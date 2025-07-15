@@ -758,7 +758,9 @@ Ejemplos:
     parser.add_argument("--run", action="store_true", help="Compilar y ejecutar")
     parser.add_argument("--ir", action="store_true", help="Mostrar AST (representación intermedia)")
     parser.add_argument("--opt", choices=["0","1","2","3"], default="2", help="Nivel de optimización gcc")
-    parser.add_argument("--version", action="version", version="cforgec 2.4.0")
+    parser.add_argument("--target", choices=["c", "wasm", "wasm-js"], default="c",
+                        help="Target de compilación: c (default), wasm (WebAssembly via emcc), wasm-js (WASM + wrapper JS)")
+    parser.add_argument("--version", action="version", version="cforgec 2.5.0")
     args = parser.parse_args()
 
     ruta = Path(args.archivo)
@@ -805,7 +807,9 @@ Ejemplos:
     salida.write_text(c_code, encoding="utf-8")
     print(f"cforgec: generado {salida}")
 
-    if args.compile or args.run:
+    if args.target in ("wasm", "wasm-js"):
+        compilar_wasm(salida, ruta, args)
+    elif args.compile or args.run:
         ejecutable = salida.with_suffix("")
         cmd = ["gcc", f"-O{args.opt}", "-o", str(ejecutable), str(salida), "-lm"]
         print(f"cforgec: compilando con: {' '.join(cmd)}")
@@ -819,6 +823,177 @@ Ejemplos:
             print(f"cforgec: ejecutando {ejecutable}...")
             print("─" * 40)
             subprocess.run([str(ejecutable)])
+
+
+# ── Target WASM ────────────────────────────────────────────────────────────────
+WASM_JS_WRAPPER = """\
+// ── C-Forge WASM wrapper ──────────────────────────────────────────────────────
+// Auto-generado por cforgec --target wasm-js
+// Uso: <script src="{module_name}.js"></script>
+//      CForge.run()   → ejecuta el programa
+//      CForge.call(fn, ...args) → llama una función exportada
+
+const CForge = (() => {
+    let _instance = null;
+    let _memory   = null;
+
+    const _imports = {
+        env: {
+            memory: new WebAssembly.Memory({{ initial: 16 }}),
+            cfv_print_num: (n)  => console.log(n),
+            cfv_print_str: (ptr, len) => {
+                const buf = new Uint8Array(_memory.buffer, ptr, len);
+                console.log(new TextDecoder().decode(buf));
+            },
+            cfv_print_bool: (b) => console.log(b ? "verdadero" : "falso"),
+        }
+    };
+
+    async function init(wasmPath) {{
+        const resp = await fetch(wasmPath || "{module_name}.wasm");
+        const buf  = await resp.arrayBuffer();
+        const res  = await WebAssembly.instantiate(buf, _imports);
+        _instance  = res.instance;
+        _memory    = _imports.env.memory;
+    }}
+
+    function run() {{
+        if (!_instance) throw new Error("CForge WASM no inicializado. Llama CForge.init() primero.");
+        return _instance.exports.main();
+    }}
+
+    function call(fn, ...args) {{
+        if (!_instance) throw new Error("CForge WASM no inicializado.");
+        const exported = _instance.exports[fn];
+        if (!exported) throw new Error(`Función '${{fn}}' no exportada.`);
+        return exported(...args);
+    }}
+
+    return {{ init, run, call }};
+})();
+
+// Auto-init si hay un atributo data-auto en el script tag
+document.currentScript?.dataset?.auto !== undefined && CForge.init().then(() => CForge.run());
+"""
+
+WASM_HTML_TEMPLATE = """\
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>C-Forge WASM — {module_name}</title>
+    <style>
+        body {{ font-family: monospace; background: #1e1e2e; color: #cdd6f4; padding: 2rem; }}
+        #output {{ background: #181825; padding: 1rem; border-radius: 8px; min-height: 200px; }}
+        button {{ background: #89b4fa; color: #1e1e2e; border: none; padding: .5rem 1rem;
+                  border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 1rem; }}
+    </style>
+</head>
+<body>
+    <h1>C-Forge WASM — {module_name}</h1>
+    <button onclick="runProgram()">▶ Ejecutar</button>
+    <pre id="output">(esperando ejecución...)</pre>
+    <script src="{module_name}.js"></script>
+    <script>
+        const out = document.getElementById("output");
+        const origLog = console.log;
+        console.log = (...a) => {{ out.textContent += a.join(" ") + "\\n"; origLog(...a); }};
+        async function runProgram() {{
+            out.textContent = "";
+            await CForge.init("{module_name}.wasm");
+            CForge.run();
+        }}
+    </script>
+</body>
+</html>
+"""
+
+
+def compilar_wasm(c_file: Path, ruta_original: Path, args):
+    """Compila el C generado a WebAssembly usando emcc (Emscripten)."""
+    module_name = ruta_original.stem
+    wasm_out    = c_file.with_suffix(".wasm")
+    js_out      = c_file.with_suffix(".js")
+
+    # Verificar que emcc está disponible
+    emcc_check = subprocess.run(["which", "emcc"], capture_output=True)
+    if emcc_check.returncode != 0:
+        print("cforgec: emcc (Emscripten) no encontrado.")
+        print("         Instala Emscripten: https://emscripten.org/docs/getting_started/")
+        print()
+        print("cforgec: generando stub WASM para desarrollo sin emcc...")
+        _generar_wasm_stub(c_file, module_name, args)
+        return
+
+    # Flags de emcc para WASM standalone
+    exported_funcs = ["_main", "_malloc", "_free"]
+    exported_str   = ",".join(exported_funcs)
+
+    cmd = [
+        "emcc",
+        str(c_file),
+        f"-O{args.opt}",
+        "-o", str(wasm_out),
+        "-s", "WASM=1",
+        "-s", "STANDALONE_WASM=1",
+        "-s", f"EXPORTED_FUNCTIONS={exported_str}",
+        "-s", "ERROR_ON_UNDEFINED_SYMBOLS=0",
+        "--no-entry",
+    ]
+    print(f"cforgec: compilando a WASM con: {' '.join(cmd)}")
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        print("cforgec: error compilando a WASM", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"cforgec: WASM generado: {wasm_out}")
+
+    if args.target == "wasm-js":
+        wrapper = WASM_JS_WRAPPER.format(module_name=module_name)
+        js_out.write_text(wrapper, encoding="utf-8")
+        print(f"cforgec: wrapper JS generado: {js_out}")
+
+        html_out = c_file.with_suffix(".html")
+        html_out.write_text(
+            WASM_HTML_TEMPLATE.format(module_name=module_name), encoding="utf-8")
+        print(f"cforgec: página HTML generada: {html_out}")
+        print(f"\n  Abre {html_out.name} en un servidor local:")
+        print(f"  python3 -m http.server 8080")
+
+
+def _generar_wasm_stub(c_file: Path, module_name: str, args):
+    """
+    Genera archivos WAT (WebAssembly Text) y JS de demostración
+    cuando emcc no está disponible. El WAT puede compilarse con `wat2wasm`.
+    """
+    wat_out = c_file.with_suffix(".wat")
+    wat_content = f"""\
+;; C-Forge WASM stub — {module_name}
+;; Generado por cforgec --target wasm (sin emcc)
+;; Compila con: wat2wasm {module_name}.wat -o {module_name}.wasm
+
+(module
+  (import "env" "cfv_print_num" (func $cfv_print_num (param f64)))
+  (import "env" "cfv_print_bool" (func $cfv_print_bool (param i32)))
+  (memory (export "memory") 1)
+
+  (func $main (export "main") (result i32)
+    ;; Stub generado — recompila con emcc para código real
+    f64.const 42
+    call $cfv_print_num
+    i32.const 0  ;; return 0
+  )
+)
+"""
+    wat_out.write_text(wat_content, encoding="utf-8")
+    print(f"cforgec: WAT stub generado: {wat_out}")
+    print(f"         Instala emcc o compila con: wat2wasm {wat_out.name}")
+
+    if args.target == "wasm-js":
+        js_out = c_file.with_suffix(".js")
+        wrapper = WASM_JS_WRAPPER.format(module_name=module_name)
+        js_out.write_text(wrapper, encoding="utf-8")
+        print(f"cforgec: wrapper JS generado: {js_out}")
 
 
 if __name__ == "__main__":

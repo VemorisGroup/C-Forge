@@ -1,0 +1,353 @@
+// stdlib/generadores.cfv — Generadores e iteradores para C-Forge
+// Implementa iteración lazy usando closures (equivalente a yield/generators)
+
+// ── Generador base ─────────────────────────────────────────────────────────────
+// Un generador es un mapa con métodos: siguiente(), tiene_siguiente(), reiniciar()
+
+funcion generador_rango(desde: numero, hasta: numero, paso: numero): mapa {
+    /// Generador de números en un rango (lazy).
+    /// @ejemplo
+    ///   sea gen = generador_rango(0, 100, 2)  // números pares de 0 a 98
+    ///   mientras (gen_tiene(gen)) { mostrar(gen_siguiente(gen)) }
+    sea p = si (paso == nulo) { 1 } sino { paso }
+    sea actual = desde
+    retornar {
+        "_tipo": "generador",
+        "_actual": actual,
+        "_desde": desde,
+        "_hasta": hasta,
+        "_paso": p,
+        "siguiente": funcion(self) {
+            sea v = self["_actual"]
+            self["_actual"] = self["_actual"] + self["_paso"]
+            retornar v
+        },
+        "tiene_siguiente": funcion(self) {
+            si (self["_paso"] > 0) { retornar self["_actual"] < self["_hasta"] }
+            retornar self["_actual"] > self["_hasta"]
+        },
+        "reiniciar": funcion(self) {
+            self["_actual"] = self["_desde"]
+        }
+    }
+}
+
+// Helpers ergonómicos
+funcion gen_siguiente(g: mapa): cualquiera {
+    retornar g["siguiente"](g)
+}
+
+funcion gen_tiene(g: mapa): booleano {
+    retornar g["tiene_siguiente"](g)
+}
+
+funcion gen_reiniciar(g: mapa): nulo {
+    g["reiniciar"](g)
+}
+
+// ── Generador desde lista ──────────────────────────────────────────────────────
+funcion generador_lista(lista_datos: lista): mapa {
+    /// Convierte una lista en un generador.
+    sea pos = 0
+    retornar {
+        "_tipo": "generador",
+        "_datos": lista_datos,
+        "_pos": pos,
+        "siguiente": funcion(self) {
+            sea v = self["_datos"][self["_pos"]]
+            self["_pos"] = self["_pos"] + 1
+            retornar v
+        },
+        "tiene_siguiente": funcion(self) {
+            retornar self["_pos"] < longitud(self["_datos"])
+        },
+        "reiniciar": funcion(self) {
+            self["_pos"] = 0
+        }
+    }
+}
+
+// ── Generador infinito ────────────────────────────────────────────────────────
+funcion generador_infinito(fn_siguiente: cualquiera, estado_inicial: cualquiera): mapa {
+    /// Generador que produce valores infinitamente.
+    /// @ejemplo
+    ///   sea fib = generador_infinito(
+    ///     funcion(st) { {"valor": st["a"] + st["b"], "a": st["b"], "b": st["a"]+st["b"]} },
+    ///     {"a": 0, "b": 1}
+    ///   )
+    ///   sea primeros10 = gen_tomar(fib, 10)
+    sea estado = estado_inicial
+    retornar {
+        "_tipo": "generador",
+        "_estado": estado,
+        "_fn": fn_siguiente,
+        "siguiente": funcion(self) {
+            sea resultado = self["_fn"](self["_estado"])
+            si (es_mapa(resultado) y tiene_clave(resultado, "valor")) {
+                self["_estado"] = resultado
+                retornar resultado["valor"]
+            }
+            self["_estado"] = resultado
+            retornar resultado
+        },
+        "tiene_siguiente": funcion(self) { retornar verdadero },
+        "reiniciar": funcion(self) { self["_estado"] = estado_inicial }
+    }
+}
+
+// ── Generadores útiles predefinidos ───────────────────────────────────────────
+funcion gen_fibonacci(): mapa {
+    /// Generador infinito de números Fibonacci.
+    sea a = 0
+    sea b = 1
+    retornar {
+        "_tipo": "generador",
+        "_a": a, "_b": b,
+        "siguiente": funcion(self) {
+            sea v = self["_a"]
+            sea temp = self["_a"] + self["_b"]
+            self["_a"] = self["_b"]
+            self["_b"] = temp
+            retornar v
+        },
+        "tiene_siguiente": funcion(self) { retornar verdadero },
+        "reiniciar": funcion(self) { self["_a"] = 0; self["_b"] = 1 }
+    }
+}
+
+funcion gen_primos(): mapa {
+    /// Generador infinito de números primos (criba incremental).
+    funcion es_primo(n) {
+        si (n < 2) { retornar falso }
+        si (n == 2) { retornar verdadero }
+        si (n % 2 == 0) { retornar falso }
+        sea i = 3
+        mientras (i * i <= n) {
+            si (n % i == 0) { retornar falso }
+            i = i + 2
+        }
+        retornar verdadero
+    }
+
+    sea candidato = 2
+    retornar {
+        "_tipo": "generador",
+        "_candidato": candidato,
+        "siguiente": funcion(self) {
+            sea v = self["_candidato"]
+            self["_candidato"] = self["_candidato"] + 1
+            mientras (!es_primo(self["_candidato"])) {
+                self["_candidato"] = self["_candidato"] + 1
+            }
+            retornar v
+        },
+        "tiene_siguiente": funcion(self) { retornar verdadero },
+        "reiniciar": funcion(self) { self["_candidato"] = 2 }
+    }
+}
+
+funcion gen_ciclo(elementos: lista): mapa {
+    /// Generador que cicla infinitamente sobre una lista.
+    sea pos = 0
+    sea n = longitud(elementos)
+    retornar {
+        "_tipo": "generador",
+        "_pos": pos, "_datos": elementos, "_n": n,
+        "siguiente": funcion(self) {
+            sea v = self["_datos"][self["_pos"] % self["_n"]]
+            self["_pos"] = self["_pos"] + 1
+            retornar v
+        },
+        "tiene_siguiente": funcion(self) { retornar verdadero },
+        "reiniciar": funcion(self) { self["_pos"] = 0 }
+    }
+}
+
+funcion gen_repetir(valor: cualquiera, n: numero): mapa {
+    /// Genera el mismo valor n veces (o infinito si n==nulo).
+    sea infinito = (n == nulo)
+    sea restantes = si (infinito) { 0 } sino { n }
+    retornar {
+        "_tipo": "generador",
+        "_valor": valor, "_infinito": infinito, "_restantes": restantes,
+        "siguiente": funcion(self) {
+            si (!self["_infinito"]) { self["_restantes"] = self["_restantes"] - 1 }
+            retornar self["_valor"]
+        },
+        "tiene_siguiente": funcion(self) {
+            si (self["_infinito"]) { retornar verdadero }
+            retornar self["_restantes"] > 0
+        },
+        "reiniciar": funcion(self) { self["_restantes"] = n }
+    }
+}
+
+// ── Operadores de generadores (lazy pipeline) ─────────────────────────────────
+funcion gen_mapear(g: mapa, fn: cualquiera): mapa {
+    /// Transforma cada valor del generador con fn (lazy).
+    retornar {
+        "_tipo": "generador",
+        "_fuente": g, "_fn": fn,
+        "siguiente": funcion(self) {
+            retornar self["_fn"](gen_siguiente(self["_fuente"]))
+        },
+        "tiene_siguiente": funcion(self) { retornar gen_tiene(self["_fuente"]) },
+        "reiniciar": funcion(self) { gen_reiniciar(self["_fuente"]) }
+    }
+}
+
+funcion gen_filtrar(g: mapa, predicado: cualquiera): mapa {
+    /// Filtra valores del generador (lazy).
+    sea _buffer = nulo
+    sea _tiene = falso
+    retornar {
+        "_tipo": "generador",
+        "_fuente": g, "_pred": predicado,
+        "_buffer": nulo, "_tiene": falso,
+        "siguiente": funcion(self) {
+            si (self["_buffer"] != nulo) {
+                sea v = self["_buffer"]
+                self["_buffer"] = nulo
+                retornar v
+            }
+            mientras (gen_tiene(self["_fuente"])) {
+                sea v = gen_siguiente(self["_fuente"])
+                si (self["_pred"](v)) { retornar v }
+            }
+            retornar nulo
+        },
+        "tiene_siguiente": funcion(self) {
+            si (self["_buffer"] != nulo) { retornar verdadero }
+            mientras (gen_tiene(self["_fuente"])) {
+                sea v = gen_siguiente(self["_fuente"])
+                si (self["_pred"](v)) {
+                    self["_buffer"] = v
+                    retornar verdadero
+                }
+            }
+            retornar falso
+        },
+        "reiniciar": funcion(self) {
+            gen_reiniciar(self["_fuente"])
+            self["_buffer"] = nulo
+        }
+    }
+}
+
+funcion gen_tomar(g: mapa, n: numero): lista {
+    /// Materializa los primeros n valores del generador en una lista.
+    sea resultado = []
+    sea tomados = 0
+    mientras (gen_tiene(g) y tomados < n) {
+        agregar(resultado, gen_siguiente(g))
+        tomados = tomados + 1
+    }
+    retornar resultado
+}
+
+funcion gen_saltar(g: mapa, n: numero): mapa {
+    /// Salta los primeros n valores del generador.
+    para _ en rango(n) {
+        si (gen_tiene(g)) { gen_siguiente(g) }
+    }
+    retornar g
+}
+
+funcion gen_a_lista(g: mapa): lista {
+    /// Materializa TODO el generador en una lista (solo para generadores finitos).
+    sea resultado = []
+    mientras (gen_tiene(g)) {
+        agregar(resultado, gen_siguiente(g))
+    }
+    retornar resultado
+}
+
+funcion gen_reducir(g: mapa, fn: cualquiera, inicial: cualquiera): cualquiera {
+    /// Reduce el generador a un valor.
+    sea acum = inicial
+    mientras (gen_tiene(g)) {
+        acum = fn(acum, gen_siguiente(g))
+    }
+    retornar acum
+}
+
+funcion gen_para_cada(g: mapa, fn: cualquiera): nulo {
+    /// Ejecuta fn para cada valor del generador.
+    mientras (gen_tiene(g)) {
+        fn(gen_siguiente(g))
+    }
+}
+
+funcion gen_zip(g1: mapa, g2: mapa): mapa {
+    /// Combina dos generadores en pares.
+    retornar {
+        "_tipo": "generador",
+        "_g1": g1, "_g2": g2,
+        "siguiente": funcion(self) {
+            retornar [gen_siguiente(self["_g1"]), gen_siguiente(self["_g2"])]
+        },
+        "tiene_siguiente": funcion(self) {
+            retornar gen_tiene(self["_g1"]) y gen_tiene(self["_g2"])
+        },
+        "reiniciar": funcion(self) {
+            gen_reiniciar(self["_g1"]); gen_reiniciar(self["_g2"])
+        }
+    }
+}
+
+funcion gen_encadenar(g1: mapa, g2: mapa): mapa {
+    /// Concatena dos generadores.
+    retornar {
+        "_tipo": "generador",
+        "_g1": g1, "_g2": g2, "_en_g2": falso,
+        "siguiente": funcion(self) {
+            si (!self["_en_g2"]) {
+                si (gen_tiene(self["_g1"])) { retornar gen_siguiente(self["_g1"]) }
+                self["_en_g2"] = verdadero
+            }
+            retornar gen_siguiente(self["_g2"])
+        },
+        "tiene_siguiente": funcion(self) {
+            si (!self["_en_g2"]) { retornar gen_tiene(self["_g1"]) o gen_tiene(self["_g2"]) }
+            retornar gen_tiene(self["_g2"])
+        },
+        "reiniciar": funcion(self) {
+            gen_reiniciar(self["_g1"]); gen_reiniciar(self["_g2"]); self["_en_g2"] = falso
+        }
+    }
+}
+
+funcion gen_enumerar(g: mapa): mapa {
+    /// Agrega índice a cada valor: [0, val], [1, val], ...
+    sea idx = 0
+    retornar {
+        "_tipo": "generador",
+        "_fuente": g, "_idx": idx,
+        "siguiente": funcion(self) {
+            sea v = [self["_idx"], gen_siguiente(self["_fuente"])]
+            self["_idx"] = self["_idx"] + 1
+            retornar v
+        },
+        "tiene_siguiente": funcion(self) { retornar gen_tiene(self["_fuente"]) },
+        "reiniciar": funcion(self) { gen_reiniciar(self["_fuente"]); self["_idx"] = 0 }
+    }
+}
+
+// ── Pipeline ──────────────────────────────────────────────────────────────────
+funcion pipeline(gen_inicial: mapa, ops: lista): cualquiera {
+    /// Aplica una serie de operaciones al generador.
+    /// @ejemplo
+    ///   sea resultado = pipeline(
+    ///     generador_rango(0, 1000),
+    ///     [
+    ///       funcion(g) { gen_filtrar(g, funcion(x) { x % 2 == 0 }) },
+    ///       funcion(g) { gen_mapear(g, funcion(x) { x * x }) },
+    ///       funcion(g) { gen_tomar(g, 5) }
+    ///     ]
+    ///   )
+    sea g = gen_inicial
+    para op en ops {
+        g = op(g)
+    }
+    retornar g
+}

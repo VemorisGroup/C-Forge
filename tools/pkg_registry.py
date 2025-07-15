@@ -412,6 +412,218 @@ def cmd_install(args):
 
     print(f"cfpkg: ✓ instalado {nombre}@{info['version']} → cforge_modules/{nombre}/")
 
+    # Actualizar lock file
+    lock = LockFile.cargar()
+    lock.registrar(
+        nombre=nombre,
+        version=info["version"],
+        sha256=info.get("sha256", ""),
+        registry=registry,
+        archivo=info.get("archivo", ""),
+        descripcion=info.get("descripcion", "")
+    )
+    lock.guardar()
+    print(f"cfpkg: ✓ cforge.lock actualizado")
+
+
+# ── Sistema de lock file ───────────────────────────────────────────────────────
+LOCK_FILE = "cforge.lock"
+LOCK_VERSION = "1"
+
+class LockFile:
+    """
+    cforge.lock — Versiones exactas de todos los paquetes instalados.
+    Garantiza builds reproducibles entre equipos y entornos.
+
+    Formato:
+    {
+      "version": "1",
+      "generado": "2025-01-01T00:00:00Z",
+      "paquetes": {
+        "nombre": {
+          "version":     "1.2.3",
+          "sha256":      "abc...",
+          "registry":    "http://...",
+          "archivo":     "nombre-1.2.3.cfpkg",
+          "descripcion": "...",
+          "instalado":   "2025-01-01T00:00:00Z"
+        }
+      }
+    }
+    """
+
+    def __init__(self, data: dict = None):
+        self.data = data or {
+            "version": LOCK_VERSION,
+            "generado": ahora(),
+            "paquetes": {}
+        }
+
+    @classmethod
+    def cargar(cls, ruta: str = LOCK_FILE) -> "LockFile":
+        p = Path(ruta)
+        if p.exists():
+            try:
+                return cls(json.loads(p.read_text(encoding="utf-8")))
+            except Exception:
+                pass
+        return cls()
+
+    def guardar(self, ruta: str = LOCK_FILE):
+        self.data["generado"] = ahora()
+        Path(ruta).write_text(
+            json.dumps(self.data, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
+
+    def registrar(self, nombre: str, version: str, sha256: str,
+                  registry: str, archivo: str = "", descripcion: str = ""):
+        self.data["paquetes"][nombre] = {
+            "version":     version,
+            "sha256":      sha256,
+            "registry":    registry,
+            "archivo":     archivo,
+            "descripcion": descripcion,
+            "instalado":   ahora()
+        }
+
+    def eliminar(self, nombre: str):
+        self.data["paquetes"].pop(nombre, None)
+
+    def obtener(self, nombre: str) -> dict:
+        return self.data["paquetes"].get(nombre, {})
+
+    def listar(self) -> dict:
+        return self.data["paquetes"]
+
+    def verificar_integridad(self, modules_dir: Path = Path("cforge_modules")) -> list:
+        """Verifica que los paquetes instalados coincidan con el lock file."""
+        errores = []
+        for nombre, info in self.data["paquetes"].items():
+            pkg_dir = modules_dir / nombre
+            if not pkg_dir.exists():
+                errores.append(f"  ✗ {nombre}@{info['version']} — directorio no encontrado")
+                continue
+            # Verificar versión en cforge.toml si existe
+            toml_path = pkg_dir / "cforge.toml"
+            if toml_path.exists():
+                try:
+                    meta = leer_cforge_toml(pkg_dir)
+                    v_instalada = meta.get("version", "?")
+                    if v_instalada != info["version"]:
+                        errores.append(
+                            f"  ✗ {nombre} — versión {v_instalada} ≠ lock {info['version']}")
+                except Exception:
+                    pass
+        return errores
+
+
+def cmd_lock(args):
+    """cfpkg lock — Mostrar contenido del lock file"""
+    lock = LockFile.cargar()
+    pkgs = lock.listar()
+
+    if not pkgs:
+        print("cfpkg: cforge.lock vacío o no encontrado.")
+        return
+
+    print(f"\n  cforge.lock  (generado: {lock.data.get('generado','?')})")
+    print(f"  {'PAQUETE':<25} {'VERSIÓN':<12} {'REGISTRY'}")
+    print("  " + "─" * 70)
+    for nombre, info in pkgs.items():
+        reg = info.get("registry", "").replace("http://localhost:7373", "local")
+        print(f"  {nombre:<25} {info['version']:<12} {reg}")
+    print()
+
+
+def cmd_ci(args):
+    """cfpkg ci — Instalar exactamente lo que dice cforge.lock (para CI/CD)"""
+    lock = LockFile.cargar()
+    pkgs = lock.listar()
+
+    if not pkgs:
+        print("cfpkg: cforge.lock no encontrado. Usa 'cfpkg install' primero.", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"cfpkg: instalando {len(pkgs)} paquete(s) desde cforge.lock...")
+    modules_dir = Path("cforge_modules")
+    modules_dir.mkdir(exist_ok=True)
+
+    errores = []
+    for nombre, info in pkgs.items():
+        version  = info["version"]
+        registry = info.get("registry", DEFAULT_REGISTRY)
+        archivo  = info.get("archivo", f"{nombre}-{version}.cfpkg")
+        sha_esperado = info.get("sha256", "")
+
+        pkg_dir = modules_dir / nombre
+        if pkg_dir.exists():
+            print(f"cfpkg:   ✓ {nombre}@{version} ya instalado")
+            continue
+
+        try:
+            dl_url = f"{registry}/descargar/{archivo}"
+            with urllib.request.urlopen(dl_url) as resp:
+                tarball = resp.read()
+        except Exception as e:
+            errores.append(f"{nombre}@{version}: {e}")
+            print(f"cfpkg:   ✗ error descargando {nombre}: {e}", file=sys.stderr)
+            continue
+
+        # Verificar hash
+        sha_real = hashlib.sha256(tarball).hexdigest()
+        if sha_esperado and sha_real != sha_esperado:
+            errores.append(f"{nombre}@{version}: hash incorrecto")
+            print(f"cfpkg:   ✗ {nombre}: hash sha256 incorrecto", file=sys.stderr)
+            continue
+
+        with tempfile.NamedTemporaryFile(suffix=".cfpkg", delete=False) as tmp:
+            tmp.write(tarball)
+            tmp_path = tmp.name
+
+        with tarfile.open(tmp_path, "r:gz") as tar:
+            tar.extractall(str(modules_dir))
+        os.unlink(tmp_path)
+        print(f"cfpkg:   ✓ {nombre}@{version}")
+
+    if errores:
+        print(f"\ncfpkg: {len(errores)} error(es) durante instalación desde lock")
+        sys.exit(1)
+    else:
+        print(f"\ncfpkg: ✓ todos los paquetes instalados desde lock")
+
+
+def cmd_verify(args):
+    """cfpkg verify — Verificar integridad de paquetes instalados"""
+    lock = LockFile.cargar()
+    errores = lock.verificar_integridad()
+
+    if not errores:
+        print(f"cfpkg: ✓ todos los paquetes coinciden con cforge.lock")
+    else:
+        print(f"cfpkg: {len(errores)} inconsistencia(s) encontradas:")
+        for e in errores:
+            print(e)
+        sys.exit(1)
+
+
+def cmd_remove(args):
+    """cfpkg remove nombre — Desinstalar paquete y actualizar lock"""
+    nombre = args.nombre
+    pkg_dir = Path("cforge_modules") / nombre
+    if pkg_dir.exists():
+        shutil.rmtree(pkg_dir)
+        print(f"cfpkg: ✓ eliminado cforge_modules/{nombre}/")
+    else:
+        print(f"cfpkg: {nombre} no está instalado")
+
+    lock = LockFile.cargar()
+    if nombre in lock.listar():
+        lock.eliminar(nombre)
+        lock.guardar()
+        print(f"cfpkg: ✓ eliminado de cforge.lock")
+
+
 def cmd_search(args):
     """cfpkg search texto"""
     registry = args.registry or DEFAULT_REGISTRY
@@ -498,7 +710,7 @@ Comandos:
   list      Listar todos los paquetes
         """
     )
-    parser.add_argument("--version", action="version", version="cfpkg 2.4.0")
+    parser.add_argument("--version", action="version", version="cfpkg 2.5.0")
     parser.add_argument("--registry", default=DEFAULT_REGISTRY,
                         help=f"URL del registry (default: {DEFAULT_REGISTRY})")
     sub = parser.add_subparsers(dest="cmd")
@@ -516,6 +728,11 @@ Comandos:
     p_inst = sub.add_parser("install", help="Instalar paquete")
     p_inst.add_argument("paquete", help="nombre o nombre@version")
 
+    # remove / uninstall
+    p_remove = sub.add_parser("remove", help="Desinstalar paquete")
+    p_remove.add_argument("nombre")
+    sub.add_parser("uninstall", help="Alias de remove").add_argument("nombre")
+
     # search
     p_search = sub.add_parser("search", help="Buscar paquetes")
     p_search.add_argument("query")
@@ -525,16 +742,25 @@ Comandos:
     p_info.add_argument("nombre")
 
     # list
-    sub.add_parser("list", help="Listar paquetes")
+    sub.add_parser("list", help="Listar paquetes en el registry")
+
+    # lock / ci / verify (lock file commands)
+    sub.add_parser("lock",   help="Mostrar contenido de cforge.lock")
+    sub.add_parser("ci",     help="Instalar exactamente desde cforge.lock (CI/CD)")
+    sub.add_parser("verify", help="Verificar integridad contra cforge.lock")
 
     args = parser.parse_args()
 
-    if args.cmd == "serve":    cmd_serve(args)
-    elif args.cmd == "publish": cmd_publish(args)
-    elif args.cmd == "install": cmd_install(args)
-    elif args.cmd == "search":  cmd_search(args)
-    elif args.cmd == "info":    cmd_info(args)
-    elif args.cmd == "list":    cmd_list(args)
+    if args.cmd == "serve":      cmd_serve(args)
+    elif args.cmd == "publish":  cmd_publish(args)
+    elif args.cmd == "install":  cmd_install(args)
+    elif args.cmd in ("remove", "uninstall"): cmd_remove(args)
+    elif args.cmd == "search":   cmd_search(args)
+    elif args.cmd == "info":     cmd_info(args)
+    elif args.cmd == "list":     cmd_list(args)
+    elif args.cmd == "lock":     cmd_lock(args)
+    elif args.cmd == "ci":       cmd_ci(args)
+    elif args.cmd == "verify":   cmd_verify(args)
     else:
         parser.print_help()
 
