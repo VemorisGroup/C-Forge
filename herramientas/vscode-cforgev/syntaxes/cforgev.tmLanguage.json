@@ -1,0 +1,34 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "C-Forgev",
+  "scopeName": "source.cforgev",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#externPython" },
+    { "include": "#externCpp" },
+    { "include": "#externJavaScript" },
+    { "include": "#externJava" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#types" },
+    { "include": "#keywords" },
+    { "include": "#functions" }
+  ],
+  "repository": {
+    "comments": { "patterns": [{ "name": "comment.line.double-slash.cforgev", "match": "//.*$" }] },
+    "strings": { "patterns": [{ "name": "string.quoted.double.cforgev", "begin": "\"", "end": "\"", "patterns": [{ "name": "constant.character.escape.cforgev", "match": "\\\\." }] }] },
+    "numbers": { "patterns": [{ "name": "constant.numeric.cforgev", "match": "\\b\\d+(?:\\.\\d+)?\\b" }] },
+    "types": { "patterns": [{ "name": "storage.type.cforgev", "match": "\\b(numero|texto|booleano|lista|mapa|nulo|cualquiera)\\b" }] },
+    "externPython": { "patterns": [{ "name": "meta.embedded.block.python.cforgev", "begin": "\\bextern\\s*\\(\\s*\"python\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.python" }] },
+    "externCpp": { "patterns": [{ "name": "meta.embedded.block.cpp.cforgev", "begin": "\\bextern\\s*\\(\\s*\"cpp\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.cpp" }] },
+    "externJavaScript": { "patterns": [{ "name": "meta.embedded.block.javascript.cforgev", "begin": "\\bextern\\s*\\(\\s*\"(?:javascript|typescript)\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.js" }] },
+    "externJava": { "patterns": [{ "name": "meta.embedded.block.java.cforgev", "begin": "\\bextern\\s*\\(\\s*\"java\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.java" }] },
+    "keywords": { "patterns": [
+      { "name": "keyword.control.test.cforgev", "match": "\\b(test|afirmar)\\b" },
+      { "name": "keyword.control.gpu.cforgev", "match": "\\bgpu\\b" },
+      { "name": "storage.modifier.cluster.cforgev", "match": "\\bcluster\\b" },
+      { "name": "keyword.control.cforgev", "match": "\\b(sea|si|sino|mientras|funcion|retornar|estructura|clase|campo|metodo|este|usar|import|pip|nuget|npm|maven|extern|intentar|capturar|verdadero|falso|y|o|no)\\b" }
+    ] },
+    "functions": { "patterns": [{ "name": "support.function.cforgev", "match": "\\b(mostrar|print|leer|leer_archivo|escribir_archivo|existe_archivo|file_read|file_write|file_append|sys_run|sys_info|net_listen|net_send|matrix|array_fast|longitud|agregar|a_numero|a_texto|raiz|potencia|absoluto|redondear|tiempo_actual|argumentos|use_python|use_csharp|use_native|use_cpp|use_javascript|use_typescript|use_java|cluster_estado|jit_estado|jit_caliente|paralelo)\\b" }] }
+  }
+}

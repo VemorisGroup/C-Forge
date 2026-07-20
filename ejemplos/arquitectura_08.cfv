@@ -1,0 +1,17 @@
+import pip:math;
+
+numero = 20;
+nombre = "C-Forgev";
+
+funcion cuadrado(valor) {
+    retornar valor * valor;
+}
+
+mostrar(nombre);
+mostrar(numero * 5);
+mostrar(math.sqrt(144));
+
+resultados = paralelo("cuadrado", [2, 3, 4, 5, 6, 7, 8, 9]);
+mostrar(resultados);
+mostrar("Invocaciones perfiladas:");
+mostrar(jit_estado("cuadrado"));

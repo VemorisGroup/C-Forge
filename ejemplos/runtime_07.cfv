@@ -1,0 +1,23 @@
+mostrar("C-Forgev 0.7 - runtime profesional");
+
+mostrar("Python RAII:");
+mostrar(use_python("math", "sqrt", [81]));
+
+intentar {
+    mostrar(use_python("math", "sqrt", [-1]));
+} capturar(error_python) {
+    mostrar("Python capturado: " + error_python);
+}
+
+mostrar("C++ registrado con memoria propia:");
+mostrar(use_cpp("owned_greet", ["Javier"]));
+mostrar("Liberaciones exactas:");
+mostrar(use_cpp("release_count", []));
+
+intentar {
+    mostrar(use_cpp("multiply", ["tipo incorrecto", 2]));
+} capturar(error_cpp) {
+    mostrar("C++ capturado: " + error_cpp);
+}
+
+mostrar("El programa sigue funcionando después de los errores.");

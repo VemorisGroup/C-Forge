@@ -1,0 +1,23 @@
+mostrar("=== Núcleo nativo C-Forgev ===");
+
+info = sys_info();
+mostrar(info.cpu);
+mostrar(info.nucleos > 0);
+mostrar(info.ram_bytes > 0);
+
+resultado = sys_run("printf C-Forgev-Nativo");
+mostrar(resultado.estado);
+mostrar(resultado.salida);
+
+file_write("build/nucleo-13.txt", "Forge");
+file_append("build/nucleo-13.txt", "v");
+mostrar(file_read("build/nucleo-13.txt"));
+
+rapido = array_fast([1, 2, 3, 4]);
+tabla = matrix(2, 3, 7);
+mostrar(rapido);
+mostrar(tabla);
+
+gpu {
+    mostrar(array_fast([4, 9, 16, 25]));
+}

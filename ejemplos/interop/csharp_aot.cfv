@@ -1,0 +1,4 @@
+mostrar("C# Native AOT real:");
+mostrar(use_native("../../build/csharp-native/CSharpNative.dylib", "csharp_add", [20, 22]));
+mostrar(use_native("../../build/csharp-native/CSharpNative.dylib", "csharp_half", [5.0]));
+mostrar(use_native("../../build/csharp-native/CSharpNative.dylib", "csharp_greet", ["Javier"]));

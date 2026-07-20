@@ -1,0 +1,34 @@
+{
+  "name": "cforgev-language",
+  "displayName": "C-Forgev Language",
+  "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forgev (.cfv)",
+  "version": "1.3.0",
+  "publisher": "vemoris-group",
+  "author": { "name": "Vemoris Group" },
+  "license": "SEE LICENSE IN LICENSE",
+  "icon": "images/icon.png",
+  "preview": true,
+  "pricing": "Free",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Programming Languages"],
+  "keywords": ["cforgev", "cfv", "programming language", "syntax highlighting", "vemoris", "compiler"],
+  "galleryBanner": { "color": "#FF6A32", "theme": "light" },
+  "repository": { "type": "git", "url": "https://github.com/VemorisGroup/C-Forgev.git" },
+  "homepage": "https://github.com/VemorisGroup/C-Forgev#readme",
+  "bugs": { "url": "https://github.com/VemorisGroup/C-Forgev/issues" },
+  "scripts": { "package": "vsce package" },
+  "devDependencies": { "@vscode/vsce": "^3.6.2" },
+  "contributes": {
+    "languages": [{
+      "id": "cforgev",
+      "aliases": ["C-Forgev", "cforgev"],
+      "extensions": [".cfv"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "cforgev",
+      "scopeName": "source.cforgev",
+      "path": "./syntaxes/cforgev.tmLanguage.json"
+    }]
+  }
+}

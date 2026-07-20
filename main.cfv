@@ -1,0 +1,210 @@
+// C-Forgev 1.3.0 Definitive — demostración maestra oficial
+import pip:math;
+import npm:path;
+
+cluster version = "1.3.0-definitive";
+cluster proyecto = "C-Forgev";
+
+// Tipado gradual: explícito e inferido.
+sea creador: texto = "Javier";
+empresa = "Vemoris Group";
+compilaciones = 1;
+sea activo: booleano = verdadero;
+
+estructura Persona {
+    nombre: texto;
+    edad: numero;
+}
+
+clase Contador {
+    campo valor: numero;
+
+    metodo incrementar(cantidad) {
+        este.valor = este.valor + cantidad;
+        retornar este.valor;
+    }
+}
+
+cluster funcion cuadrado(numero) {
+    retornar numero * numero;
+}
+
+funcion dividir_seguro(a, b) {
+    retornar a / b;
+}
+
+persona = Persona(creador, 20);
+contador = Contador(0);
+lenguajes = ["C++", "C#", "Python", "Java", "JavaScript", "TypeScript"];
+
+print("=== C-Forgev 1.3: demostración maestra ===");
+mostrar("Creador: " + persona.nombre);
+mostrar("Empresa: " + empresa);
+mostrar(lenguajes);
+mostrar(cluster_estado());
+mostrar(contador.incrementar(5));
+
+// Sistema y hardware nativos.
+hardware = sys_info();
+mostrar("Hardware:");
+mostrar(hardware.cpu);
+mostrar(hardware.nucleos);
+mostrar(hardware.ram_bytes);
+mostrar(hardware.sistema);
+
+proceso = sys_run("printf Sistema-C-Forgev");
+mostrar("Proceso nativo:");
+mostrar(proceso.estado);
+mostrar(proceso.salida);
+
+// Archivos UTF-8 nativos.
+file_write("build/demostracion-maestra.txt", "C-Forge");
+file_append("build/demostracion-maestra.txt", "v 1.3");
+contenido_archivo = file_read("build/demostracion-maestra.txt");
+mostrar(contenido_archivo);
+
+// Matemática contigua y bloque acelerable.
+vector_rapido = array_fast([1, 2, 3, 4, 5]);
+matriz_densa = matrix(2, 3, 7);
+mostrar(vector_rapido);
+mostrar(matriz_densa);
+
+gpu {
+    resultados_gpu = paralelo("cuadrado", [2, 3, 4, 5, 6, 7, 8, 9]);
+    mostrar("Función cuadrado dentro de bloque GPU/CPU paralelo:");
+    mostrar(resultados_gpu);
+}
+
+// IA local explicable ejecutada dentro del puente Python.
+texto_ia = "C-Forgev es potente rápido seguro y excelente";
+extern("python") {
+    texto_ia = "C-Forgev es potente rápido seguro y excelente"
+    positivas = {"potente", "rápido", "seguro", "excelente"}
+    tokens = texto_ia.lower().split()
+    puntaje = sum(1 for token in tokens if token in positivas)
+    etiqueta = "positivo" if puntaje >= 2 else "neutral"
+    print(f"extern Python IA: etiqueta={etiqueta}, puntaje={puntaje}")
+}
+
+// Datos web procesados por JavaScript.
+extern("javascript") {
+    const respuestaWeb = {
+        estado: 200,
+        servicio: "Vemoris API",
+        tecnologias: ["C-Forgev", "JavaScript"]
+    };
+    console.log("extern JavaScript web: " + JSON.stringify(respuestaWeb));
+}
+
+extern("typescript") {
+    const respuestaTipada: number = 6 * 7;
+    console.log("extern TypeScript: " + respuestaTipada);
+}
+
+extern("cpp") {
+    std::string mensaje_raii = "extern C++: almacenamiento RAII activo";
+    std::cout << mensaje_raii << std::endl;
+}
+
+intentar {
+    extern("java") {
+        System.out.println("extern Java: JVM activa");
+    }
+} capturar(error_java) {
+    mostrar("Java no disponible: " + error_java);
+}
+
+// Importaciones y puentes de los ecosistemas.
+mostrar("Python universal:");
+mostrar(math.sqrt(625));
+mostrar(use_python("math", "pow", [2, 10]));
+
+mostrar("JavaScript/npm:");
+mostrar(path.basename("/tmp/cforgev/main.cfv"));
+mostrar(use_javascript("path", "extname", ["programa.ts"]));
+
+python_version = use_python("cforgev_runtime", "get", ["version"]);
+javascript_version = use_javascript("ejemplos/interop/forge_symbols.js", "read", ["version"]);
+mostrar("ForgeSymbols compartido:");
+mostrar(python_version);
+mostrar(javascript_version.value);
+mostrar(javascript_version.origin);
+
+intentar {
+    mostrar(use_csharp("build/csharp-native/CSharpNative.dylib", "csharp_add", [20, 22]));
+} capturar(error_csharp) {
+    mostrar("C# Native AOT no disponible: " + error_csharp);
+}
+
+intentar {
+    mostrar(use_cpp("owned_greet", [creador]));
+} capturar(error_cpp) {
+    mostrar("C++ registrado se enlaza automáticamente al compilar.");
+}
+
+// Networking: servidor TCP local de una conexión con timeout controlado.
+intentar {
+    paquete = net_listen(39452, 50);
+    mostrar(paquete.datos);
+} capturar(error_red) {
+    mostrar("Networking listo; demostración sin cliente: " + error_red);
+}
+
+intentar {
+    mostrar(dividir_seguro(10, 0));
+} capturar(error_division) {
+    mostrar("Excepción capturada: " + error_division);
+}
+
+mostrar("Contador JIT de cuadrado:");
+mostrar(jit_estado("cuadrado"));
+
+test "tipado gradual e inferencia" {
+    valor_inferido = 40 + 2;
+    sea valor_estricto: numero = valor_inferido;
+    afirmar(valor_estricto == 42, "la inferencia debe conservar el tipo numérico");
+}
+
+test "sistema y hardware" {
+    afirmar(hardware.nucleos > 0, "debe existir al menos un núcleo");
+    afirmar(proceso.estado == 0, "sys_run debe finalizar correctamente");
+}
+
+test "archivos nativos" {
+    afirmar(contenido_archivo == "C-Forgev 1.3", "file_write y file_append deben conservar datos");
+}
+
+test "matrix y array_fast" {
+    afirmar(vector_rapido[4] == 5, "array_fast debe conservar números");
+    afirmar(matriz_densa[1][2] == 7, "matrix debe usar las dimensiones indicadas");
+}
+
+test "Python universal" {
+    afirmar(math.sqrt(81) == 9, "math.sqrt debe devolver 9");
+}
+
+test "JavaScript universal" {
+    afirmar(path.extname("archivo.ts") == ".ts", "npm:path debe reconocer TypeScript");
+}
+
+test "ForgeValue compartido" {
+    afirmar(python_version == version, "Python debe leer version");
+    afirmar(javascript_version.value == version, "JavaScript debe leer version");
+}
+
+test "clases y mutación segura" {
+    cuenta_prueba = Contador(10);
+    afirmar(cuenta_prueba.incrementar(5) == 15, "el método debe actualizar el estado");
+}
+
+test "paralelismo" {
+    paralelo_prueba = paralelo("cuadrado", [2, 3, 4]);
+    afirmar(paralelo_prueba[0] == 4, "primer resultado paralelo incorrecto");
+    afirmar(paralelo_prueba[2] == 16, "último resultado paralelo incorrecto");
+}
+
+test "símbolos cluster" {
+    afirmar(longitud(cluster_estado()) >= 3, "deben registrarse funciones y variables cluster");
+}
+
+print("=== Demostración maestra finalizada ===");

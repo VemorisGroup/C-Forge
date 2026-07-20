@@ -1,0 +1,20 @@
+cluster version = "1.0";
+
+cluster funcion duplicar(valor) {
+    retornar valor * 2;
+}
+
+mostrar("Símbolos distribuidos:");
+mostrar(cluster_estado());
+
+extern("python") {
+print("Hola desde bloque Python literal")
+}
+
+extern("cpp") {
+std::cout << "Hola desde bloque C++ literal" << std::endl;
+std::string memoria_segura = "RAII";
+std::cout << memoria_segura << std::endl;
+}
+
+mostrar(duplicar(21));

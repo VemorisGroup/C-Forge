@@ -1,0 +1,12 @@
+mostrar("Python real:");
+mostrar(use_python("math", "sqrt", [81]));
+mostrar(use_python("builtins", "len", ["abc"]));
+mostrar(use_python("os.path", "basename", ["/tmp/demo.txt"]));
+
+mostrar("Biblioteca dinámica C/C++:");
+mostrar(use_native("../../build/libnative_math.dylib", "native_multiply", [6, 7]));
+mostrar(use_native("../../build/libnative_math.dylib", "native_half", [5.0]));
+mostrar(use_native("../../build/libnative_math.dylib", "native_greet", ["Javier"]));
+
+mostrar("C++ vinculado y registrado:");
+mostrar(use_cpp("multiply", [8, 9]));

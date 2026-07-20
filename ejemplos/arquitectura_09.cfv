@@ -1,0 +1,22 @@
+import pip:math;
+
+nombre = "C-Forgev 0.9";
+
+funcion cuadrado(valor) {
+    retornar valor * valor;
+}
+
+mostrar(nombre);
+mostrar("Python universal:");
+mostrar(math.sqrt(256));
+
+gpu {
+    resultados = paralelo("cuadrado", [2, 3, 4, 5, 6, 7, 8, 9]);
+    mostrar("Bloque GPU con backend CPU paralelo:");
+    mostrar(resultados);
+}
+
+mostrar("Perfil JIT:");
+mostrar(jit_estado("cuadrado"));
+mostrar("C++ registrado:");
+mostrar(use_cpp("owned_greet", ["Javier"]));

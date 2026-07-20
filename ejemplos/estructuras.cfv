@@ -1,0 +1,11 @@
+estructura Proyecto {
+    nombre: texto;
+    empresa: texto;
+    version: numero;
+}
+
+sea proyecto: Proyecto = Proyecto("C-Forgev", "Vemoris Group", 0.4);
+
+mostrar(proyecto.nombre);
+mostrar(proyecto.empresa);
+mostrar(proyecto.version);

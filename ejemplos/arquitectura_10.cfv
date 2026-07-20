@@ -1,0 +1,32 @@
+import pip:math;
+
+cluster version = "1.0";
+cluster funcion cuadrado(valor) {
+    retornar valor * valor;
+}
+
+mostrar("C-Forgev 1.0 Experimental");
+mostrar(cluster_estado());
+mostrar(math.sqrt(400));
+
+gpu {
+    resultados = paralelo("cuadrado", [2, 3, 4, 5, 6, 7, 8, 9]);
+    mostrar(resultados);
+}
+
+extern("python") {
+print("Python literal integrado")
+}
+
+extern("cpp") {
+std::string mensaje_seguro = "C++ literal con RAII";
+std::cout << mensaje_seguro << std::endl;
+}
+
+mostrar("Perfil adaptativo:");
+mostrar(jit_estado("cuadrado"));
+intentar {
+    mostrar(use_cpp("owned_greet", ["Javier"]));
+} capturar(error_cpp) {
+    mostrar("C++ registrado requiere compilar con --vincular.");
+}

@@ -1,0 +1,17 @@
+// C-Forgev 0.2: tipos, lógica, listas y mapas
+sea tecnologias: lista = ["C++", "C#", "Python"];
+agregar(tecnologias, "C-Forgev");
+
+sea proyecto: mapa = {
+    "nombre": "C-Forgev",
+    "empresa": "Vemoris Group"
+};
+
+sea activo: booleano = verdadero;
+
+si (activo y longitud(tecnologias) >= 4) {
+    mostrar(proyecto["nombre"]);
+    mostrar(tecnologias);
+    mostrar("Cantidad:");
+    mostrar(longitud(tecnologias));
+}

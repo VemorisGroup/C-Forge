@@ -1,0 +1,38 @@
+// Presentación oficial de C-Forgev
+sea creador = "Javier";
+sea empresa = "Vemoris Group";
+sea lenguaje = "C-Forgev";
+
+mostrar("Creador: " + creador);
+mostrar("Empresa: " + empresa);
+mostrar("Lenguaje: " + lenguaje);
+mostrar(100 * 5);
+
+sea edad = 20;
+
+si (edad >= 18) {
+    mostrar("Eres mayor de edad");
+} sino {
+    mostrar("Eres menor de edad");
+}
+
+sea numero = 1;
+mostrar("Contando con un ciclo:");
+
+mientras (numero <= 5) {
+    mostrar(numero);
+    numero = numero + 1;
+}
+
+funcion sumar(a, b) {
+    retornar a + b;
+}
+
+funcion presentar(nombre) {
+    mostrar("Bienvenido, " + nombre);
+}
+
+sea resultado = sumar(40, 2);
+mostrar("Resultado de la función:");
+mostrar(resultado);
+presentar("Javier");
