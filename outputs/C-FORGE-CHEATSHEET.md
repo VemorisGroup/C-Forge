@@ -1,4 +1,4 @@
-# C-Forgev 1.3 — Guía rápida oficial
+# C-Forge 1.3 — Guía rápida oficial
 
 ## Ejecutar y compilar
 
@@ -91,7 +91,7 @@ lista = [10, 20, 30];
 agregar(lista, 40);
 mostrar(lista[0]);
 
-mapa = {"nombre": "C-Forgev", "version": 1.3};
+mapa = {"nombre": "C-Forge", "version": 1.3};
 mostrar(mapa.nombre);
 
 vector = array_fast([1, 2, 3, 4]);
@@ -138,7 +138,7 @@ mostrar(proceso.salida);
 mostrar(proceso.error);
 
 file_write("datos.txt", "Hola");
-file_append("datos.txt", " C-Forgev");
+file_append("datos.txt", " C-Forge");
 mostrar(file_read("datos.txt"));
 ```
 

@@ -1,22 +1,26 @@
-# C-Forgev
+# C-Forge
 
 <p align="center">
-  <img src="assets/cforgev-logo.svg" width="128" height="128" alt="Logo de C-Forgev">
+  <img src="assets/cforgev-logo.svg" width="128" height="128" alt="Logo de C-Forge">
 </p>
 
 > Lenguaje de programación experimental de Vemoris Group con sintaxis propia,
 > ejecución interactiva, compilación a C++17 e interoperabilidad políglota.
 
-**Versión actual:** `1.3.0-definitive`<br>
+**Versión actual:** `1.4.0-definitive`<br>
 **Extensión oficial:** `.cfv`<br>
 **Estado:** experimental; apto para aprendizaje, demostraciones y desarrollo del motor.
 
-C-Forgev combina una sintaxis legible, tipado gradual, compilación nativa y un
+C-Forge combina una sintaxis legible, tipado gradual, compilación nativa y un
 sistema de valores común llamado `ForgeValue`. El proyecto permite ejecutar un
 programa durante el desarrollo o traducirlo a un ejecutable C++ nativo.
 
+> **Migración de marca:** C-Forge fue publicado inicialmente como C-Forgev.
+> El comando `cforge`, la extensión `.cfv` y los identificadores técnicos
+> `cforgev` se conservan para no romper instalaciones ni proyectos existentes.
+
 ```cfv
-cluster proyecto = "C-Forgev";
+cluster proyecto = "C-Forge";
 
 funcion cuadrado(numero) {
     retornar numero * numero;
@@ -58,7 +62,7 @@ Desde la raíz del proyecto:
 ./outputs/cforge-master --setup
 ```
 
-En el Mac utilizado para desarrollar C-Forgev están activos Apple Clang,
+En el Mac utilizado para desarrollar C-Forge están activos Apple Clang,
 Python 3, Node.js y Eclipse Temurin JDK.
 
 ### 2. Ejecutar un programa
@@ -93,7 +97,7 @@ El instalador copia la distribución monolítica a `/usr/local/bin/cforge`.
 
 Los lanzamientos etiquetados generan automáticamente paquetes para los tres
 sistemas. Mientras los catálogos públicos revisan los manifiestos, se instalan
-desde [GitHub Releases](https://github.com/VemorisGroup/C-Forgev/releases).
+desde [GitHub Releases](https://github.com/VemorisGroup/C-Forge/releases).
 
 macOS, cuando se publique el tap de Vemoris Group:
 
@@ -110,7 +114,7 @@ winget install VemorisGroup.CForgev
 Debian/Ubuntu usando el paquete descargado del lanzamiento:
 
 ```bash
-sudo apt install ./cforgev_1.3.0_all.deb
+sudo apt install ./cforgev_1.4.0_all.deb
 ```
 
 La preparación y las condiciones necesarias para ofrecer los comandos cortos
@@ -129,7 +133,7 @@ cforge test main.cfv
 Resultado esperado:
 
 ```text
-C-Forgev Test: 10 aprobados, 0 fallidos
+C-Forge Test: 10 aprobados, 0 fallidos
 ```
 
 Para comprobar también el backend nativo:
@@ -212,7 +216,7 @@ test "suma" {
 ```
 
 La referencia ampliada está en
-[`outputs/C-FORGEV-CHEATSHEET.md`](outputs/C-FORGEV-CHEATSHEET.md).
+[`outputs/C-FORGE-CHEATSHEET.md`](outputs/C-FORGE-CHEATSHEET.md).
 
 ## Núcleo nativo
 
@@ -222,7 +226,7 @@ mostrar(info.cpu);
 mostrar(info.nucleos);
 mostrar(info.ram_bytes);
 
-proceso = sys_run("printf C-Forgev");
+proceso = sys_run("printf C-Forge");
 mostrar(proceso.estado);
 mostrar(proceso.salida);
 
@@ -417,7 +421,7 @@ para instalarla localmente.
 - `net_listen` es TCP local de una conexión; no sustituye un framework web.
 - Los perfiles JIT y los bloques GPU son infraestructura funcional con backend
   CPU, no un compilador JIT de producción ni un backend Metal/CUDA terminado.
-- No se afirma que C-Forgev supere en rendimiento o estabilidad a lenguajes
+- No se afirma que C-Forge supere en rendimiento o estabilidad a lenguajes
   maduros sin benchmarks independientes y reproducibles.
 - No se recomienda todavía para banca, infraestructura crítica o producción.
 
@@ -426,11 +430,11 @@ para instalarla localmente.
 - [`ESPECIFICACION.md`](ESPECIFICACION.md): sintaxis y comportamiento implementado.
 - [`INTEROPERABILIDAD.md`](INTEROPERABILIDAD.md): ABI y puentes externos.
 - [`CHANGELOG.md`](CHANGELOG.md): historial de versiones.
-- [`outputs/C-FORGEV-CHEATSHEET.md`](outputs/C-FORGEV-CHEATSHEET.md): referencia rápida.
+- [`outputs/C-FORGE-CHEATSHEET.md`](outputs/C-FORGE-CHEATSHEET.md): referencia rápida.
 
 ## Proyecto
 
-C-Forgev es una iniciativa de **Vemoris Group**, creada por **Javier**. El motor
+C-Forge es una iniciativa de **Vemoris Group**, creada por **Javier**. El motor
 se publica como proyecto experimental para continuar investigando diseño de
 lenguajes, compilación e interoperabilidad.
 

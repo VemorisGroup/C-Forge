@@ -1,9 +1,9 @@
-# Distribución de C-Forgev
+# Distribución de C-Forge
 
 ## Estado real de los comandos
 
 La automatización del repositorio genera archivos portables para macOS, Linux y
-Windows, además de un paquete `.deb`. Publicar un tag como `v1.3.0` crea una
+Windows, además de un paquete `.deb`. Publicar un tag como `v1.4.0` crea una
 GitHub Release mediante `.github/workflows/release.yml`.
 
 ### Homebrew
@@ -28,7 +28,7 @@ El lanzamiento genera un ejecutable autónomo con PyInstaller y también un ZIP
 portable para desarrollo. Después se completa el manifiesto con:
 
 ```bash
-python packaging/winget/generate.py 1.3.0 dist/cforge-1.3.0-windows-x64.exe
+python packaging/winget/generate.py 1.4.0 dist/cforge-1.4.0-windows-x64.exe
 ```
 
 El manifiesto resultante debe enviarse a `microsoft/winget-pkgs`. Cuando sea

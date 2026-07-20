@@ -26,8 +26,8 @@ class InterpreterTests(unittest.TestCase):
         return buffer.getvalue()
 
     def test_variables_math_and_strings(self) -> None:
-        source = 'sea nombre = "C-Forgev"; mostrar(nombre); mostrar(2 + 3 * 4);'
-        self.assertEqual(self.output(source), "C-Forgev\n14\n")
+        source = 'sea nombre = "C-Forge"; mostrar(nombre); mostrar(2 + 3 * 4);'
+        self.assertEqual(self.output(source), "C-Forge\n14\n")
 
     def test_division_by_zero_is_explained(self) -> None:
         with self.assertRaisesRegex(CForgevError, "dividir por cero"):
@@ -125,7 +125,7 @@ class InterpreterTests(unittest.TestCase):
             with contextlib.redirect_stderr(stderr):
                 status = main()
         self.assertEqual(status, 1)
-        self.assertIn("[C-Forgev Runtime Exception]", stderr.getvalue())
+        self.assertIn("[C-Forge Runtime Exception]", stderr.getvalue())
         self.assertNotIn("Traceback", stderr.getvalue())
 
     def test_wasm_backend_generates_valid_module_structure(self) -> None:
@@ -636,7 +636,7 @@ std::cout << value << std::endl;
         output = buffer.getvalue()
         self.assertIn("15\n", output)
         self.assertIn("20\n", output)
-        self.assertIn("[C-Forgev Runtime Exception]", output)
+        self.assertIn("[C-Forge Runtime Exception]", output)
         self.assertTrue(output.endswith("continua\n"))
 
     def test_repl_universal_import_prints_method_result(self) -> None:

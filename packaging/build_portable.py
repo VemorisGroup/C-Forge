@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Construye una distribución portable y reproducible de C-Forgev."""
+"""Construye una distribución portable y reproducible de C-Forge."""
 
 from __future__ import annotations
 

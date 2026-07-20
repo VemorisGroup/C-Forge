@@ -1,7 +1,7 @@
 import pip:math;
 
 numero = 20;
-nombre = "C-Forgev";
+nombre = "C-Forge";
 
 funcion cuadrado(valor) {
     retornar valor * valor;

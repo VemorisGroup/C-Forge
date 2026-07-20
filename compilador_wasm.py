@@ -1,4 +1,4 @@
-"""Backend WebAssembly inicial de C-Forgev: subconjunto numérico -> WAT válido."""
+"""Backend WebAssembly inicial de C-Forge: subconjunto numérico -> WAT válido."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ class WasmGenerator:
         )
         body = "\n".join(self.statement(statement) for statement in self.program.statements)
         return (
-            ";; C-Forgev WebAssembly 0.9 — módulo WAT completo\n"
+            ";; C-Forge WebAssembly 0.9 — módulo WAT completo\n"
             "(module\n"
             '  (import "env" "cfv_print_f64" (func $cfv_print_f64 (param f64)))\n'
             '  (func (export "_start")\n'

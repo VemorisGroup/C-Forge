@@ -1,9 +1,9 @@
-// C-Forgev 1.3.0 Definitive — demostración maestra oficial
+// C-Forge 1.4.0 Definitive — demostración maestra oficial
 import pip:math;
 import npm:path;
 
-cluster version = "1.3.0-definitive";
-cluster proyecto = "C-Forgev";
+cluster version = "1.4.0-definitive";
+cluster proyecto = "C-Forge";
 
 // Tipado gradual: explícito e inferido.
 sea creador: texto = "Javier";
@@ -37,7 +37,7 @@ persona = Persona(creador, 20);
 contador = Contador(0);
 lenguajes = ["C++", "C#", "Python", "Java", "JavaScript", "TypeScript"];
 
-print("=== C-Forgev 1.3: demostración maestra ===");
+print("=== C-Forge 1.3: demostración maestra ===");
 mostrar("Creador: " + persona.nombre);
 mostrar("Empresa: " + empresa);
 mostrar(lenguajes);
@@ -52,7 +52,7 @@ mostrar(hardware.nucleos);
 mostrar(hardware.ram_bytes);
 mostrar(hardware.sistema);
 
-proceso = sys_run("printf Sistema-C-Forgev");
+proceso = sys_run("printf Sistema-C-Forge");
 mostrar("Proceso nativo:");
 mostrar(proceso.estado);
 mostrar(proceso.salida);
@@ -76,9 +76,9 @@ gpu {
 }
 
 // IA local explicable ejecutada dentro del puente Python.
-texto_ia = "C-Forgev es potente rápido seguro y excelente";
+texto_ia = "C-Forge es potente rápido seguro y excelente";
 extern("python") {
-    texto_ia = "C-Forgev es potente rápido seguro y excelente"
+    texto_ia = "C-Forge es potente rápido seguro y excelente"
     positivas = {"potente", "rápido", "seguro", "excelente"}
     tokens = texto_ia.lower().split()
     puntaje = sum(1 for token in tokens if token in positivas)
@@ -91,7 +91,7 @@ extern("javascript") {
     const respuestaWeb = {
         estado: 200,
         servicio: "Vemoris API",
-        tecnologias: ["C-Forgev", "JavaScript"]
+        tecnologias: ["C-Forge", "JavaScript"]
     };
     console.log("extern JavaScript web: " + JSON.stringify(respuestaWeb));
 }
@@ -171,7 +171,7 @@ test "sistema y hardware" {
 }
 
 test "archivos nativos" {
-    afirmar(contenido_archivo == "C-Forgev 1.3", "file_write y file_append deben conservar datos");
+    afirmar(contenido_archivo == "C-Forge 1.3", "file_write y file_append deben conservar datos");
 }
 
 test "matrix y array_fast" {

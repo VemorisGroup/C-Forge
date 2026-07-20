@@ -29,7 +29,7 @@ std::filesystem::path find_engine(const char* executable) {
 
 void print_help() {
     std::cout
-        << "C-Forgev Toolchain 1.3.0\n"
+        << "C-Forge Toolchain 1.4.0\n"
         << "Uso:\n"
         << "  cforge fmt archivo.cfv\n"
         << "  cforge test archivo.cfv\n";
@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
         throw std::runtime_error("no se pudo iniciar python3: error " + std::to_string(errno));
 #endif
     } catch (const std::exception& error) {
-        std::cerr << "[C-Forgev Toolchain Exception] " << error.what() << '\n';
+        std::cerr << "[C-Forge Toolchain Exception] " << error.what() << '\n';
         return 1;
     }
 }

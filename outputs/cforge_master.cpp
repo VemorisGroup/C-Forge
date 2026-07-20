@@ -1,4 +1,4 @@
-// C-Forgev 1.3.0 Definitive — distribución monolítica generada.
+// C-Forge 1.4.0 Definitive — distribución monolítica generada.
 // Fuente reproducible: herramientas/generar_amalgama.py
 
 #include <Python.h>
@@ -71,7 +71,7 @@ private:
 const std::map<std::string, std::string>& embedded_resources() {
     static const std::map<std::string, std::string> resources = {
         {R"CFV0DATA(cforgev.py)CFV0DATA", R"CFV1DATA(#!/usr/bin/env python3
-"""Primer intérprete del lenguaje C-Forgev."""
+"""Primer intérprete del lenguaje C-Forge."""
 
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ import time
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
-VERSION = "1.3.0-definitive"
+VERSION = "1.4.0-definitive"
 
 
 class CForgevError(Exception):
@@ -1251,7 +1251,7 @@ process.stdout.write("\\n{marker}" + JSON.stringify(result === undefined ? null 
             raise CForgevError(f"Línea {line}: JavaScript falló: {invoked.stderr.strip()}")
         visible, separator, payload = invoked.stdout.rpartition(marker)
         if not separator:
-            raise CForgevError(f"Línea {line}: JavaScript no devolvió protocolo C-Forgev")
+            raise CForgevError(f"Línea {line}: JavaScript no devolvió protocolo C-Forge")
         if visible.strip():
             print(visible.strip())
         try:
@@ -1566,7 +1566,7 @@ def run_test_file(path: Path) -> int:
     Interpreter(tokenize(source), base_dir=path.resolve().parent, test_results=results).run()
     if not results:
         raise CForgevError(f"{path} no contiene bloques test")
-    print(f"C-Forgev Test: {len(results)} aprobados, 0 fallidos")
+    print(f"C-Forge Test: {len(results)} aprobados, 0 fallidos")
     return len(results)
 
 
@@ -1583,7 +1583,7 @@ def execute_watch(
     cluster_symbols: dict[str, str] = {}
     last_stamp: int | None = None
     reloads = 0
-    print(f"C-Forgev hot reload: observando {path} (Ctrl+C para terminar)")
+    print(f"C-Forge hot reload: observando {path} (Ctrl+C para terminar)")
     while max_reloads is None or reloads < max_reloads:
         try:
             stamp = path.stat().st_mtime_ns
@@ -1596,13 +1596,13 @@ def execute_watch(
                 ).run()
                 last_stamp = stamp
                 reloads += 1
-                print(f"[C-Forgev Hot Reload] versión {reloads} cargada; estado conservado")
+                print(f"[C-Forge Hot Reload] versión {reloads} cargada; estado conservado")
             time.sleep(interval)
         except KeyboardInterrupt:
-            print("\nC-Forgev hot reload finalizado")
+            print("\nC-Forge hot reload finalizado")
             return
         except (OSError, CForgevError) as error:
-            print(f"[C-Forgev Runtime Exception] {error}")
+            print(f"[C-Forge Runtime Exception] {error}")
             time.sleep(interval)
 
 
@@ -1649,7 +1649,7 @@ def run_repl(input_fn=input) -> None:
     jit_counts: dict[str, int] = {}
     cluster_symbols: dict[str, str] = {}
     buffer = ""
-    print(f"C-Forgev {VERSION} — REPL (escribe 'salir' para terminar)")
+    print(f"C-Forge {VERSION} — REPL (escribe 'salir' para terminar)")
     while True:
         try:
             line = input_fn("cfv> " if not buffer else "...  ")
@@ -1689,9 +1689,9 @@ def run_repl(input_fn=input) -> None:
                 Path.cwd(), imported_modules, structures, [], jit_counts, cluster_symbols,
             ).run()
         except ReturnSignal:
-            print("[C-Forgev Runtime Exception] 'retornar' solo se puede usar dentro de una función")
+            print("[C-Forge Runtime Exception] 'retornar' solo se puede usar dentro de una función")
         except CForgevError as error:
-            print(f"[C-Forgev Runtime Exception] {error}")
+            print(f"[C-Forge Runtime Exception] {error}")
 
 
 def main() -> int:
@@ -1708,14 +1708,14 @@ def main() -> int:
         try:
             if command == "fmt":
                 changed = format_file(path)
-                print(f"C-Forgev fmt: {'formateado' if changed else 'sin cambios'} — {path}")
+                print(f"C-Forge fmt: {'formateado' if changed else 'sin cambios'} — {path}")
             else:
                 run_test_file(path)
         except CForgevError as error:
-            print(f"[C-Forgev Runtime Exception] {error}", file=sys.stderr)
+            print(f"[C-Forge Runtime Exception] {error}", file=sys.stderr)
             return 1
         return 0
-    parser = argparse.ArgumentParser(prog="cforgev", description="Intérprete de C-Forgev")
+    parser = argparse.ArgumentParser(prog="cforgev", description="Intérprete de C-Forge")
     parser.add_argument("archivo", nargs="?", type=Path, help="archivo .cfv que se ejecutará")
     parser.add_argument("--compilar", action="store_true", help="crear un ejecutable nativo")
     parser.add_argument("-o", "--salida", type=Path, help="ruta del ejecutable generado")
@@ -1723,7 +1723,7 @@ def main() -> int:
         "--vincular", action="append", type=Path, default=[],
         help="archivo C/C++ adicional que se compilará y vinculará"
     )
-    parser.add_argument("--version", action="version", version=f"C-Forgev {VERSION}")
+    parser.add_argument("--version", action="version", version=f"C-Forge {VERSION}")
     parser.add_argument("--reparar", action="store_true", help="reparar errores sintácticos seguros")
     parser.add_argument("--vigilar", action="store_true", help="recargar el archivo conservando estado")
     parser.add_argument("--intervalo", type=float, default=0.5, help="segundos entre revisiones")
@@ -1735,7 +1735,7 @@ def main() -> int:
         run_repl()
         return 0
     if args.archivo.suffix != ".cfv":
-        print("Aviso: los programas C-Forgev normalmente usan la extensión .cfv", file=sys.stderr)
+        print("Aviso: los programas C-Forge normalmente usan la extensión .cfv", file=sys.stderr)
     try:
         if args.reparar:
             try:
@@ -1749,13 +1749,13 @@ def main() -> int:
                 backup = args.archivo.with_suffix(args.archivo.suffix + ".bak")
                 backup.write_text(original, encoding="utf-8")
                 args.archivo.write_text(repaired, encoding="utf-8")
-                print("[C-Forgev Self-Healing] " + "; ".join(changes))
+                print("[C-Forge Self-Healing] " + "; ".join(changes))
                 print(f"Respaldo creado: {backup}")
         if args.wasm:
             from compilador_wasm import compile_wasm
             output = args.salida or args.archivo.with_suffix(".wat")
             compile_wasm(args.archivo, output)
-            print(f"Módulo WebAssembly C-Forgev creado: {output}")
+            print(f"Módulo WebAssembly C-Forge creado: {output}")
         elif args.vigilar:
             execute_watch(args.archivo, program_arguments, args.intervalo)
         elif args.compilar:
@@ -1763,15 +1763,15 @@ def main() -> int:
 
             output = args.salida or args.archivo.with_suffix("")
             compile_native(args.archivo, output, args.vincular)
-            print(f"Ejecutable C-Forgev creado: {output}")
+            print(f"Ejecutable C-Forge creado: {output}")
         else:
             execute(args.archivo, program_arguments)
     except CForgevError as error:
-        print(f"[C-Forgev Runtime Exception] {error}", file=sys.stderr)
+        print(f"[C-Forge Runtime Exception] {error}", file=sys.stderr)
         try:
             _, suggestions = repair_source(args.archivo.read_text(encoding="utf-8"))
             if suggestions:
-                print("[C-Forgev Self-Healing] Sugerencia: " + "; ".join(suggestions), file=sys.stderr)
+                print("[C-Forge Self-Healing] Sugerencia: " + "; ".join(suggestions), file=sys.stderr)
                 print("Ejecuta otra vez con --reparar para aplicarla.", file=sys.stderr)
         except OSError:
             pass
@@ -1781,7 +1781,7 @@ def main() -> int:
 
 def setup_environment() -> int:
     """Diagnostica dependencias sin modificar el equipo silenciosamente."""
-    print("C-Forgev Setup 1.3.0")
+    print("C-Forge Setup 1.4.0")
     clang = shutil.which("clang++") is not None
     python = bool(getattr(sys, "frozen", False)) or shutil.which("python3") is not None
     node = shutil.which("node") is not None
@@ -1835,7 +1835,7 @@ def install_global() -> int:
     except OSError as error:
         print(f"No se pudo instalar {destination}: {error}", file=sys.stderr)
         return 1
-    print(f"C-Forgev instalado globalmente en {destination}")
+    print(f"C-Forge instalado globalmente en {destination}")
     print("Ya puedes ejecutar: cforge --version")
     return 0
 
@@ -1843,7 +1843,7 @@ def install_global() -> int:
 if __name__ == "__main__":
     raise SystemExit(main())
 )CFV1DATA"},
-        {R"CFV2DATA(compilador_nativo.py)CFV2DATA", R"CFV3DATA("""Backend nativo experimental de C-Forgev: .cfv -> C++ -> ejecutable."""
+        {R"CFV2DATA(compilador_nativo.py)CFV2DATA", R"CFV3DATA("""Backend nativo experimental de C-Forge: .cfv -> C++ -> ejecutable."""
 
 from __future__ import annotations
 
@@ -2546,8 +2546,8 @@ class Generator:
     cfv_argumentos_global = Value{{cfv_args_lista}};
 {cluster_functions}{main}
     return 0;
-  }} catch(const std::exception& e) {{ std::cerr << "[C-Forgev Runtime Exception] " << e.what() << '\\n'; return 1; }}
-  catch(...) {{ std::cerr << "[C-Forgev Runtime Exception] excepción nativa desconocida\\n"; return 1; }}
+  }} catch(const std::exception& e) {{ std::cerr << "[C-Forge Runtime Exception] " << e.what() << '\\n'; return 1; }}
+  catch(...) {{ std::cerr << "[C-Forge Runtime Exception] excepción nativa desconocida\\n"; return 1; }}
 }}
 '''
 
@@ -2761,7 +2761,7 @@ def compile_native(
     linked_sources.extend(automatic_sources)
     if automatic_sources:
         print(
-            "C-Forgev Auto-Link C++: "
+            "C-Forge Auto-Link C++: "
             + ", ".join(str(path) for path in automatic_sources)
         )
     if linked_sources:
@@ -2930,7 +2930,7 @@ def resolve_imports(program: Program, base_dir: Path, loaded: set[Path]) -> Prog
         statements.extend(imported.statements)
     return Program(functions, statements)
 )CFV3DATA"},
-        {R"CFV4DATA(compilador_wasm.py)CFV4DATA", R"CFV5DATA("""Backend WebAssembly inicial de C-Forgev: subconjunto numérico -> WAT válido."""
+        {R"CFV4DATA(compilador_wasm.py)CFV4DATA", R"CFV5DATA("""Backend WebAssembly inicial de C-Forge: subconjunto numérico -> WAT válido."""
 
 from __future__ import annotations
 
@@ -2954,7 +2954,7 @@ class WasmGenerator:
         )
         body = "\n".join(self.statement(statement) for statement in self.program.statements)
         return (
-            ";; C-Forgev WebAssembly 0.9 — módulo WAT completo\n"
+            ";; C-Forge WebAssembly 0.9 — módulo WAT completo\n"
             "(module\n"
             '  (import "env" "cfv_print_f64" (func $cfv_print_f64 (param f64)))\n'
             '  (func (export "_start")\n'
@@ -3135,7 +3135,7 @@ std::filesystem::path find_engine(const char* executable) {
 
 void print_help() {
     std::cout
-        << "C-Forgev Toolchain 1.3.0\n"
+        << "C-Forge Toolchain 1.4.0\n"
         << "Uso:\n"
         << "  cforge fmt archivo.cfv\n"
         << "  cforge test archivo.cfv\n";
@@ -3171,16 +3171,16 @@ int main(int argc, char** argv) {
         throw std::runtime_error("no se pudo iniciar python3: error " + std::to_string(errno));
 #endif
     } catch (const std::exception& error) {
-        std::cerr << "[C-Forgev Toolchain Exception] " << error.what() << '\n';
+        std::cerr << "[C-Forge Toolchain Exception] " << error.what() << '\n';
         return 1;
     }
 }
 )CFV11DATA"},
         {R"CFV12DATA(herramientas/vscode-cforgev/package.json)CFV12DATA", R"CFV13DATA({
   "name": "cforgev-language",
-  "displayName": "C-Forgev Language",
-  "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forgev (.cfv)",
-  "version": "1.3.0",
+  "displayName": "C-Forge Language Support",
+  "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
+  "version": "1.3.1",
   "publisher": "vemoris-group",
   "author": { "name": "Vemoris Group" },
   "license": "SEE LICENSE IN LICENSE",
@@ -3189,17 +3189,17 @@ int main(int argc, char** argv) {
   "pricing": "Free",
   "engines": { "vscode": "^1.80.0" },
   "categories": ["Programming Languages"],
-  "keywords": ["cforgev", "cfv", "programming language", "syntax highlighting", "vemoris", "compiler"],
+  "keywords": ["c-forge", "cforge", "cforgev", "cfv", "programming language", "syntax highlighting", "vemoris", "compiler"],
   "galleryBanner": { "color": "#FF6A32", "theme": "light" },
-  "repository": { "type": "git", "url": "https://github.com/VemorisGroup/C-Forgev.git" },
-  "homepage": "https://github.com/VemorisGroup/C-Forgev#readme",
-  "bugs": { "url": "https://github.com/VemorisGroup/C-Forgev/issues" },
+  "repository": { "type": "git", "url": "https://github.com/VemorisGroup/C-Forge.git" },
+  "homepage": "https://github.com/VemorisGroup/C-Forge#readme",
+  "bugs": { "url": "https://github.com/VemorisGroup/C-Forge/issues" },
   "scripts": { "package": "vsce package" },
   "devDependencies": { "@vscode/vsce": "^3.6.2" },
   "contributes": {
     "languages": [{
       "id": "cforgev",
-      "aliases": ["C-Forgev", "cforgev"],
+      "aliases": ["C-Forge", "cforgev"],
       "extensions": [".cfv"],
       "configuration": "./language-configuration.json"
     }],
@@ -3224,7 +3224,7 @@ int main(int argc, char** argv) {
 )CFV15DATA"},
         {R"CFV16DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV16DATA", R"CFV17DATA({
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "C-Forgev",
+  "name": "C-Forge",
   "scopeName": "source.cforgev",
   "patterns": [
     { "include": "#comments" },
@@ -3315,7 +3315,7 @@ bool command_available(const std::string& command) {
 }
 
 int setup_environment() {
-    std::cout << "C-Forgev Setup 1.3.0\n";
+    std::cout << "C-Forge Setup 1.4.0\n";
     const bool clang = command_available("clang++");
     const bool python = command_available("python3");
 #ifdef __APPLE__
@@ -3353,7 +3353,7 @@ int install_globally(const char* executable) {
     const std::filesystem::path destination = directory / "cforge";
     std::filesystem::create_directories(directory, error);
     if (error) {
-        std::cerr << "C-Forgev necesita permisos para crear " << directory << ".\n"
+        std::cerr << "C-Forge necesita permisos para crear " << directory << ".\n"
                   << "Ejecuta: sudo \"" << source.string() << "\" --install\n";
         return 1;
     }
@@ -3366,7 +3366,7 @@ int install_globally(const char* executable) {
     }
     if (::chmod(destination.c_str(), 0755) != 0)
         throw std::runtime_error("instalado, pero no se pudo marcar como ejecutable");
-    std::cout << "C-Forgev instalado globalmente en " << destination << "\n"
+    std::cout << "C-Forge instalado globalmente en " << destination << "\n"
               << "Ya puedes ejecutar: cforge --version\n";
     return 0;
 #endif
@@ -3385,10 +3385,10 @@ int main(int argc, char** argv) {
         cforgev::PythonRuntime python;
         return cforgev::run_toolchain(argc, argv, workspace.path());
     } catch (const std::exception& error) {
-        std::cerr << "[C-Forgev Bootstrap Exception] " << error.what() << '\n';
+        std::cerr << "[C-Forge Bootstrap Exception] " << error.what() << '\n';
         return 1;
     } catch (...) {
-        std::cerr << "[C-Forgev Bootstrap Exception] error desconocido\n";
+        std::cerr << "[C-Forge Bootstrap Exception] error desconocido\n";
         return 1;
     }
 }

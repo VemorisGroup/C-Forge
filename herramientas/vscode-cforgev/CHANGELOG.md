@@ -1,8 +1,14 @@
 # Changelog
 
+## 1.3.1
+
+- Nueva identidad pública **C-Forge**.
+- Se conservan el identificador `cforgev` y `.cfv` por compatibilidad.
+- Enlaces oficiales migrados al repositorio C-Forge.
+
 ## 1.3.0
 
-- Palabras clave y funciones de C-Forgev 1.3.
+- Palabras clave y funciones de C-Forge 1.3.
 - Sistema, archivos, TCP, `matrix` y `array_fast`.
 - Puentes Python, C#, C++, Java, JavaScript y TypeScript.
 - Bloques `gpu`, `cluster`, `extern` y `test`.

@@ -1,9 +1,9 @@
-// C-Forgev 0.2: tipos, lógica, listas y mapas
+// C-Forge 0.2: tipos, lógica, listas y mapas
 sea tecnologias: lista = ["C++", "C#", "Python"];
-agregar(tecnologias, "C-Forgev");
+agregar(tecnologias, "C-Forge");
 
 sea proyecto: mapa = {
-    "nombre": "C-Forgev",
+    "nombre": "C-Forge",
     "empresa": "Vemoris Group"
 };
 

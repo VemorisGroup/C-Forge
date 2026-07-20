@@ -1,4 +1,4 @@
-"""Backend nativo experimental de C-Forgev: .cfv -> C++ -> ejecutable."""
+"""Backend nativo experimental de C-Forge: .cfv -> C++ -> ejecutable."""
 
 from __future__ import annotations
 
@@ -701,8 +701,8 @@ class Generator:
     cfv_argumentos_global = Value{{cfv_args_lista}};
 {cluster_functions}{main}
     return 0;
-  }} catch(const std::exception& e) {{ std::cerr << "[C-Forgev Runtime Exception] " << e.what() << '\\n'; return 1; }}
-  catch(...) {{ std::cerr << "[C-Forgev Runtime Exception] excepción nativa desconocida\\n"; return 1; }}
+  }} catch(const std::exception& e) {{ std::cerr << "[C-Forge Runtime Exception] " << e.what() << '\\n'; return 1; }}
+  catch(...) {{ std::cerr << "[C-Forge Runtime Exception] excepción nativa desconocida\\n"; return 1; }}
 }}
 '''
 
@@ -916,7 +916,7 @@ def compile_native(
     linked_sources.extend(automatic_sources)
     if automatic_sources:
         print(
-            "C-Forgev Auto-Link C++: "
+            "C-Forge Auto-Link C++: "
             + ", ".join(str(path) for path in automatic_sources)
         )
     if linked_sources:

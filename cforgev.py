@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Primer intérprete del lenguaje C-Forgev."""
+"""Primer intérprete del lenguaje C-Forge."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
-VERSION = "1.3.0-definitive"
+VERSION = "1.4.0-definitive"
 
 
 class CForgevError(Exception):
@@ -1179,7 +1179,7 @@ process.stdout.write("\\n{marker}" + JSON.stringify(result === undefined ? null 
             raise CForgevError(f"Línea {line}: JavaScript falló: {invoked.stderr.strip()}")
         visible, separator, payload = invoked.stdout.rpartition(marker)
         if not separator:
-            raise CForgevError(f"Línea {line}: JavaScript no devolvió protocolo C-Forgev")
+            raise CForgevError(f"Línea {line}: JavaScript no devolvió protocolo C-Forge")
         if visible.strip():
             print(visible.strip())
         try:
@@ -1494,7 +1494,7 @@ def run_test_file(path: Path) -> int:
     Interpreter(tokenize(source), base_dir=path.resolve().parent, test_results=results).run()
     if not results:
         raise CForgevError(f"{path} no contiene bloques test")
-    print(f"C-Forgev Test: {len(results)} aprobados, 0 fallidos")
+    print(f"C-Forge Test: {len(results)} aprobados, 0 fallidos")
     return len(results)
 
 
@@ -1511,7 +1511,7 @@ def execute_watch(
     cluster_symbols: dict[str, str] = {}
     last_stamp: int | None = None
     reloads = 0
-    print(f"C-Forgev hot reload: observando {path} (Ctrl+C para terminar)")
+    print(f"C-Forge hot reload: observando {path} (Ctrl+C para terminar)")
     while max_reloads is None or reloads < max_reloads:
         try:
             stamp = path.stat().st_mtime_ns
@@ -1524,13 +1524,13 @@ def execute_watch(
                 ).run()
                 last_stamp = stamp
                 reloads += 1
-                print(f"[C-Forgev Hot Reload] versión {reloads} cargada; estado conservado")
+                print(f"[C-Forge Hot Reload] versión {reloads} cargada; estado conservado")
             time.sleep(interval)
         except KeyboardInterrupt:
-            print("\nC-Forgev hot reload finalizado")
+            print("\nC-Forge hot reload finalizado")
             return
         except (OSError, CForgevError) as error:
-            print(f"[C-Forgev Runtime Exception] {error}")
+            print(f"[C-Forge Runtime Exception] {error}")
             time.sleep(interval)
 
 
@@ -1577,7 +1577,7 @@ def run_repl(input_fn=input) -> None:
     jit_counts: dict[str, int] = {}
     cluster_symbols: dict[str, str] = {}
     buffer = ""
-    print(f"C-Forgev {VERSION} — REPL (escribe 'salir' para terminar)")
+    print(f"C-Forge {VERSION} — REPL (escribe 'salir' para terminar)")
     while True:
         try:
             line = input_fn("cfv> " if not buffer else "...  ")
@@ -1617,9 +1617,9 @@ def run_repl(input_fn=input) -> None:
                 Path.cwd(), imported_modules, structures, [], jit_counts, cluster_symbols,
             ).run()
         except ReturnSignal:
-            print("[C-Forgev Runtime Exception] 'retornar' solo se puede usar dentro de una función")
+            print("[C-Forge Runtime Exception] 'retornar' solo se puede usar dentro de una función")
         except CForgevError as error:
-            print(f"[C-Forgev Runtime Exception] {error}")
+            print(f"[C-Forge Runtime Exception] {error}")
 
 
 def main() -> int:
@@ -1636,14 +1636,14 @@ def main() -> int:
         try:
             if command == "fmt":
                 changed = format_file(path)
-                print(f"C-Forgev fmt: {'formateado' if changed else 'sin cambios'} — {path}")
+                print(f"C-Forge fmt: {'formateado' if changed else 'sin cambios'} — {path}")
             else:
                 run_test_file(path)
         except CForgevError as error:
-            print(f"[C-Forgev Runtime Exception] {error}", file=sys.stderr)
+            print(f"[C-Forge Runtime Exception] {error}", file=sys.stderr)
             return 1
         return 0
-    parser = argparse.ArgumentParser(prog="cforgev", description="Intérprete de C-Forgev")
+    parser = argparse.ArgumentParser(prog="cforgev", description="Intérprete de C-Forge")
     parser.add_argument("archivo", nargs="?", type=Path, help="archivo .cfv que se ejecutará")
     parser.add_argument("--compilar", action="store_true", help="crear un ejecutable nativo")
     parser.add_argument("-o", "--salida", type=Path, help="ruta del ejecutable generado")
@@ -1651,7 +1651,7 @@ def main() -> int:
         "--vincular", action="append", type=Path, default=[],
         help="archivo C/C++ adicional que se compilará y vinculará"
     )
-    parser.add_argument("--version", action="version", version=f"C-Forgev {VERSION}")
+    parser.add_argument("--version", action="version", version=f"C-Forge {VERSION}")
     parser.add_argument("--reparar", action="store_true", help="reparar errores sintácticos seguros")
     parser.add_argument("--vigilar", action="store_true", help="recargar el archivo conservando estado")
     parser.add_argument("--intervalo", type=float, default=0.5, help="segundos entre revisiones")
@@ -1663,7 +1663,7 @@ def main() -> int:
         run_repl()
         return 0
     if args.archivo.suffix != ".cfv":
-        print("Aviso: los programas C-Forgev normalmente usan la extensión .cfv", file=sys.stderr)
+        print("Aviso: los programas C-Forge normalmente usan la extensión .cfv", file=sys.stderr)
     try:
         if args.reparar:
             try:
@@ -1677,13 +1677,13 @@ def main() -> int:
                 backup = args.archivo.with_suffix(args.archivo.suffix + ".bak")
                 backup.write_text(original, encoding="utf-8")
                 args.archivo.write_text(repaired, encoding="utf-8")
-                print("[C-Forgev Self-Healing] " + "; ".join(changes))
+                print("[C-Forge Self-Healing] " + "; ".join(changes))
                 print(f"Respaldo creado: {backup}")
         if args.wasm:
             from compilador_wasm import compile_wasm
             output = args.salida or args.archivo.with_suffix(".wat")
             compile_wasm(args.archivo, output)
-            print(f"Módulo WebAssembly C-Forgev creado: {output}")
+            print(f"Módulo WebAssembly C-Forge creado: {output}")
         elif args.vigilar:
             execute_watch(args.archivo, program_arguments, args.intervalo)
         elif args.compilar:
@@ -1691,15 +1691,15 @@ def main() -> int:
 
             output = args.salida or args.archivo.with_suffix("")
             compile_native(args.archivo, output, args.vincular)
-            print(f"Ejecutable C-Forgev creado: {output}")
+            print(f"Ejecutable C-Forge creado: {output}")
         else:
             execute(args.archivo, program_arguments)
     except CForgevError as error:
-        print(f"[C-Forgev Runtime Exception] {error}", file=sys.stderr)
+        print(f"[C-Forge Runtime Exception] {error}", file=sys.stderr)
         try:
             _, suggestions = repair_source(args.archivo.read_text(encoding="utf-8"))
             if suggestions:
-                print("[C-Forgev Self-Healing] Sugerencia: " + "; ".join(suggestions), file=sys.stderr)
+                print("[C-Forge Self-Healing] Sugerencia: " + "; ".join(suggestions), file=sys.stderr)
                 print("Ejecuta otra vez con --reparar para aplicarla.", file=sys.stderr)
         except OSError:
             pass
@@ -1709,7 +1709,7 @@ def main() -> int:
 
 def setup_environment() -> int:
     """Diagnostica dependencias sin modificar el equipo silenciosamente."""
-    print("C-Forgev Setup 1.3.0")
+    print("C-Forge Setup 1.4.0")
     clang = shutil.which("clang++") is not None
     python = bool(getattr(sys, "frozen", False)) or shutil.which("python3") is not None
     node = shutil.which("node") is not None
@@ -1763,7 +1763,7 @@ def install_global() -> int:
     except OSError as error:
         print(f"No se pudo instalar {destination}: {error}", file=sys.stderr)
         return 1
-    print(f"C-Forgev instalado globalmente en {destination}")
+    print(f"C-Forge instalado globalmente en {destination}")
     print("Ya puedes ejecutar: cforge --version")
     return 0
 

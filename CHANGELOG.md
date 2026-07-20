@@ -1,4 +1,11 @@
-# Historial de C-Forgev
+# Historial de C-Forge
+
+## 1.4.0-definitive — 2026-07-20
+
+- La marca pública cambia de C-Forgev a **C-Forge**.
+- Se conservan `cforge`, `.cfv` e identificadores internos como compatibilidad.
+- Documentación, ejemplos, paquetes, extensión y enlaces oficiales migrados.
+- La extensión de VS Code avanza a 1.3.1 con la nueva identidad pública.
 
 ## Distribución multiplataforma — 2026-07-20
 
@@ -30,7 +37,7 @@
 - Registro compartido de símbolos globales accesible desde C++.
 - `ForgeSymbols` automático para funciones Python y módulos JavaScript.
 - Resolución homogénea por punto para módulos y mapas extranjeros.
-- Pruebas cruzadas Python → C-Forgev → JavaScript en intérprete y nativo.
+- Pruebas cruzadas Python → C-Forge → JavaScript en intérprete y nativo.
 
 ## 1.1.0-experimental — 2026-07-20
 
@@ -75,7 +82,7 @@
 
 - Resultados ABI con propiedad explícita y callback de liberación RAII.
 - `PyObject*` administrados por referencias automáticas y excepciones extraídas.
-- Errores C++, C# y Python normalizados como `[C-Forgev Runtime Exception]`.
+- Errores C++, C# y Python normalizados como `[C-Forge Runtime Exception]`.
 - Excepciones extranjeras compatibles con `intentar/capturar`.
 - REPL persistente y multilínea al ejecutar `./cforgev` sin archivo.
 - Pruebas de liberación exacta, recuperación de errores e interoperabilidad real.

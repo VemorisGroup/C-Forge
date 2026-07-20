@@ -1,8 +1,8 @@
-# Especificación de C-Forgev 1.3.0 Definitive
+# Especificación de C-Forge 1.4.0 Definitive
 
 ## Estado
 
-C-Forgev 1.2 es una implementación experimental de un lenguaje compilado de
+C-Forge 1.2 es una implementación experimental de un lenguaje compilado de
 propósito general creado por Vemoris Group. Esta especificación describe solamente
 las capacidades implementadas y no promete compatibilidad futura absoluta.
 
@@ -44,7 +44,7 @@ Los operadores lógicos son `y`, `o` y `no`.
 
 ```text
 sea lenguajes: lista = ["C++", "C#", "Python"];
-agregar(lenguajes, "C-Forgev");
+agregar(lenguajes, "C-Forge");
 mostrar(lenguajes[0]);
 
 sea persona: mapa = {"nombre": "Javier", "edad": 20};
@@ -154,9 +154,9 @@ decimales o textos. Los detalles normativos están en `INTEROPERABILIDAD.md`.
 
 ## Paralelismo y perfil adaptativo
 
-`paralelo("funcion", trabajos)` aplica una función C-Forgev de un argumento a cada
+`paralelo("funcion", trabajos)` aplica una función C-Forge de un argumento a cada
 elemento. El backend C++ usa `std::async(std::launch::async)` y ejecuta tareas
-C-Forgev nativas fuera del GIL. El intérprete mantiene la misma semántica con
+C-Forge nativas fuera del GIL. El intérprete mantiene la misma semántica con
 hilos, aunque el GIL anfitrión puede limitar trabajo intensivo no compilado.
 
 Cada función registra invocaciones mediante contadores sincronizados.
@@ -208,7 +208,7 @@ datos recursivos con Python/JavaScript y escalares con el puente Java 1.1.
 lista y mapa, con procedencia del runtime. Las variables globales se registran en
 un árbol compartido. Python las ve como `ForgeSymbols`, JavaScript como
 `globalThis.ForgeSymbols` y C++ mediante `cfv_symbol`. Los mapas provenientes de
-otro runtime admiten acceso con punto igual que los datos de C-Forgev.
+otro runtime admiten acceso con punto igual que los datos de C-Forge.
 
 ## Seguridad de memoria asistida
 

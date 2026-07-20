@@ -1,7 +1,7 @@
 class Cforgev < Formula
-  desc "Lenguaje de programación experimental C-Forgev"
-  homepage "https://github.com/VemorisGroup/C-Forgev"
-  url "https://github.com/VemorisGroup/C-Forgev/archive/refs/tags/vVERSION.tar.gz"
+  desc "Lenguaje de programación experimental C-Forge"
+  homepage "https://github.com/VemorisGroup/C-Forge"
+  url "https://github.com/VemorisGroup/C-Forge/archive/refs/tags/vVERSION.tar.gz"
   sha256 "SHA256"
   license :cannot_represent
 
@@ -17,6 +17,6 @@ class Cforgev < Formula
   end
 
   test do
-    assert_match "C-Forgev VERSION-definitive", shell_output("#{bin}/cforge --version")
+    assert_match "C-Forge VERSION-definitive", shell_output("#{bin}/cforge --version")
   end
 end

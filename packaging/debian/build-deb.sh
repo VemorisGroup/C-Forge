@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-1.3.0}"
+VERSION="${1:-1.4.0}"
 ARCH="${2:-all}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STAGE="$ROOT/dist/deb-root"
@@ -21,9 +21,9 @@ Priority: optional
 Architecture: $ARCH
 Depends: python3 (>= 3.9)
 Maintainer: Vemoris Group <hola@vemorisgroup.com>
-Homepage: https://github.com/VemorisGroup/C-Forgev
-Description: Intérprete experimental del lenguaje C-Forgev
- C-Forgev ofrece sintaxis propia, REPL, pruebas y compilación experimental.
+Homepage: https://github.com/VemorisGroup/C-Forge
+Description: Intérprete experimental del lenguaje C-Forge
+ C-Forge ofrece sintaxis propia, REPL, pruebas y compilación experimental.
 EOF
 
 cat > "$STAGE/usr/bin/cforge" <<'EOF'

@@ -1,6 +1,6 @@
 import pip:math;
 
-nombre = "C-Forgev 0.9";
+nombre = "C-Forge 0.9";
 
 funcion cuadrado(valor) {
     retornar valor * valor;

@@ -1,11 +1,11 @@
-mostrar("=== Núcleo nativo C-Forgev ===");
+mostrar("=== Núcleo nativo C-Forge ===");
 
 info = sys_info();
 mostrar(info.cpu);
 mostrar(info.nucleos > 0);
 mostrar(info.ram_bytes > 0);
 
-resultado = sys_run("printf C-Forgev-Nativo");
+resultado = sys_run("printf C-Forge-Nativo");
 mostrar(resultado.estado);
 mostrar(resultado.salida);
 

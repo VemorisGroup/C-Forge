@@ -1,4 +1,4 @@
-mostrar("C-Forgev 0.7 - runtime profesional");
+mostrar("C-Forge 0.7 - runtime profesional");
 
 mostrar("Python RAII:");
 mostrar(use_python("math", "sqrt", [81]));

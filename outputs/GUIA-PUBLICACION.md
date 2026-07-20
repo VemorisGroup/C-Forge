@@ -1,23 +1,23 @@
-# Publicación de C-Forgev
+# Publicación de C-Forge
 
 ## GitHub
 
-Antes de crear el repositorio, revisa que el nombre público sea `C-Forgev` y que
+Antes de crear el repositorio, revisa que el nombre público sea `C-Forge` y que
 la licencia propietaria incluida represente la decisión de Vemoris Group.
 
 ```bash
 git init
 git add .
-git commit -m "C-Forgev 1.3.0 definitive"
+git commit -m "C-Forge 1.4.0 definitive"
 git branch -M main
-git remote add origin https://github.com/VemorisGroup/C-Forgev.git
+git remote add origin https://github.com/VemorisGroup/C-Forge.git
 git push -u origin main
 ```
 
 La configuración `.gitignore` evita subir builds, SDKs locales, cachés,
 temporales y paquetes de distribución duplicados.
 
-Para una versión descargable, crea y publica el tag `v1.3.0`. El workflow
+Para una versión descargable, crea y publica el tag `v1.4.0`. El workflow
 `Publicar paquetes` prueba y genera automáticamente:
 
 - Archivo portable para macOS.
@@ -47,7 +47,7 @@ npx @vscode/vsce package
 Instalación local para revisión:
 
 ```bash
-code --install-extension cforgev-language-1.3.0.vsix
+code --install-extension cforgev-language-1.3.1.vsix
 ```
 
 Publicación después de crear el publicador y configurar la autenticación:

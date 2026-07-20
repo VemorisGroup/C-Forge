@@ -1,6 +1,6 @@
-# C-Forgev Language
+# C-Forge Language
 
-Soporte oficial de lenguaje para archivos `.cfv` de **C-Forgev**, un proyecto
+Soporte oficial de lenguaje para archivos `.cfv` de **C-Forge**, un proyecto
 experimental de Vemoris Group.
 
 ## Funciones
@@ -15,7 +15,7 @@ experimental de Vemoris Group.
 ## Ejemplo
 
 ```cfv
-cluster proyecto = "C-Forgev";
+cluster proyecto = "C-Forge";
 
 funcion cuadrado(numero) {
     retornar numero * numero;
@@ -30,7 +30,7 @@ gpu {
 ## Requisitos
 
 Esta extensión proporciona soporte visual y no instala el compilador. Para
-ejecutar programas necesitas una instalación independiente de C-Forgev.
+ejecutar programas necesitas una instalación independiente de C-Forge.
 
 ```bash
 cforge --version
@@ -39,7 +39,7 @@ cforge programa.cfv
 
 ## Estado
 
-Versión `1.3.0`, publicada como Preview. C-Forgev y esta extensión continúan en
+Versión `1.3.1`, publicada como Preview. C-Forge y esta extensión continúan en
 desarrollo experimental.
 
 Copyright © 2026 Vemoris Group y Javier. Todos los derechos reservados.

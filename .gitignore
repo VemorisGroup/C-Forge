@@ -31,7 +31,7 @@ outputs/main.cfv
 
 # Only current official deliverables belong in the repository
 outputs/*
-!outputs/C-FORGEV-CHEATSHEET.md
+!outputs/C-FORGE-CHEATSHEET.md
 !outputs/GUIA-PUBLICACION.md
 !outputs/cforge-master
 !outputs/cforge_master.cpp

@@ -5,7 +5,7 @@ cluster funcion cuadrado(valor) {
     retornar valor * valor;
 }
 
-mostrar("C-Forgev 1.0 Experimental");
+mostrar("C-Forge 1.0 Experimental");
 mostrar(cluster_estado());
 mostrar(math.sqrt(400));
 

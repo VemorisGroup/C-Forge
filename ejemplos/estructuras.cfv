@@ -4,7 +4,7 @@ estructura Proyecto {
     version: numero;
 }
 
-sea proyecto: Proyecto = Proyecto("C-Forgev", "Vemoris Group", 0.4);
+sea proyecto: Proyecto = Proyecto("C-Forge", "Vemoris Group", 0.4);
 
 mostrar(proyecto.nombre);
 mostrar(proyecto.empresa);

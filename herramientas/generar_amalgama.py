@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Genera la distribución monolítica C++ de C-Forgev desde las fuentes oficiales."""
+"""Genera la distribución monolítica C++ de C-Forge desde las fuentes oficiales."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def generate() -> str:
             + raw_literal(content, index * 2 + 1) + "}"
         )
     resources = ",\n".join(entries)
-    return f'''// C-Forgev 1.3.0 Definitive — distribución monolítica generada.
+    return f'''// C-Forge 1.4.0 Definitive — distribución monolítica generada.
 // Fuente reproducible: herramientas/generar_amalgama.py
 
 #include <Python.h>
@@ -169,7 +169,7 @@ bool command_available(const std::string& command) {{
 }}
 
 int setup_environment() {{
-    std::cout << "C-Forgev Setup 1.3.0\\n";
+    std::cout << "C-Forge Setup 1.4.0\\n";
     const bool clang = command_available("clang++");
     const bool python = command_available("python3");
 #ifdef __APPLE__
@@ -207,7 +207,7 @@ int install_globally(const char* executable) {{
     const std::filesystem::path destination = directory / "cforge";
     std::filesystem::create_directories(directory, error);
     if (error) {{
-        std::cerr << "C-Forgev necesita permisos para crear " << directory << ".\\n"
+        std::cerr << "C-Forge necesita permisos para crear " << directory << ".\\n"
                   << "Ejecuta: sudo \\\"" << source.string() << "\\\" --install\\n";
         return 1;
     }}
@@ -220,7 +220,7 @@ int install_globally(const char* executable) {{
     }}
     if (::chmod(destination.c_str(), 0755) != 0)
         throw std::runtime_error("instalado, pero no se pudo marcar como ejecutable");
-    std::cout << "C-Forgev instalado globalmente en " << destination << "\\n"
+    std::cout << "C-Forge instalado globalmente en " << destination << "\\n"
               << "Ya puedes ejecutar: cforge --version\\n";
     return 0;
 #endif
@@ -239,10 +239,10 @@ int main(int argc, char** argv) {{
         cforgev::PythonRuntime python;
         return cforgev::run_toolchain(argc, argv, workspace.path());
     }} catch (const std::exception& error) {{
-        std::cerr << "[C-Forgev Bootstrap Exception] " << error.what() << '\\n';
+        std::cerr << "[C-Forge Bootstrap Exception] " << error.what() << '\\n';
         return 1;
     }} catch (...) {{
-        std::cerr << "[C-Forgev Bootstrap Exception] error desconocido\\n";
+        std::cerr << "[C-Forge Bootstrap Exception] error desconocido\\n";
         return 1;
     }}
 }}
@@ -252,7 +252,7 @@ int main(int argc, char** argv) {{
 def main() -> None:
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(generate(), encoding="utf-8")
-    print(f"Amalgama C-Forgev creada: {OUTPUT}")
+    print(f"Amalgama C-Forge creada: {OUTPUT}")
 
 
 if __name__ == "__main__":
