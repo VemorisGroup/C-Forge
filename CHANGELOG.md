@@ -1,5 +1,12 @@
 # Historial de C-Forge
 
+## En desarrollo
+
+- Gestor seguro de dependencias del sistema con consentimiento explícito.
+- Alias `.cfv-gui` para componentes gráficos utilizados desde C-Forge.
+- Captura de `stdout`/`stderr` y salida limpia del C-Forge Package Manager.
+- Calculadora gráfica de macOS distribuida como aplicación `.app`.
+
 ## 1.4.0-definitive — 2026-07-20
 
 - La marca pública cambia de C-Forgev a **C-Forge**.

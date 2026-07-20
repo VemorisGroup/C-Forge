@@ -1,0 +1,13 @@
+#!/bin/zsh
+
+set -u
+
+resource_dir="$(cd "$(dirname "$0")/../Resources" && pwd)"
+cforge_bin="$(command -v cforge 2>/dev/null || true)"
+
+if [[ -z "$cforge_bin" ]]; then
+  /usr/bin/osascript -e 'display alert "C-Forge no está instalado" message "Instálalo con Homebrew antes de abrir la calculadora." as critical'
+  exit 1
+fi
+
+exec "$cforge_bin" "$resource_dir/calculadora.cfv"

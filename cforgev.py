@@ -67,6 +67,105 @@ class Token:
     line: int
 
 
+@dataclass(frozen=True)
+class SystemDependency:
+    public_name: str
+    detected_modules: tuple[str, ...]
+    command: tuple[str, ...]
+
+
+def _gui_dependency() -> SystemDependency | None:
+    """Devuelve una receta fija y auditable para la interfaz gráfica."""
+    if sys.platform == "darwin":
+        version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        return SystemDependency(
+            ".cfv-gui", ("tkinter", "_tkinter"),
+            ("brew", "install", f"python-tk@{version}"),
+        )
+    if sys.platform.startswith("linux"):
+        prefix = () if hasattr(os, "geteuid") and os.geteuid() == 0 else ("sudo",)
+        return SystemDependency(
+            ".cfv-gui", ("tkinter", "_tkinter"),
+            prefix + ("apt-get", "install", "-y", "python3-tk"),
+        )
+    return None
+
+
+def dependency_for_error(error: BaseException) -> SystemDependency | None:
+    """Mapea errores conocidos sin interpretar comandos provenientes del script."""
+    missing = getattr(error, "name", None)
+    message = str(error).lower()
+    dependency = _gui_dependency()
+    if dependency and (
+        missing in dependency.detected_modules
+        or any(module.lower() in message for module in dependency.detected_modules)
+    ):
+        return dependency
+    return None
+
+
+_INTERNAL_INSTALL_RE = re.compile(
+    r"(?im)^.*(?:brew\s+install|pip\s+install|npm\s+install|apt(?:-get)?\s+install).*$"
+)
+
+
+def branded_process_output(output: str) -> str:
+    """Elimina ruido de gestores externos sin ocultar errores no relacionados."""
+    cleaned = _INTERNAL_INSTALL_RE.sub(
+        "[C-Forge Package Manager] Configurando dependencias del núcleo para entorno .cfv...",
+        output,
+    )
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    return "\n".join(lines[-8:])
+
+
+def ensure_system_dependency(
+    dependency: SystemDependency,
+    input_fn=input,
+    runner=subprocess.run,
+) -> bool:
+    """Solicita consentimiento y ejecuta solo recetas internas predefinidas."""
+    print(f"[C-Forge] Para usar esta función, se requiere el módulo del sistema {dependency.public_name}.")
+    print("Componente del sistema que se instalará:")
+    print("  " + " ".join(dependency.command))
+    if not sys.stdin.isatty() and os.environ.get("CFORGE_ASSUME_YES") != "1":
+        print("[C-Forge] Instalación cancelada: se requiere una terminal interactiva.")
+        return False
+    answer = "S" if os.environ.get("CFORGE_ASSUME_YES") == "1" else input_fn(
+        "¿Deseas instalarlo automáticamente ahora? (S/N): "
+    )
+    if answer.strip().lower() not in {"s", "si", "sí", "y", "yes"}:
+        print("[C-Forge] Instalación cancelada por el usuario.")
+        return False
+    if not shutil.which(dependency.command[0]):
+        print(
+            f"[C-Forge Package Manager] No está disponible "
+            f"'{dependency.command[0]}' en este sistema."
+        )
+        return False
+    print("[C-Forge Package Manager] Configurando dependencias del núcleo para entorno .cfv...")
+    try:
+        completed = runner(
+            list(dependency.command),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as install_error:
+        print(f"[C-Forge Package Manager] No se pudo iniciar la instalación: {install_error}")
+        return False
+    if completed.returncode == 0:
+        importlib.invalidate_caches()
+        print("[C-Forge Package Manager] Progreso: [████████████████████] 100%")
+        print(f"[C-Forge Package Manager] {dependency.public_name} quedó disponible.")
+        return True
+    details = branded_process_output((completed.stdout or "") + "\n" + (completed.stderr or ""))
+    print(f"[C-Forge Package Manager] La instalación terminó con código {completed.returncode}.")
+    if details:
+        print(details)
+    return False
+
+
 TOKEN_RE = re.compile(
     r"(?P<SPACE>[ \t\r]+)|(?P<COMMENT>//[^\n]*)|(?P<NEWLINE>\n)|"
     r'(?P<STRING>"(?:\\.|[^"\\])*")|(?P<NUMBER>\d+(?:\.\d+)?)|'
@@ -396,11 +495,24 @@ class Interpreter:
         validate_foreign_memory(language, body.value, body.line)
         if language == "python":
             namespace = {"__name__": "__cforgev_extern__", **self.variables}
+            code = textwrap.dedent(body.value).strip("\n") + "\n"
             try:
-                code = textwrap.dedent(body.value).strip("\n") + "\n"
                 exec(compile(code, "<extern python>", "exec"), namespace, namespace)
             except Exception as error:
-                raise CForgevError(f"Línea {body.line}: extern Python falló: {error}") from error
+                dependency = dependency_for_error(error)
+                if not dependency or not ensure_system_dependency(dependency):
+                    if dependency:
+                        raise CForgevError(
+                            f"Línea {body.line}: falta el módulo C-Forge {dependency.public_name}"
+                        ) from error
+                    raise CForgevError(f"Línea {body.line}: extern Python falló: {error}") from error
+                try:
+                    exec(compile(code, "<extern python>", "exec"), namespace, namespace)
+                except Exception as retry_error:
+                    raise CForgevError(
+                        f"Línea {body.line}: {dependency.public_name} fue instalado, "
+                        "pero el proceso actual debe reiniciarse"
+                    ) from retry_error
             for key, value in namespace.items():
                 if not key.startswith("__") and is_universal_data(value):
                     self.variables[key] = value

@@ -45,11 +45,14 @@ def generate() -> str:
 
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <regex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -161,6 +164,69 @@ int run_toolchain(int argc, char** argv, const std::filesystem::path& root) {{
     long status = PyLong_AsLong(result.get());
     if (PyErr_Occurred()) {{ PyErr_Print(); return 1; }}
     return static_cast<int>(status);
+}}
+
+struct ProcessResult final {{
+    int status = -1;
+    std::string output;
+}};
+
+ProcessResult run_process_captured(const std::string& trusted_command) {{
+    // Esta función solo recibe comandos construidos por recetas internas.
+    const std::string redirected = trusted_command + " 2>&1";
+#ifdef _WIN32
+    FILE* pipe = _popen(redirected.c_str(), "r");
+#else
+    FILE* pipe = popen(redirected.c_str(), "r");
+#endif
+    if (!pipe) throw std::runtime_error("no se pudo iniciar el gestor de dependencias");
+    std::string output;
+    char chunk[4096];
+    while (std::fgets(chunk, sizeof(chunk), pipe)) output += chunk;
+#ifdef _WIN32
+    const int status = _pclose(pipe);
+#else
+    const int status = pclose(pipe);
+#endif
+    return {{status, std::move(output)}};
+}}
+
+std::string branded_process_output(std::string output) {{
+    static const std::regex internal_install(
+        R"((^|\n)[^\n]*(brew\s+install|pip\s+install|npm\s+install|apt(-get)?\s+install)[^\n]*)",
+        std::regex::icase);
+    return std::regex_replace(
+        output,
+        internal_install,
+        "$1[C-Forge Package Manager] Configurando dependencias del núcleo para entorno .cfv...");
+}}
+
+bool confirm_and_install_dependency(
+    const std::string& public_name,
+    const std::string& trusted_command
+) {{
+    std::cout << "[C-Forge] Para usar esta función, se requiere el módulo del sistema "
+              << public_name << ".\\n"
+              << "Componente del sistema que se instalará:\\n  " << trusted_command << "\\n"
+              << "¿Deseas instalarlo automáticamente ahora? (S/N): " << std::flush;
+    std::string answer;
+    if (!std::getline(std::cin, answer)) return false;
+    if (answer != "S" && answer != "s" && answer != "SI" && answer != "si") {{
+        std::cout << "[C-Forge] Instalación cancelada por el usuario.\\n";
+        return false;
+    }}
+    std::cout << "[C-Forge Package Manager] Configurando dependencias del núcleo "
+                 "para entorno .cfv...\\n";
+    const auto result = run_process_captured(trusted_command);
+    if (result.status == 0) {{
+        std::cout << "[C-Forge Package Manager] Progreso: [████████████████████] 100%\\n";
+        std::cout << "[C-Forge Package Manager] " << public_name << " quedó disponible.\\n";
+        return true;
+    }}
+    std::cerr << "[C-Forge Package Manager] La instalación no pudo completarse.\\n";
+    const auto details = branded_process_output(result.output);
+    if (!details.empty()) std::cerr << details << '\\n';
+    return false;
 }}
 
 bool command_available(const std::string& command) {{

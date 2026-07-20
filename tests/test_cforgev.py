@@ -6,12 +6,14 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 from unittest.mock import patch
 from pathlib import Path
 
 from cforgev import (
-    CForgevError, Interpreter, execute, execute_watch, format_source, repair_source,
+    CForgevError, Interpreter, SystemDependency, branded_process_output,
+    ensure_system_dependency, execute, execute_watch, format_source, repair_source,
     run_repl, run_test_file, tokenize,
 )
 from compilador_nativo import Parser, compile_native
@@ -32,6 +34,26 @@ class InterpreterTests(unittest.TestCase):
     def test_division_by_zero_is_explained(self) -> None:
         with self.assertRaisesRegex(CForgevError, "dividir por cero"):
             self.output("mostrar(10 / 0);")
+
+    def test_dependency_manager_requires_consent_and_captures_output(self) -> None:
+        dependency = SystemDependency(".cfv-gui", ("tkinter",), ("brew", "install", "python-tk"))
+        calls = []
+
+        def runner(command, **options):
+            calls.append((command, options))
+            return types.SimpleNamespace(returncode=0, stdout="ruido", stderr="")
+
+        with patch("sys.stdin.isatty", return_value=True), patch("shutil.which", return_value="/opt/homebrew/bin/brew"):
+            self.assertTrue(ensure_system_dependency(dependency, input_fn=lambda _: "S", runner=runner))
+        self.assertEqual(calls[0][0], ["brew", "install", "python-tk"])
+        self.assertTrue(calls[0][1]["capture_output"])
+
+    def test_dependency_manager_brand_filter(self) -> None:
+        output = "brew install python-tk@3.13\nError real: sin espacio\n"
+        branded = branded_process_output(output)
+        self.assertNotIn("brew install", branded)
+        self.assertIn("C-Forge Package Manager", branded)
+        self.assertIn("sin espacio", branded)
 
     def test_if_else_and_comparisons(self) -> None:
         source = """

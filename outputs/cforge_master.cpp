@@ -5,11 +5,14 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <regex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -137,6 +140,105 @@ class Token:
     kind: str
     value: str
     line: int
+
+
+@dataclass(frozen=True)
+class SystemDependency:
+    public_name: str
+    detected_modules: tuple[str, ...]
+    command: tuple[str, ...]
+
+
+def _gui_dependency() -> SystemDependency | None:
+    """Devuelve una receta fija y auditable para la interfaz gráfica."""
+    if sys.platform == "darwin":
+        version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        return SystemDependency(
+            ".cfv-gui", ("tkinter", "_tkinter"),
+            ("brew", "install", f"python-tk@{version}"),
+        )
+    if sys.platform.startswith("linux"):
+        prefix = () if hasattr(os, "geteuid") and os.geteuid() == 0 else ("sudo",)
+        return SystemDependency(
+            ".cfv-gui", ("tkinter", "_tkinter"),
+            prefix + ("apt-get", "install", "-y", "python3-tk"),
+        )
+    return None
+
+
+def dependency_for_error(error: BaseException) -> SystemDependency | None:
+    """Mapea errores conocidos sin interpretar comandos provenientes del script."""
+    missing = getattr(error, "name", None)
+    message = str(error).lower()
+    dependency = _gui_dependency()
+    if dependency and (
+        missing in dependency.detected_modules
+        or any(module.lower() in message for module in dependency.detected_modules)
+    ):
+        return dependency
+    return None
+
+
+_INTERNAL_INSTALL_RE = re.compile(
+    r"(?im)^.*(?:brew\s+install|pip\s+install|npm\s+install|apt(?:-get)?\s+install).*$"
+)
+
+
+def branded_process_output(output: str) -> str:
+    """Elimina ruido de gestores externos sin ocultar errores no relacionados."""
+    cleaned = _INTERNAL_INSTALL_RE.sub(
+        "[C-Forge Package Manager] Configurando dependencias del núcleo para entorno .cfv...",
+        output,
+    )
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    return "\n".join(lines[-8:])
+
+
+def ensure_system_dependency(
+    dependency: SystemDependency,
+    input_fn=input,
+    runner=subprocess.run,
+) -> bool:
+    """Solicita consentimiento y ejecuta solo recetas internas predefinidas."""
+    print(f"[C-Forge] Para usar esta función, se requiere el módulo del sistema {dependency.public_name}.")
+    print("Componente del sistema que se instalará:")
+    print("  " + " ".join(dependency.command))
+    if not sys.stdin.isatty() and os.environ.get("CFORGE_ASSUME_YES") != "1":
+        print("[C-Forge] Instalación cancelada: se requiere una terminal interactiva.")
+        return False
+    answer = "S" if os.environ.get("CFORGE_ASSUME_YES") == "1" else input_fn(
+        "¿Deseas instalarlo automáticamente ahora? (S/N): "
+    )
+    if answer.strip().lower() not in {"s", "si", "sí", "y", "yes"}:
+        print("[C-Forge] Instalación cancelada por el usuario.")
+        return False
+    if not shutil.which(dependency.command[0]):
+        print(
+            f"[C-Forge Package Manager] No está disponible "
+            f"'{dependency.command[0]}' en este sistema."
+        )
+        return False
+    print("[C-Forge Package Manager] Configurando dependencias del núcleo para entorno .cfv...")
+    try:
+        completed = runner(
+            list(dependency.command),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as install_error:
+        print(f"[C-Forge Package Manager] No se pudo iniciar la instalación: {install_error}")
+        return False
+    if completed.returncode == 0:
+        importlib.invalidate_caches()
+        print("[C-Forge Package Manager] Progreso: [████████████████████] 100%")
+        print(f"[C-Forge Package Manager] {dependency.public_name} quedó disponible.")
+        return True
+    details = branded_process_output((completed.stdout or "") + "\n" + (completed.stderr or ""))
+    print(f"[C-Forge Package Manager] La instalación terminó con código {completed.returncode}.")
+    if details:
+        print(details)
+    return False
 
 
 TOKEN_RE = re.compile(
@@ -468,11 +570,24 @@ class Interpreter:
         validate_foreign_memory(language, body.value, body.line)
         if language == "python":
             namespace = {"__name__": "__cforgev_extern__", **self.variables}
+            code = textwrap.dedent(body.value).strip("\n") + "\n"
             try:
-                code = textwrap.dedent(body.value).strip("\n") + "\n"
                 exec(compile(code, "<extern python>", "exec"), namespace, namespace)
             except Exception as error:
-                raise CForgevError(f"Línea {body.line}: extern Python falló: {error}") from error
+                dependency = dependency_for_error(error)
+                if not dependency or not ensure_system_dependency(dependency):
+                    if dependency:
+                        raise CForgevError(
+                            f"Línea {body.line}: falta el módulo C-Forge {dependency.public_name}"
+                        ) from error
+                    raise CForgevError(f"Línea {body.line}: extern Python falló: {error}") from error
+                try:
+                    exec(compile(code, "<extern python>", "exec"), namespace, namespace)
+                except Exception as retry_error:
+                    raise CForgevError(
+                        f"Línea {body.line}: {dependency.public_name} fue instalado, "
+                        "pero el proceso actual debe reiniciarse"
+                    ) from retry_error
             for key, value in namespace.items():
                 if not key.startswith("__") and is_universal_data(value):
                     self.variables[key] = value
@@ -3180,7 +3295,7 @@ int main(int argc, char** argv) {
   "name": "cforgev-language",
   "displayName": "C-Forge Language Support",
   "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "publisher": "vemoris-group",
   "author": { "name": "Vemoris Group" },
   "license": "SEE LICENSE IN LICENSE",
@@ -3201,7 +3316,11 @@ int main(int argc, char** argv) {
       "id": "cforgev",
       "aliases": ["C-Forge", "cforgev"],
       "extensions": [".cfv"],
-      "configuration": "./language-configuration.json"
+      "configuration": "./language-configuration.json",
+      "icon": {
+        "light": "./images/icon.png",
+        "dark": "./images/icon.png"
+      }
     }],
     "grammars": [{
       "language": "cforgev",
@@ -3307,6 +3426,72 @@ int run_toolchain(int argc, char** argv, const std::filesystem::path& root) {
     long status = PyLong_AsLong(result.get());
     if (PyErr_Occurred()) { PyErr_Print(); return 1; }
     return static_cast<int>(status);
+}
+
+struct ProcessResult final {
+    int status = -1;
+    std::string output;
+};
+
+ProcessResult run_process_captured(const std::string& trusted_command) {
+    // Esta función solo recibe comandos construidos por recetas internas.
+    const std::string redirected = trusted_command + " 2>&1";
+#ifdef _WIN32
+    FILE* pipe = _popen(redirected.c_str(), "r");
+#else
+    FILE* pipe = popen(redirected.c_str(), "r");
+#endif
+    if (!pipe) throw std::runtime_error("no se pudo iniciar el gestor de dependencias");
+    std::string output;
+    char chunk[4096];
+    while (std::fgets(chunk, sizeof(chunk), pipe)) output += chunk;
+#ifdef _WIN32
+    const int status = _pclose(pipe);
+#else
+    const int status = pclose(pipe);
+#endif
+    return {status, std::move(output)};
+}
+
+std::string branded_process_output(std::string output) {
+    static const std::regex internal_install(
+        R"((^|
+)[^
+]*(brew\s+install|pip\s+install|npm\s+install|apt(-get)?\s+install)[^
+]*)",
+        std::regex::icase);
+    return std::regex_replace(
+        output,
+        internal_install,
+        "$1[C-Forge Package Manager] Configurando dependencias del núcleo para entorno .cfv...");
+}
+
+bool confirm_and_install_dependency(
+    const std::string& public_name,
+    const std::string& trusted_command
+) {
+    std::cout << "[C-Forge] Para usar esta función, se requiere el módulo del sistema "
+              << public_name << ".\n"
+              << "Componente del sistema que se instalará:\n  " << trusted_command << "\n"
+              << "¿Deseas instalarlo automáticamente ahora? (S/N): " << std::flush;
+    std::string answer;
+    if (!std::getline(std::cin, answer)) return false;
+    if (answer != "S" && answer != "s" && answer != "SI" && answer != "si") {
+        std::cout << "[C-Forge] Instalación cancelada por el usuario.\n";
+        return false;
+    }
+    std::cout << "[C-Forge Package Manager] Configurando dependencias del núcleo "
+                 "para entorno .cfv...\n";
+    const auto result = run_process_captured(trusted_command);
+    if (result.status == 0) {
+        std::cout << "[C-Forge Package Manager] Progreso: [████████████████████] 100%\n";
+        std::cout << "[C-Forge Package Manager] " << public_name << " quedó disponible.\n";
+        return true;
+    }
+    std::cerr << "[C-Forge Package Manager] La instalación no pudo completarse.\n";
+    const auto details = branded_process_output(result.output);
+    if (!details.empty()) std::cerr << details << '\n';
+    return false;
 }
 
 bool command_available(const std::string& command) {

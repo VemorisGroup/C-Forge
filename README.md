@@ -15,6 +15,11 @@ C-Forge combina una sintaxis legible, tipado gradual, compilación nativa y un
 sistema de valores común llamado `ForgeValue`. El proyecto permite ejecutar un
 programa durante el desarrollo o traducirlo a un ejecutable C++ nativo.
 
+Cuando una función necesita un componente conocido del sistema, la VM lo
+presenta mediante un alias propio, como `.cfv-gui`, solicita autorización y
+captura la salida del instalador. C-Forge muestra el paquete real antes de
+ejecutarlo y nunca instala dependencias sin consentimiento explícito.
+
 > **Migración de marca:** C-Forge fue publicado inicialmente como C-Forgev.
 > El comando `cforge`, la extensión `.cfv` y los identificadores técnicos
 > `cforgev` se conservan para no romper instalaciones ni proyectos existentes.
