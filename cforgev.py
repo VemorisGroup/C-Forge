@@ -186,7 +186,7 @@ def ensure_system_dependency(
 TOKEN_RE = re.compile(
     r"(?P<SPACE>[ \t\r]+)|(?P<COMMENT>//[^\n]*)|(?P<NEWLINE>\n)|"
     r'(?P<STRING>"(?:\\.|[^"\\])*")|(?P<NUMBER>\d+(?:\.\d+)?)|'
-    r"(?P<IDENT>[A-Za-z_][A-Za-z0-9_]*)|(?P<OP>==|!=|>=|<=|[+\-*/=(),;.:{}<>\[\]])|(?P<BAD>.)"
+    r"(?P<IDENT>[A-Za-z_][A-Za-z0-9_]*)|(?P<OP><<|==|!=|>=|<=|[+\-*/=(),;.:{}<>\[\]])|(?P<BAD>.)"
 )
 
 
@@ -363,6 +363,26 @@ class Interpreter:
             self.consume_value("(", "Se esperaba '('")
             value = self.expression()
             self.consume_value(")", "Se esperaba ')'")
+            self.optional_semicolon()
+            print(format_value(value))
+            return
+        if self._match_dotted_print(("console", "log")) or self._match_dotted_print(
+            ("System", "out", "println")
+        ):
+            value = self.expression()
+            self.consume_value(")", "Se esperaba ')' después del texto")
+            self.optional_semicolon()
+            print(format_value(value))
+            return
+        if self._match_cout():
+            value = self.expression()
+            if self.match_value("<<"):
+                if self.match_ident("std"):
+                    self.consume_value(":", "Se esperaba std::endl")
+                    self.consume_value(":", "Se esperaba std::endl")
+                endl = self.consume("IDENT", "Solo se admite endl después de la salida")
+                if endl.value != "endl":
+                    raise CForgevError(f"Línea {endl.line}: solo se admite endl")
             self.optional_semicolon()
             print(format_value(value))
             return
@@ -854,6 +874,9 @@ class Interpreter:
             if self.match_value("("):
                 value = self.call_method(value, field)
                 continue
+            if field.value == "length" and isinstance(value, (str, list, dict)):
+                value = len(value)
+                continue
             if not isinstance(value, dict) or field.value not in value:
                 raise CForgevError(f"Línea {field.line}: campo desconocido '{field.value}'")
             value = value[field.value]
@@ -867,6 +890,19 @@ class Interpreter:
                 if not self.match_value(","):
                     break
         self.consume_value(")", "Se esperaba ')' después de los argumentos")
+        if name.value in {"append", "push"}:
+            if not isinstance(instance, list) or len(arguments) != 1:
+                raise CForgevError(
+                    f"Línea {name.line}: {name.value} requiere una lista y un elemento"
+                )
+            instance.append(arguments[0])
+            return None
+        if name.value in {"length", "len"}:
+            if arguments or not isinstance(instance, (str, list, dict)):
+                raise CForgevError(
+                    f"Línea {name.line}: {name.value} requiere texto, lista o mapa"
+                )
+            return len(instance)
         if isinstance(instance, UniversalModule):
             if instance.ecosystem == "pip":
                 try:
@@ -915,6 +951,37 @@ class Interpreter:
         except ReturnSignal as signal:
             return signal.value
         return None
+
+    def _match_dotted_print(self, names: tuple[str, ...]) -> bool:
+        needed = len(names) * 2
+        if self.current + needed > len(self.tokens):
+            return False
+        cursor = self.current
+        for index, name in enumerate(names):
+            if self.tokens[cursor].kind != "IDENT" or self.tokens[cursor].value != name:
+                return False
+            cursor += 1
+            if index + 1 < len(names):
+                if self.tokens[cursor].value != ".":
+                    return False
+                cursor += 1
+        if self.tokens[cursor].value != "(":
+            return False
+        self.current = cursor + 1
+        return True
+
+    def _match_cout(self) -> bool:
+        cursor = self.current
+        if self.tokens[cursor].kind == "IDENT" and self.tokens[cursor].value == "std":
+            if self.tokens[cursor + 1].value != ":" or self.tokens[cursor + 2].value != ":":
+                return False
+            cursor += 3
+        if self.tokens[cursor].kind != "IDENT" or self.tokens[cursor].value != "cout":
+            return False
+        if self.tokens[cursor + 1].value != "<<":
+            return False
+        self.current = cursor + 2
+        return True
 
     def atom(self) -> object:
         if self.match("NUMBER"):

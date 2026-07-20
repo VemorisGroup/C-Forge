@@ -261,7 +261,7 @@ def ensure_system_dependency(
 TOKEN_RE = re.compile(
     r"(?P<SPACE>[ \t\r]+)|(?P<COMMENT>//[^\n]*)|(?P<NEWLINE>\n)|"
     r'(?P<STRING>"(?:\\.|[^"\\])*")|(?P<NUMBER>\d+(?:\.\d+)?)|'
-    r"(?P<IDENT>[A-Za-z_][A-Za-z0-9_]*)|(?P<OP>==|!=|>=|<=|[+\-*/=(),;.:{}<>\[\]])|(?P<BAD>.)"
+    r"(?P<IDENT>[A-Za-z_][A-Za-z0-9_]*)|(?P<OP><<|==|!=|>=|<=|[+\-*/=(),;.:{}<>\[\]])|(?P<BAD>.)"
 )
 
 
@@ -438,6 +438,26 @@ class Interpreter:
             self.consume_value("(", "Se esperaba '('")
             value = self.expression()
             self.consume_value(")", "Se esperaba ')'")
+            self.optional_semicolon()
+            print(format_value(value))
+            return
+        if self._match_dotted_print(("console", "log")) or self._match_dotted_print(
+            ("System", "out", "println")
+        ):
+            value = self.expression()
+            self.consume_value(")", "Se esperaba ')' después del texto")
+            self.optional_semicolon()
+            print(format_value(value))
+            return
+        if self._match_cout():
+            value = self.expression()
+            if self.match_value("<<"):
+                if self.match_ident("std"):
+                    self.consume_value(":", "Se esperaba std::endl")
+                    self.consume_value(":", "Se esperaba std::endl")
+                endl = self.consume("IDENT", "Solo se admite endl después de la salida")
+                if endl.value != "endl":
+                    raise CForgevError(f"Línea {endl.line}: solo se admite endl")
             self.optional_semicolon()
             print(format_value(value))
             return
@@ -929,6 +949,9 @@ class Interpreter:
             if self.match_value("("):
                 value = self.call_method(value, field)
                 continue
+            if field.value == "length" and isinstance(value, (str, list, dict)):
+                value = len(value)
+                continue
             if not isinstance(value, dict) or field.value not in value:
                 raise CForgevError(f"Línea {field.line}: campo desconocido '{field.value}'")
             value = value[field.value]
@@ -942,6 +965,19 @@ class Interpreter:
                 if not self.match_value(","):
                     break
         self.consume_value(")", "Se esperaba ')' después de los argumentos")
+        if name.value in {"append", "push"}:
+            if not isinstance(instance, list) or len(arguments) != 1:
+                raise CForgevError(
+                    f"Línea {name.line}: {name.value} requiere una lista y un elemento"
+                )
+            instance.append(arguments[0])
+            return None
+        if name.value in {"length", "len"}:
+            if arguments or not isinstance(instance, (str, list, dict)):
+                raise CForgevError(
+                    f"Línea {name.line}: {name.value} requiere texto, lista o mapa"
+                )
+            return len(instance)
         if isinstance(instance, UniversalModule):
             if instance.ecosystem == "pip":
                 try:
@@ -990,6 +1026,37 @@ class Interpreter:
         except ReturnSignal as signal:
             return signal.value
         return None
+
+    def _match_dotted_print(self, names: tuple[str, ...]) -> bool:
+        needed = len(names) * 2
+        if self.current + needed > len(self.tokens):
+            return False
+        cursor = self.current
+        for index, name in enumerate(names):
+            if self.tokens[cursor].kind != "IDENT" or self.tokens[cursor].value != name:
+                return False
+            cursor += 1
+            if index + 1 < len(names):
+                if self.tokens[cursor].value != ".":
+                    return False
+                cursor += 1
+        if self.tokens[cursor].value != "(":
+            return False
+        self.current = cursor + 1
+        return True
+
+    def _match_cout(self) -> bool:
+        cursor = self.current
+        if self.tokens[cursor].kind == "IDENT" and self.tokens[cursor].value == "std":
+            if self.tokens[cursor + 1].value != ":" or self.tokens[cursor + 2].value != ":":
+                return False
+            cursor += 3
+        if self.tokens[cursor].kind != "IDENT" or self.tokens[cursor].value != "cout":
+            return False
+        if self.tokens[cursor + 1].value != "<<":
+            return False
+        self.current = cursor + 2
+        return True
 
     def atom(self) -> object:
         if self.match("NUMBER"):
@@ -2234,6 +2301,23 @@ class Parser:
             self.value(")", "Se esperaba ')'")
             self.take(";")
             return ("print", expression)
+        if self.dotted_print(("console", "log")) or self.dotted_print(
+            ("System", "out", "println")
+        ):
+            expression = self.expression()
+            self.value(")", "Se esperaba ')' después del texto")
+            self.take(";")
+            return ("print", expression)
+        if self.cout_print():
+            expression = self.expression()
+            if self.take("<<"):
+                if self.word("std"):
+                    self.value(":", "Se esperaba std::endl")
+                    self.value(":", "Se esperaba std::endl")
+                if self.ident("Solo se admite endl después de la salida") != "endl":
+                    raise CForgevError("Solo se admite endl después de la salida")
+            self.take(";")
+            return ("print", expression)
         if self.word("si"):
             condition = self.parenthesized()
             yes = self.block()
@@ -2286,6 +2370,34 @@ class Parser:
         result = self.expression()
         self.value(")", "Se esperaba ')'")
         return result
+
+    def dotted_print(self, names: tuple[str, ...]) -> bool:
+        cursor = self.current
+        for index, name in enumerate(names):
+            if cursor >= len(self.tokens) or self.tokens[cursor].kind != "IDENT" or self.tokens[cursor].value != name:
+                return False
+            cursor += 1
+            if index + 1 < len(names):
+                if cursor >= len(self.tokens) or self.tokens[cursor].value != ".":
+                    return False
+                cursor += 1
+        if cursor >= len(self.tokens) or self.tokens[cursor].value != "(":
+            return False
+        self.current = cursor + 1
+        return True
+
+    def cout_print(self) -> bool:
+        cursor = self.current
+        if self.tokens[cursor].kind == "IDENT" and self.tokens[cursor].value == "std":
+            if self.tokens[cursor + 1].value != ":" or self.tokens[cursor + 2].value != ":":
+                return False
+            cursor += 3
+        if self.tokens[cursor].kind != "IDENT" or self.tokens[cursor].value != "cout":
+            return False
+        if self.tokens[cursor + 1].value != "<<":
+            return False
+        self.current = cursor + 2
+        return True
 
     def expression(self) -> Expr:
         return self.logical_or()
@@ -2586,6 +2698,8 @@ static Value cfv_arena_stage(Value value,const std::string&connector){auto&runti
 static Value cfv_arena_estado(){auto&runtime=cfv_arena_runtime();auto out=std::make_shared<std::map<std::string,Value>>();(*out)["ruta"]=runtime.path.string();(*out)["capacidad"]=(double)runtime.arena->capacity();(*out)["usado"]=(double)runtime.arena->used();(*out)["registros_vivos"]=(double)runtime.arena->live_records();auto offsets=std::make_shared<std::map<std::string,Value>>();{std::lock_guard<std::mutex>guard(runtime.mutex);for(const auto&[name,offset]:runtime.latest)(*offsets)[name]=(double)offset;}(*out)["offsets"]=offsets;return out;}
 static Value cfv_catalogo(){auto out=std::make_shared<std::map<std::string,Value>>();(*out)["ia_"]=std::string("python");(*out)["ui_"]=std::string("java");(*out)["web_"]=std::string("javascript");return out;}
 static Value cfv_catalog_dispatch(const std::string&,const std::string&,const Value&);
+static Value cfv_compat_append(Value collection,Value item){auto list=std::get_if<Lista>(&collection.data);if(!list)throw std::runtime_error("append/push requiere una lista");(*list)->push_back(std::move(item));cfv_arena_stage(collection,"compat_collection");return Value{};}
+static Value cfv_compat_length(Value collection){cfv_arena_stage(collection,"compat_length");if(auto p=std::get_if<std::string>(&collection.data))return (double)p->size();if(auto p=std::get_if<Lista>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<Mapa>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<FastArray>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<DenseMatrix>(&collection.data))return (double)(*p)->rows;throw std::runtime_error("length/len requiere texto o colección");}
 static void mostrar(const Value&v){std::cout<<texto(v)<<'\n';}
 static Value cfv_leer(Value mensaje=Value{std::string("")}){if(mensaje.index()!=2)throw std::runtime_error("el mensaje de leer debe ser texto");std::cout<<std::get<std::string>(mensaje.data);std::string s;std::getline(std::cin,s);return s;}
 static Value cfv_a_numero(const Value&v){try{if(auto p=std::get_if<double>(&v.data))return *p;if(auto p=std::get_if<std::string>(&v.data))return std::stod(*p);}catch(...){ }throw std::runtime_error("no se puede convertir a número");}
@@ -2954,9 +3068,20 @@ class Generator:
                 pairs.append("{" + key[1] + ", " + self.expr(value) + "}")
             return "crear_mapa({" + ", ".join(pairs) + "})"
         if kind == "index": return f"indice({self.expr(expression[1])}, {self.expr(expression[2])})"
-        if kind == "field": return f'indice({self.expr(expression[1])}, Value{{std::string("{expression[2]}")}})'
+        if kind == "field":
+            if expression[2] == "length":
+                return f"cfv_compat_length({self.expr(expression[1])})"
+            return f'indice({self.expr(expression[1])}, Value{{std::string("{expression[2]}")}})'
         if kind == "method_call":
             receiver = expression[1]
+            if expression[2] in {"append", "push"}:
+                if len(expression[3]) != 1:
+                    raise CForgevError(f"{expression[2]} requiere exactamente un elemento")
+                return f"cfv_compat_append({self.expr(receiver)}, {self.expr(expression[3][0])})"
+            if expression[2] in {"length", "len"}:
+                if expression[3]:
+                    raise CForgevError(f"{expression[2]} no recibe argumentos")
+                return f"cfv_compat_length({self.expr(receiver)})"
             if receiver[0] == "variable" and receiver[1] in self.universal_imports:
                 ecosystem, package = self.universal_imports[receiver[1]]
                 args = "crear_lista({" + ", ".join(self.expr(arg) for arg in expression[3]) + "})"

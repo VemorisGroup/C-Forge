@@ -34,6 +34,10 @@ El punto y coma es opcional al final de una instrucción.
 ```cfv
 mostrar("Hola");
 print(42);
+console.log("JavaScript");
+System.out.println("Java");
+std::cout << "C++" << std::endl;
+cout << "C++ simplificado";
 nombre = leer("Nombre: ");
 numero = a_numero("25");
 texto = a_texto(25);
@@ -89,7 +93,12 @@ mostrar(cuenta.depositar(50));
 ```cfv
 lista = [10, 20, 30];
 agregar(lista, 40);
+lista.append(50);
+lista.push(60);
 mostrar(lista[0]);
+mostrar(lista.length);
+mostrar(lista.length());
+mostrar(lista.len());
 
 mapa = {"nombre": "C-Forge", "version": 1.3};
 mostrar(mapa.nombre);

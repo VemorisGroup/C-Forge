@@ -51,6 +51,23 @@ mostrar("Hola, " + creador);
 mostrar(resultado);
 ```
 
+También puede usarse sintaxis de impresión y colecciones conocida de otros
+lenguajes; todas las variantes se normalizan internamente a `ForgeValue`:
+
+```cfv
+print("Python")
+console.log("JavaScript")
+System.out.println("Java")
+std::cout << "C++" << std::endl
+
+datos = [1, 2]
+datos.append(3)
+datos.push(4)
+print(datos.length)
+print(datos.length())
+print(datos.len())
+```
+
 ## Características
 
 - Variables inferidas y declaraciones con tipo explícito.

@@ -4,9 +4,11 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
-from cforgev import connector_engine
+from cforgev import Interpreter, connector_engine, tokenize
 from compilador_nativo import compile_native
 
 
@@ -14,6 +16,30 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class SharedArenaTests(unittest.TestCase):
+    COMPAT_SOURCE = r'''
+print("python")
+console.log("javascript")
+System.out.println("java")
+std::cout << "cpp" << std::endl
+cout << "cpp-simple"
+datos = [1, 2]
+datos.append(3)
+datos.push(4)
+print(datos.length)
+print(datos.length())
+print(datos.len())
+print("Forge".length)
+'''
+
+    def test_multilanguage_syntax_in_interpreter(self) -> None:
+        output = StringIO()
+        with redirect_stdout(output):
+            Interpreter(tokenize(self.COMPAT_SOURCE)).run()
+        self.assertEqual(
+            output.getvalue().splitlines(),
+            ["python", "javascript", "java", "cpp", "cpp-simple", "4", "4", "4", "5"],
+        )
+
     def test_declarative_catalog_is_deterministic(self) -> None:
         self.assertEqual(connector_engine("ia_procesar"), "python")
         self.assertEqual(connector_engine("ui_crear"), "java")
@@ -57,6 +83,20 @@ class SharedArenaTests(unittest.TestCase):
             run = subprocess.run([str(executable)], capture_output=True, text=True)
             self.assertEqual(run.returncode, 0, run.stderr)
             self.assertEqual(run.stdout.splitlines(), ["42", "verdadero", "python"])
+
+    @unittest.skipUnless(shutil.which("clang++"), "clang++ no está disponible")
+    def test_multilanguage_syntax_in_native_compiler(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "compat.cfv"
+            executable = Path(directory) / "compat"
+            source.write_text(self.COMPAT_SOURCE, encoding="utf-8")
+            compile_native(source, executable)
+            run = subprocess.run([str(executable)], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(
+                run.stdout.splitlines(),
+                ["python", "javascript", "java", "cpp", "cpp-simple", "4", "4", "4", "5"],
+            )
 
 
 if __name__ == "__main__":
