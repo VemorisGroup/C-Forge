@@ -39,7 +39,7 @@ cforge programa.cfv
 
 ## Estado
 
-Versión `1.3.1`, publicada como Preview. C-Forge y esta extensión continúan en
+Versión `1.3.2`, publicada como Preview. C-Forge y esta extensión continúan en
 desarrollo experimental.
 
 Copyright © 2026 Vemoris Group y Javier. Todos los derechos reservados.

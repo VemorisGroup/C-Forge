@@ -47,7 +47,7 @@ npx @vscode/vsce package
 Instalación local para revisión:
 
 ```bash
-code --install-extension cforgev-language-1.3.1.vsix
+code --install-extension cforgev-language-1.3.2.vsix
 ```
 
 Publicación después de crear el publicador y configurar la autenticación:

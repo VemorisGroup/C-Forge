@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.2
+
+- El logo oficial se registra como icono del lenguaje para archivos `.cfv`.
+- Compatible con temas de iconos que admiten iconos predeterminados por lenguaje.
+
 ## 1.3.1
 
 - Nueva identidad pública **C-Forge**.
