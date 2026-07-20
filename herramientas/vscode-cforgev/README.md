@@ -9,6 +9,9 @@ experimental de Vemoris Group.
 - Reconocimiento de `gpu`, `cluster`, `test` y bloques `extern`.
 - Coloreado de los puentes Python, C#, C++, Java, JavaScript y TypeScript.
 - Soporte para funciones nativas de sistema, archivos, TCP, matrices y arrays.
+- Coloreado de `console.log`, `System.out.println`, `std::cout` y `cout`.
+- Compatibilidad visual con `.append()`, `.push()`, `.length` y `.len()`.
+- Forge Shared Arena y conectores declarativos `ia_`, `ui_` y `web_`.
 - Comentarios de línea mediante `//`.
 - Cierre automático de llaves, corchetes, paréntesis y comillas.
 
@@ -25,6 +28,10 @@ gpu {
     resultados = paralelo("cuadrado", [2, 3, 4, 5]);
     mostrar(resultados);
 }
+
+console.log("C-Forge compatible");
+resultados.append(36);
+print(resultados.length);
 ```
 
 ## Requisitos
@@ -39,7 +46,7 @@ cforge programa.cfv
 
 ## Estado
 
-Versión `1.3.2`, publicada como Preview. C-Forge y esta extensión continúan en
+Versión `1.4.0`, publicada como Preview. C-Forge y esta extensión continúan en
 desarrollo experimental.
 
 Copyright © 2026 Vemoris Group y Javier. Todos los derechos reservados.

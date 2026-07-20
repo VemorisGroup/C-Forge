@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0
+
+- Coloreado para `console.log`, `System.out.println`, `std::cout` y `cout`.
+- Métodos compatibles `.append()`, `.push()`, `.length` y `.len()`.
+- Funciones Forge Shared Arena, catálogo declarativo y conectores `ia_`, `ui_`, `web_`.
+- Compatibilidad con la sintaxis incorporada en C-Forge 1.4.
+
 ## 1.3.2
 
 - El logo oficial se registra como icono del lenguaje para archivos `.cfv`.

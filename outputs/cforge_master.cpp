@@ -3955,38 +3955,74 @@ int main(int argc, char** argv) {
   "name": "cforgev-language",
   "displayName": "C-Forge Language Support",
   "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "publisher": "vemoris-group",
-  "author": { "name": "Vemoris Group" },
+  "author": {
+    "name": "Vemoris Group"
+  },
   "license": "SEE LICENSE IN LICENSE",
   "icon": "images/icon.png",
   "preview": true,
   "pricing": "Free",
-  "engines": { "vscode": "^1.80.0" },
-  "categories": ["Programming Languages"],
-  "keywords": ["c-forge", "cforge", "cforgev", "cfv", "programming language", "syntax highlighting", "vemoris", "compiler"],
-  "galleryBanner": { "color": "#FF6A32", "theme": "light" },
-  "repository": { "type": "git", "url": "https://github.com/VemorisGroup/C-Forge.git" },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "c-forge",
+    "cforge",
+    "cforgev",
+    "cfv",
+    "programming language",
+    "syntax highlighting",
+    "vemoris",
+    "compiler"
+  ],
+  "galleryBanner": {
+    "color": "#FF6A32",
+    "theme": "light"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/VemorisGroup/C-Forge.git"
+  },
   "homepage": "https://github.com/VemorisGroup/C-Forge#readme",
-  "bugs": { "url": "https://github.com/VemorisGroup/C-Forge/issues" },
-  "scripts": { "package": "vsce package" },
-  "devDependencies": { "@vscode/vsce": "^3.6.2" },
+  "bugs": {
+    "url": "https://github.com/VemorisGroup/C-Forge/issues"
+  },
+  "scripts": {
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.6.2"
+  },
   "contributes": {
-    "languages": [{
-      "id": "cforgev",
-      "aliases": ["C-Forge", "cforgev"],
-      "extensions": [".cfv"],
-      "configuration": "./language-configuration.json",
-      "icon": {
-        "light": "./images/icon.png",
-        "dark": "./images/icon.png"
+    "languages": [
+      {
+        "id": "cforgev",
+        "aliases": [
+          "C-Forge",
+          "cforgev"
+        ],
+        "extensions": [
+          ".cfv"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./images/icon.png",
+          "dark": "./images/icon.png"
+        }
       }
-    }],
-    "grammars": [{
-      "language": "cforgev",
-      "scopeName": "source.cforgev",
-      "path": "./syntaxes/cforgev.tmLanguage.json"
-    }]
+    ],
+    "grammars": [
+      {
+        "language": "cforgev",
+        "scopeName": "source.cforgev",
+        "path": "./syntaxes/cforgev.tmLanguage.json"
+      }
+    ]
   }
 }
 )CFV15DATA"},
@@ -4015,6 +4051,7 @@ int main(int argc, char** argv) {
     { "include": "#numbers" },
     { "include": "#types" },
     { "include": "#keywords" },
+    { "include": "#compatibility" },
     { "include": "#functions" }
   ],
   "repository": {
@@ -4032,7 +4069,16 @@ int main(int argc, char** argv) {
       { "name": "storage.modifier.cluster.cforgev", "match": "\\bcluster\\b" },
       { "name": "keyword.control.cforgev", "match": "\\b(sea|si|sino|mientras|funcion|retornar|estructura|clase|campo|metodo|este|usar|import|pip|nuget|npm|maven|extern|intentar|capturar|verdadero|falso|y|o|no)\\b" }
     ] },
-    "functions": { "patterns": [{ "name": "support.function.cforgev", "match": "\\b(mostrar|print|leer|leer_archivo|escribir_archivo|existe_archivo|file_read|file_write|file_append|sys_run|sys_info|net_listen|net_send|matrix|array_fast|longitud|agregar|a_numero|a_texto|raiz|potencia|absoluto|redondear|tiempo_actual|argumentos|use_python|use_csharp|use_native|use_cpp|use_javascript|use_typescript|use_java|cluster_estado|jit_estado|jit_caliente|paralelo)\\b" }] }
+    "compatibility": { "patterns": [
+      { "name": "meta.function-call.compatibility.javascript.cforgev", "match": "\\b(console)(\\.)(log)(?=\\s*\\()", "captures": { "1": { "name": "support.class.console.cforgev" }, "2": { "name": "punctuation.accessor.cforgev" }, "3": { "name": "support.function.log.cforgev" } } },
+      { "name": "meta.function-call.compatibility.java.cforgev", "match": "\\b(System)(\\.)(out)(\\.)(println)(?=\\s*\\()", "captures": { "1": { "name": "support.class.system.cforgev" }, "2": { "name": "punctuation.accessor.cforgev" }, "3": { "name": "support.variable.out.cforgev" }, "4": { "name": "punctuation.accessor.cforgev" }, "5": { "name": "support.function.println.cforgev" } } },
+      { "name": "meta.output.compatibility.cpp.cforgev", "match": "\\b(?:std::)?(?:cout|endl)\\b", "captures": { "0": { "name": "support.function.output.cpp.cforgev" } } },
+      { "name": "meta.method.compatibility.collection.cforgev", "match": "(\\.)(append|push|length|len)\\b", "captures": { "1": { "name": "punctuation.accessor.cforgev" }, "2": { "name": "support.function.collection.cforgev" } } }
+    ] },
+    "functions": { "patterns": [
+      { "name": "entity.name.function.connector.cforgev", "match": "\\b(?:ia_|ui_|web_)[A-Za-z_][A-Za-z0-9_]*\\b" },
+      { "name": "support.function.cforgev", "match": "\\b(mostrar|print|leer|leer_archivo|escribir_archivo|existe_archivo|file_read|file_write|file_append|sys_run|sys_info|net_listen|net_send|matrix|array_fast|longitud|agregar|a_numero|a_texto|raiz|potencia|absoluto|redondear|tiempo_actual|argumentos|forge_hash|forge_bench|forge_catalogo|forge_arena_estado|json_parse|sys_fetch|use_python|use_csharp|use_native|use_cpp|use_javascript|use_typescript|use_java|cluster_estado|jit_estado|jit_caliente|paralelo)\\b" }
+    ] }
   }
 }
 )CFV19DATA"}
