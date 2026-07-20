@@ -17,12 +17,17 @@ git push -u origin main
 La configuración `.gitignore` evita subir builds, SDKs locales, cachés,
 temporales y paquetes de distribución duplicados.
 
-Para una versión descargable, crea el tag `v1.3.0` y adjunta a GitHub Releases:
+Para una versión descargable, crea y publica el tag `v1.3.0`. El workflow
+`Publicar paquetes` prueba y genera automáticamente:
 
-- `cforge-master` para macOS ARM64.
-- El superarchivo `cforge_master.cpp`.
-- El paquete `.vsix` de la extensión.
-- El cheatsheet oficial.
+- Archivo portable para macOS.
+- Archivo portable para Linux.
+- ZIP portable y ejecutable autónomo para Windows.
+- Paquete `.deb` para Debian/Ubuntu.
+- Fórmula Homebrew y manifiesto WinGet con SHA-256.
+
+Consulta [`DISTRIBUCION.md`](DISTRIBUCION.md) para publicar los índices de cada
+gestor. Los catálogos oficiales tienen procesos de revisión externos.
 
 ## Visual Studio Marketplace
 

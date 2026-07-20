@@ -1,5 +1,14 @@
 # Historial de C-Forgev
 
+## Distribución multiplataforma — 2026-07-20
+
+- CI de ejecución portable para macOS, Linux y Windows.
+- GitHub Releases automáticas mediante tags `v*`.
+- Archivos portables para los tres sistemas y ejecutable autónomo de Windows.
+- Paquete `.deb` para Debian/Ubuntu.
+- Generadores de fórmula Homebrew y manifiesto WinGet con SHA-256.
+- Diagnóstico `--setup` adaptado a cada sistema operativo.
+
 ## 1.3.0-definitive — 2026-07-20
 
 - Núcleo de sistema: `sys_run` y `sys_info` en intérprete y backend C++.

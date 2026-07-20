@@ -1,5 +1,6 @@
 # C-Forgev build products
 build/
+dist/
 *.dylib
 *.so
 *.dll
@@ -36,3 +37,6 @@ outputs/*
 
 # Local editor settings
 .vscode/
+
+# Local clones and package-manager workspaces
+C-Forgev/

@@ -46,6 +46,7 @@ mostrar(resultado);
 - Formateador, pruebas nativas, hot reload, reparación conservadora y salida WAT.
 - Extensión de sintaxis para Visual Studio Code.
 - Distribución monolítica C++ e instalador global para macOS.
+- Paquetes portables y automatización de lanzamientos para macOS, Linux y Windows.
 
 ## Inicio rápido
 
@@ -87,6 +88,33 @@ cforge --version
 ```
 
 El instalador copia la distribución monolítica a `/usr/local/bin/cforge`.
+
+## Instalación multiplataforma
+
+Los lanzamientos etiquetados generan automáticamente paquetes para los tres
+sistemas. Mientras los catálogos públicos revisan los manifiestos, se instalan
+desde [GitHub Releases](https://github.com/VemorisGroup/C-Forgev/releases).
+
+macOS, cuando se publique el tap de Vemoris Group:
+
+```bash
+brew install VemorisGroup/cforgev/cforgev
+```
+
+Windows, después de la aceptación del manifiesto en WinGet:
+
+```powershell
+winget install VemorisGroup.CForgev
+```
+
+Debian/Ubuntu usando el paquete descargado del lanzamiento:
+
+```bash
+sudo apt install ./cforgev_1.3.0_all.deb
+```
+
+La preparación y las condiciones necesarias para ofrecer los comandos cortos
+están documentadas en [`DISTRIBUCION.md`](DISTRIBUCION.md).
 
 ## Prueba maestra
 

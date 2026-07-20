@@ -1783,7 +1783,7 @@ def setup_environment() -> int:
     """Diagnostica dependencias sin modificar el equipo silenciosamente."""
     print("C-Forgev Setup 1.3.0")
     clang = shutil.which("clang++") is not None
-    python = shutil.which("python3") is not None
+    python = bool(getattr(sys, "frozen", False)) or shutil.which("python3") is not None
     node = shutil.which("node") is not None
     if sys.platform == "darwin":
         java = subprocess.run(
@@ -1791,16 +1791,28 @@ def setup_environment() -> int:
         ).returncode == 0
     else:
         java = shutil.which("java") is not None and shutil.which("javac") is not None
-    print("[OK] C++: clang++ disponible" if clang else "[FALTA] C++: xcode-select --install")
+    if clang:
+        print("[OK] C++: clang++ disponible")
+    elif sys.platform == "darwin":
+        print("[FALTA] C++: ejecuta xcode-select --install")
+    elif os.name == "nt":
+        print("[OPCIONAL] C++: instala Visual Studio Build Tools o LLVM")
+    else:
+        print("[FALTA] C++: instala clang++ o g++")
     print("[OK] Python 3 disponible" if python else "[FALTA] Python 3")
     print("[OK] JavaScript/TypeScript: Node.js disponible" if node else "[OPCIONAL] Node.js no instalado")
     if java:
         print("[OK] Java: JDK y JVM disponibles")
     else:
-        print("[FALTA] Java: instala un JDK con:\n  brew install --cask temurin")
+        if sys.platform == "darwin":
+            print("[FALTA] Java: brew install --cask temurin")
+        elif os.name == "nt":
+            print("[FALTA] Java: winget install EclipseAdoptium.Temurin.21.JDK")
+        else:
+            print("[FALTA] Java: sudo apt install default-jdk")
         print("Alternativa oficial: https://adoptium.net/temurin/releases/")
     print("Setup finalizado; no se realizaron instalaciones sin autorización.")
-    return 0 if clang and python else 1
+    return 0 if python else 1
 
 
 def install_global() -> int:
@@ -3167,11 +3179,23 @@ int main(int argc, char** argv) {
         {R"CFV12DATA(herramientas/vscode-cforgev/package.json)CFV12DATA", R"CFV13DATA({
   "name": "cforgev-language",
   "displayName": "C-Forgev Language",
-  "description": "Soporte de sintaxis para C-Forgev",
-  "version": "1.2.0",
+  "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forgev (.cfv)",
+  "version": "1.3.0",
   "publisher": "vemoris-group",
+  "author": { "name": "Vemoris Group" },
+  "license": "SEE LICENSE IN LICENSE",
+  "icon": "images/icon.png",
+  "preview": true,
+  "pricing": "Free",
   "engines": { "vscode": "^1.80.0" },
   "categories": ["Programming Languages"],
+  "keywords": ["cforgev", "cfv", "programming language", "syntax highlighting", "vemoris", "compiler"],
+  "galleryBanner": { "color": "#FF6A32", "theme": "light" },
+  "repository": { "type": "git", "url": "https://github.com/VemorisGroup/C-Forgev.git" },
+  "homepage": "https://github.com/VemorisGroup/C-Forgev#readme",
+  "bugs": { "url": "https://github.com/VemorisGroup/C-Forgev/issues" },
+  "scripts": { "package": "vsce package" },
+  "devDependencies": { "@vscode/vsce": "^3.6.2" },
   "contributes": {
     "languages": [{
       "id": "cforgev",

@@ -1,0 +1,22 @@
+class Cforgev < Formula
+  desc "Lenguaje de programación experimental C-Forgev"
+  homepage "https://github.com/VemorisGroup/C-Forgev"
+  url "https://github.com/VemorisGroup/C-Forgev/archive/refs/tags/vVERSION.tar.gz"
+  sha256 "SHA256"
+  license :cannot_represent
+
+  depends_on "python@3.13"
+
+  def install
+    libexec.install "cforgev.py", "compilador_nativo.py", "compilador_wasm.py", "include", "ejemplos"
+    (bin/"cforge").write <<~SH
+      #!/bin/sh
+      exec "#{Formula["python@3.13"].opt_bin}/python3.13" "#{libexec}/cforgev.py" "$@"
+    SH
+    bin.install_symlink "cforge" => "cforgev"
+  end
+
+  test do
+    assert_match "C-Forgev VERSION-definitive", shell_output("#{bin}/cforge --version")
+  end
+end
