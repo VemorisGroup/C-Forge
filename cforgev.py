@@ -27,6 +27,20 @@ from pathlib import Path
 
 VERSION = "1.4.0-definitive"
 
+CONNECTOR_CATALOG = {
+    "ia_": "python",
+    "ui_": "java",
+    "web_": "javascript",
+}
+
+
+def connector_engine(name: str) -> str | None:
+    """Resuelve conectores por prefijo sin heurísticas ambiguas."""
+    return next(
+        (engine for prefix, engine in CONNECTOR_CATALOG.items() if name.startswith(prefix)),
+        None,
+    )
+
 
 class CForgevError(Exception):
     pass
@@ -958,6 +972,10 @@ class Interpreter:
                 if not self.match_value(","):
                     break
         self.consume_value(")", "Se esperaba ')' después de los argumentos")
+        if name.value == "forge_catalogo":
+            if arguments:
+                raise CForgevError(f"Línea {name.line}: forge_catalogo no recibe argumentos")
+            return dict(CONNECTOR_CATALOG)
         if name.value == "forge_hash":
             if len(arguments) != 1 or not is_universal_data(arguments[0]):
                 raise CForgevError(
@@ -1271,6 +1289,17 @@ class Interpreter:
             return StructureValue(name.value, values)
         function = self.functions.get(name.value)
         if function is None:
+            engine = connector_engine(name.value)
+            if engine is not None:
+                setting = {
+                    "python": "CFORGE_IA_MODULE",
+                    "java": "CFORGE_UI_ADAPTER",
+                    "javascript": "CFORGE_WEB_MODULE",
+                }[engine]
+                raise CForgevError(
+                    f"Línea {name.line}: conector '{name.value}' enrutado a {engine}; "
+                    f"configura su adaptador mediante {setting}"
+                )
             raise CForgevError(f"Línea {name.line}: función desconocida '{name.value}'")
         return self.invoke_user_function(function, arguments, name.line)
 

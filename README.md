@@ -395,10 +395,15 @@ Archivos principales:
 | `compilador_nativo.py` | Parser, análisis y generador C++17. |
 | `compilador_wasm.py` | Backend experimental WAT. |
 | `include/cforgev_ffi.h` | ABI para bibliotecas nativas. |
+| `include/cforge_shared_arena.h` | ABI Forge Shared Arena 1.0 con offsets de 64 bits. |
 | `herramientas/generar_amalgama.py` | Generador del superarchivo C++. |
 | `herramientas/vscode-cforgev/` | Gramática y configuración de VS Code. |
 | `tests/test_cforgev.py` | Suite de regresión. |
 | `ejemplos/` | Programas y demostraciones. |
+
+La especificación de memoria compartida y del catálogo `ia_`/`ui_`/`web_` está
+en [docs/FORGE-SHARED-ARENA.md](docs/FORGE-SHARED-ARENA.md). La demostración
+nativa está en `ejemplos/arena_catalogo_16.cfv`.
 
 ## Reconstruir la distribución monolítica
 

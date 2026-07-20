@@ -102,6 +102,20 @@ from pathlib import Path
 
 VERSION = "1.4.0-definitive"
 
+CONNECTOR_CATALOG = {
+    "ia_": "python",
+    "ui_": "java",
+    "web_": "javascript",
+}
+
+
+def connector_engine(name: str) -> str | None:
+    """Resuelve conectores por prefijo sin heurísticas ambiguas."""
+    return next(
+        (engine for prefix, engine in CONNECTOR_CATALOG.items() if name.startswith(prefix)),
+        None,
+    )
+
 
 class CForgevError(Exception):
     pass
@@ -1033,6 +1047,10 @@ class Interpreter:
                 if not self.match_value(","):
                     break
         self.consume_value(")", "Se esperaba ')' después de los argumentos")
+        if name.value == "forge_catalogo":
+            if arguments:
+                raise CForgevError(f"Línea {name.line}: forge_catalogo no recibe argumentos")
+            return dict(CONNECTOR_CATALOG)
         if name.value == "forge_hash":
             if len(arguments) != 1 or not is_universal_data(arguments[0]):
                 raise CForgevError(
@@ -1346,6 +1364,17 @@ class Interpreter:
             return StructureValue(name.value, values)
         function = self.functions.get(name.value)
         if function is None:
+            engine = connector_engine(name.value)
+            if engine is not None:
+                setting = {
+                    "python": "CFORGE_IA_MODULE",
+                    "java": "CFORGE_UI_ADAPTER",
+                    "javascript": "CFORGE_WEB_MODULE",
+                }[engine]
+                raise CForgevError(
+                    f"Línea {name.line}: conector '{name.value}' enrutado a {engine}; "
+                    f"configura su adaptador mediante {setting}"
+                )
             raise CForgevError(f"Línea {name.line}: función desconocida '{name.value}'")
         return self.invoke_user_function(function, arguments, name.line)
 
@@ -2472,6 +2501,7 @@ class StaticTypeAnalyzer:
 
 
 RUNTIME = r'''#include <algorithm>
+#include "cforge_shared_arena.h"
 #include <cmath>
 #include <chrono>
 #include <cstdio>
@@ -2542,6 +2572,20 @@ static Value divide(const Value&a,const Value&b){double d=numero(b);if(d==0)thro
 static Value compara(const Value&a,const Value&b,const std::string&o){if(o=="==")return a.data==b.data;if(o=="!=")return a.data!=b.data;if(a.index()==1&&b.index()==1){double x=numero(a),y=numero(b);if(o==">")return x>y;if(o==">=")return x>=y;if(o=="<")return x<y;return x<=y;}if(a.index()==2&&b.index()==2){auto x=std::get<std::string>(a.data),y=std::get<std::string>(b.data);if(o==">")return x>y;if(o==">=")return x>=y;if(o=="<")return x<y;return x<=y;}throw std::runtime_error("comparación entre tipos incompatibles");}
 static std::string cfv_number_text(double value){std::ostringstream stream;if(std::floor(value)==value)stream<<(long long)value;else stream<<value;return stream.str();}
 static std::string texto(const Value&v){if(v.index()==0)return "nulo";if(auto p=std::get_if<double>(&v.data))return cfv_number_text(*p);if(auto p=std::get_if<std::string>(&v.data))return *p;if(auto p=std::get_if<bool>(&v.data))return *p?"verdadero":"falso";if(auto p=std::get_if<Lista>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=", ";s+=texto((*p)->at(i));}return s+"]";}if(auto p=std::get_if<Mapa>(&v.data)){std::string s="{";bool first=true;for(auto&[k,x]:**p){if(!first)s+=", ";first=false;s+="\""+k+"\": "+texto(x);}return s+"}";}if(auto p=std::get_if<FastArray>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=", ";s+=cfv_number_text((*p)->at(i));}return s+"]";}if(auto p=std::get_if<DenseMatrix>(&v.data)){std::string s="[";for(size_t row=0;row<(*p)->rows;++row){if(row)s+=", ";s+="[";for(size_t column=0;column<(*p)->columns;++column){if(column)s+=", ";s+=cfv_number_text((*p)->values[row*(*p)->columns+column]);}s+="]";}return s+"]";}throw std::runtime_error("ForgeValue desconocido");}
+static std::string cfv_json_escape(const std::string&input){std::string out="\"";for(unsigned char c:input){switch(c){case '\"':out+="\\\"";break;case '\\':out+="\\\\";break;case '\n':out+="\\n";break;case '\r':out+="\\r";break;case '\t':out+="\\t";break;default:if(c<32){char b[7];std::snprintf(b,sizeof(b),"\\u%04x",c);out+=b;}else out+=(char)c;}}return out+"\"";}
+static std::string cfv_canonical_json(const Value&v){if(v.index()==0)return "null";if(auto p=std::get_if<double>(&v.data))return cfv_number_text(*p);if(auto p=std::get_if<std::string>(&v.data))return cfv_json_escape(*p);if(auto p=std::get_if<bool>(&v.data))return *p?"true":"false";if(auto p=std::get_if<Lista>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=",";s+=cfv_canonical_json((*p)->at(i));}return s+"]";}if(auto p=std::get_if<Mapa>(&v.data)){std::string s="{";bool first=true;for(const auto&[k,x]:**p){if(!first)s+=",";first=false;s+=cfv_json_escape(k)+":"+cfv_canonical_json(x);}return s+"}";}return cfv_json_escape(texto(v));}
+struct CfvArenaRuntime{std::filesystem::path path;std::unique_ptr<cforge::arena::ForgeSharedArena>arena;std::mutex mutex;std::map<std::string,cforge::arena::Offset>latest;CfvArenaRuntime(){auto id=
+#ifdef _WIN32
+(unsigned long long)GetCurrentProcessId();
+#else
+(unsigned long long)getpid();
+#endif
+path=std::filesystem::temp_directory_path()/("cforge-arena-"+std::to_string(id)+".bin");arena=std::make_unique<cforge::arena::ForgeSharedArena>(cforge::arena::ForgeSharedArena::create(path,64ULL*1024ULL*1024ULL));}~CfvArenaRuntime(){std::error_code error;arena.reset();std::filesystem::remove(path,error);}};
+static CfvArenaRuntime&cfv_arena_runtime(){static CfvArenaRuntime runtime;return runtime;}
+static Value cfv_arena_stage(Value value,const std::string&connector){auto&runtime=cfv_arena_runtime();auto json=cfv_canonical_json(value);std::lock_guard<std::mutex>guard(runtime.mutex);runtime.latest[connector]=runtime.arena->store_text(cforge::arena::ValueType::Json,json);return value;}
+static Value cfv_arena_estado(){auto&runtime=cfv_arena_runtime();auto out=std::make_shared<std::map<std::string,Value>>();(*out)["ruta"]=runtime.path.string();(*out)["capacidad"]=(double)runtime.arena->capacity();(*out)["usado"]=(double)runtime.arena->used();(*out)["registros_vivos"]=(double)runtime.arena->live_records();auto offsets=std::make_shared<std::map<std::string,Value>>();{std::lock_guard<std::mutex>guard(runtime.mutex);for(const auto&[name,offset]:runtime.latest)(*offsets)[name]=(double)offset;}(*out)["offsets"]=offsets;return out;}
+static Value cfv_catalogo(){auto out=std::make_shared<std::map<std::string,Value>>();(*out)["ia_"]=std::string("python");(*out)["ui_"]=std::string("java");(*out)["web_"]=std::string("javascript");return out;}
+static Value cfv_catalog_dispatch(const std::string&,const std::string&,const Value&);
 static void mostrar(const Value&v){std::cout<<texto(v)<<'\n';}
 static Value cfv_leer(Value mensaje=Value{std::string("")}){if(mensaje.index()!=2)throw std::runtime_error("el mensaje de leer debe ser texto");std::cout<<std::get<std::string>(mensaje.data);std::string s;std::getline(std::cin,s);return s;}
 static Value cfv_a_numero(const Value&v){try{if(auto p=std::get_if<double>(&v.data))return *p;if(auto p=std::get_if<std::string>(&v.data))return std::stod(*p);}catch(...){ }throw std::runtime_error("no se puede convertir a número");}
@@ -2587,7 +2631,7 @@ static std::filesystem::path cfv_base_archivos;
 static std::string ruta_archivo(const Value&v){if(v.index()!=2)throw std::runtime_error("la ruta debe ser texto");auto p=std::filesystem::path(std::get<std::string>(v.data));return (p.is_absolute()?p:cfv_base_archivos/p).string();}
 static Value cfv_leer_archivo(const Value&ruta){std::ifstream f(ruta_archivo(ruta),std::ios::binary);if(!f)throw std::runtime_error("no se pudo abrir el archivo");std::ostringstream s;s<<f.rdbuf();return s.str();}
 static Value cfv_escribir_archivo(const Value&ruta,const Value&contenido){if(contenido.index()!=2)throw std::runtime_error("el contenido debe ser texto");auto p=std::filesystem::path(ruta_archivo(ruta));if(p.has_parent_path())std::filesystem::create_directories(p.parent_path());std::ofstream f(p,std::ios::binary);if(!f)throw std::runtime_error("no se pudo escribir el archivo");f<<std::get<std::string>(contenido.data);return Value{};}
-static Value cfv_file_read(const Value&ruta){return cfv_leer_archivo(ruta);}
+static Value cfv_file_read(const Value&ruta){return cfv_arena_stage(cfv_leer_archivo(ruta),"file_read");}
 static Value cfv_file_write(const Value&ruta,const Value&contenido){return cfv_escribir_archivo(ruta,contenido);}
 static Value cfv_file_append(const Value&ruta,const Value&contenido){if(contenido.index()!=2)throw std::runtime_error("el contenido debe ser texto");auto p=std::filesystem::path(ruta_archivo(ruta));if(p.has_parent_path())std::filesystem::create_directories(p.parent_path());std::ofstream f(p,std::ios::binary|std::ios::app);if(!f)throw std::runtime_error("no se pudo anexar al archivo");f<<std::get<std::string>(contenido.data);return Value{};}
 static Value cfv_existe_archivo(const Value&ruta){return std::filesystem::exists(ruta_archivo(ruta));}
@@ -2678,8 +2722,8 @@ def _cfv_exec_java(code):
     print(run.stdout,end="")
 )CFVPY";if(PyRun_SimpleString(code)!=0)throw std::runtime_error(cfv_python_error("no se pudo preparar puente políglota"));ready=true;}
 static Value cfv_forge_hash(const Value&value){cfv_prepare_polyglot();auto args=std::make_shared<std::vector<Value>>();args->push_back(value);return cfv_origin(cfv_use_python(Value{std::string("__main__")},Value{std::string("_cfv_hash")},Value{args}),"cforgev");}
-static Value cfv_json_parse(const Value&text){if(text.index()!=2)throw std::runtime_error("json_parse requiere texto");cfv_prepare_polyglot();auto args=std::make_shared<std::vector<Value>>();args->push_back(text);return cfv_origin(cfv_use_python(Value{std::string("__main__")},Value{std::string("_cfv_json_parse")},Value{args}),"cforgev");}
-static Value cfv_sys_fetch(const Value&url){if(url.index()!=2)throw std::runtime_error("sys_fetch requiere una URL");cfv_prepare_polyglot();auto args=std::make_shared<std::vector<Value>>();args->push_back(url);return cfv_origin(cfv_use_python(Value{std::string("__main__")},Value{std::string("_cfv_fetch")},Value{args}),"cforgev");}
+static Value cfv_json_parse(const Value&text){if(text.index()!=2)throw std::runtime_error("json_parse requiere texto");cfv_prepare_polyglot();auto args=std::make_shared<std::vector<Value>>();args->push_back(text);return cfv_arena_stage(cfv_origin(cfv_use_python(Value{std::string("__main__")},Value{std::string("_cfv_json_parse")},Value{args}),"cforgev"),"json_parse");}
+static Value cfv_sys_fetch(const Value&url){if(url.index()!=2)throw std::runtime_error("sys_fetch requiere una URL");cfv_prepare_polyglot();auto args=std::make_shared<std::vector<Value>>();args->push_back(url);return cfv_arena_stage(cfv_origin(cfv_use_python(Value{std::string("__main__")},Value{std::string("_cfv_fetch")},Value{args}),"cforgev"),"sys_fetch");}
 static Value cfv_use_javascript(const Value&module,const Value&function,const Value&args){cfv_prepare_polyglot();Value resolved=module;if(module.index()==2){auto raw=std::filesystem::path(std::get<std::string>(module.data));if(!raw.is_absolute()&&raw.string().find('/')!=std::string::npos)resolved=(cfv_base_archivos/raw).string();}auto packed=std::make_shared<std::vector<Value>>();packed->push_back(resolved);packed->push_back(function);packed->push_back(args);packed->push_back(cfv_symbol_snapshot());return cfv_origin(cfv_use_python(Value{std::string("__main__")},Value{std::string("_cfv_js")},Value{packed}),"javascript");}
 static Value cfv_use_java(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("use_java requiere un JDK instalado; puente JNI/JAR preparado pero JVM no disponible");}
 static void cfv_exec_javascript_code(const std::string&code,bool typescript){std::cout.flush();cfv_prepare_polyglot();auto args=std::make_shared<std::vector<Value>>();args->push_back(code);args->push_back(typescript);(void)cfv_use_python(Value{std::string("__main__")},Value{std::string("_cfv_exec_js")},Value{args});PyRun_SimpleString("import sys; sys.stdout.flush(); sys.stderr.flush()");}
@@ -2695,6 +2739,7 @@ static Value cfv_use_java(const Value&,const Value&,const Value&,const Value&){t
 static void cfv_exec_javascript_code(const std::string&,bool){throw std::runtime_error("JavaScript requiere soporte políglota");}
 static void cfv_exec_java_code(const std::string&){throw std::runtime_error("Java requiere soporte políglota");}
 #endif
+static Value cfv_catalog_dispatch(const std::string&engine,const std::string&name,const Value&arguments){Value staged=cfv_arena_stage(arguments,name);const char*setting=std::getenv(engine=="python"?"CFORGE_IA_MODULE":engine=="javascript"?"CFORGE_WEB_MODULE":"CFORGE_UI_ADAPTER");if(!setting||!*setting)throw std::runtime_error("conector "+name+" enrutado a "+engine+", pero su adaptador no está configurado");if(engine=="python")return cfv_use_python(Value{std::string(setting)},Value{name},staged);if(engine=="javascript")return cfv_use_javascript(Value{std::string(setting)},Value{name},staged);throw std::runtime_error("conector "+name+" requiere el adaptador Java declarado en CFORGE_UI_ADAPTER");}
 static Value cfv_forge_bench(const std::function<Value()>&function,const Value&count){long long iterations=(long long)numero(count);if(iterations<1||iterations>10000000)throw std::runtime_error("forge_bench requiere 1..10.000.000 iteraciones");Value result;auto started=std::chrono::steady_clock::now();for(long long i=0;i<iterations;++i)result=function();double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();auto report=std::make_shared<std::map<std::string,Value>>();(*report)["resultado"]=result;(*report)["iteraciones"]=(double)iterations;(*report)["segundos"]=seconds;(*report)["por_segundo"]=seconds>0?iterations/seconds:0;return report;}
 static Value crear_lista(std::initializer_list<Value>v){return std::make_shared<std::vector<Value>>(v);}static Value crear_mapa(std::initializer_list<std::pair<const std::string,Value>>v){return std::make_shared<std::map<std::string,Value>>(v);}
 static Value indice(const Value&v,const Value&k){double n=0;if(auto p=std::get_if<Lista>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de lista inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<Mapa>(&v.data)){if(k.index()!=2)throw std::runtime_error("la clave debe ser texto");auto it=(*p)->find(std::get<std::string>(k.data));if(it==(*p)->end())throw std::runtime_error("clave inexistente");return it->second;}if(auto p=std::get_if<FastArray>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de array_fast inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<DenseMatrix>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->rows)throw std::runtime_error("fila de matrix inválida");auto row=std::make_shared<std::vector<double>>((*p)->values.begin()+(size_t)n*(*p)->columns,(*p)->values.begin()+((size_t)n+1)*(*p)->columns);return row;}throw std::runtime_error("el valor no admite índices");}
@@ -2930,6 +2975,28 @@ class Generator:
         if kind == "call":
             aliases = {"use_csharp": "use_native", "use_typescript": "use_javascript"}
             call_name = aliases.get(expression[1], expression[1])
+            connector = next(
+                ((prefix, engine) for prefix, engine in (
+                    ("ia_", "python"), ("ui_", "java"), ("web_", "javascript")
+                ) if call_name.startswith(prefix)),
+                None,
+            )
+            if connector is not None:
+                arguments = "crear_lista({" + ", ".join(
+                    self.expr(argument) for argument in expression[2]
+                ) + "})"
+                return (
+                    f'cfv_catalog_dispatch("{connector[1]}", "{call_name}", '
+                    f'{arguments})'
+                )
+            if call_name == "forge_catalogo":
+                if expression[2]:
+                    raise CForgevError("forge_catalogo no recibe argumentos")
+                return "cfv_catalogo()"
+            if call_name == "forge_arena_estado":
+                if expression[2]:
+                    raise CForgevError("forge_arena_estado no recibe argumentos")
+                return "cfv_arena_estado()"
             if call_name == "jit_estado":
                 return "cfv_jit_estado(" + ", ".join(self.expr(arg) for arg in expression[2]) + ")"
             if call_name == "jit_caliente":
@@ -3289,7 +3356,358 @@ CFV_EXPORT int cfv_register_function(const char* name, CfvForeignFunction functi
 
 #endif
 )CFV7DATA"},
-        {R"CFV8DATA(herramientas/cforgev_ffi_runner.cpp)CFV8DATA", R"CFV9DATA(#include "cforgev_ffi.h"
+        {R"CFV8DATA(include/cforge_shared_arena.h)CFV8DATA", R"CFV9DATA(#ifndef CFORGE_SHARED_ARENA_H
+#define CFORGE_SHARED_ARENA_H
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <limits>
+#include <new>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <cerrno>
+#include <fcntl.h>
+#include <pthread.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
+namespace cforge::arena {
+
+using Offset = std::uint64_t;
+
+inline constexpr std::uint64_t kMagic = 0x43464F5247454131ULL;  // "CFORGEA1"
+inline constexpr std::uint32_t kVersion = 1;
+inline constexpr std::uint64_t kAlignment = 64;
+inline constexpr std::uint32_t kRecordLive = 1;
+inline constexpr std::uint32_t kRecordReleased = 2;
+
+enum class ValueType : std::uint32_t {
+    Null = 0,
+    Boolean = 1,
+    Integer = 2,
+    Decimal = 3,
+    Utf8 = 4,
+    Bytes = 5,
+    Json = 6,
+    Float64Array = 7,
+};
+
+struct alignas(64) RecordHeader final {
+    std::uint64_t magic = kMagic;
+    std::uint32_t version = kVersion;
+    std::uint32_t type = 0;
+    std::uint64_t payload_size = 0;
+    std::uint64_t payload_offset = 0;
+    std::uint64_t generation = 0;
+    std::atomic<std::uint64_t> references{1};
+    std::atomic<std::uint32_t> state{kRecordLive};
+    std::uint32_t checksum = 0;
+    std::uint8_t reserved[8]{};
+};
+
+struct alignas(64) ArenaHeader final {
+    std::uint64_t magic = kMagic;
+    std::uint32_t version = kVersion;
+    std::uint32_t header_size = 0;
+    std::uint64_t capacity = 0;
+    std::atomic<std::uint64_t> used{0};
+    std::atomic<std::uint64_t> generation{1};
+    std::atomic<std::uint64_t> live_records{0};
+#ifndef _WIN32
+    pthread_mutex_t mutex{};
+#else
+    std::uint8_t mutex_placeholder[64]{};
+#endif
+};
+
+struct ByteView final {
+    const std::byte* data = nullptr;
+    std::uint64_t size = 0;
+    ValueType type = ValueType::Null;
+    Offset record = 0;
+};
+
+inline std::uint64_t align_up(std::uint64_t value) {
+    if (value > std::numeric_limits<std::uint64_t>::max() - (kAlignment - 1))
+        throw std::overflow_error("ForgeSharedArena: overflow de alineación");
+    return (value + kAlignment - 1) & ~(kAlignment - 1);
+}
+
+inline std::uint32_t checksum32(const void* data, std::size_t size) noexcept {
+    const auto* bytes = static_cast<const std::uint8_t*>(data);
+    std::uint32_t hash = 2166136261u;
+    for (std::size_t i = 0; i < size; ++i) {
+        hash ^= bytes[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+class ForgeSharedArena final {
+public:
+    static ForgeSharedArena create(const std::filesystem::path& path, std::uint64_t capacity) {
+        if (capacity < align_up(sizeof(ArenaHeader)) + align_up(sizeof(RecordHeader)) + 1)
+            throw std::invalid_argument("ForgeSharedArena: capacidad demasiado pequeña");
+        ForgeSharedArena arena;
+        arena.open_mapping(path, capacity, true);
+        std::memset(arena.base_, 0, static_cast<std::size_t>(capacity));
+        auto* header = new (arena.base_) ArenaHeader{};
+        header->header_size = static_cast<std::uint32_t>(sizeof(ArenaHeader));
+        header->capacity = capacity;
+        header->used.store(align_up(sizeof(ArenaHeader)), std::memory_order_release);
+#ifndef _WIN32
+        pthread_mutexattr_t attributes;
+        if (pthread_mutexattr_init(&attributes) != 0)
+            throw std::runtime_error("ForgeSharedArena: mutexattr_init falló");
+        pthread_mutexattr_setpshared(&attributes, PTHREAD_PROCESS_SHARED);
+#ifdef PTHREAD_MUTEX_ROBUST
+        pthread_mutexattr_setrobust(&attributes, PTHREAD_MUTEX_ROBUST);
+#endif
+        const int status = pthread_mutex_init(&header->mutex, &attributes);
+        pthread_mutexattr_destroy(&attributes);
+        if (status != 0) throw std::runtime_error("ForgeSharedArena: mutex compartido falló");
+#endif
+        arena.header_ = header;
+        return arena;
+    }
+
+    static ForgeSharedArena open(const std::filesystem::path& path) {
+        ForgeSharedArena arena;
+        arena.open_mapping(path, 0, false);
+        arena.header_ = reinterpret_cast<ArenaHeader*>(arena.base_);
+        arena.validate_arena();
+        return arena;
+    }
+
+    ForgeSharedArena() = default;
+    ~ForgeSharedArena() { close(); }
+    ForgeSharedArena(const ForgeSharedArena&) = delete;
+    ForgeSharedArena& operator=(const ForgeSharedArena&) = delete;
+    ForgeSharedArena(ForgeSharedArena&& other) noexcept { move_from(other); }
+    ForgeSharedArena& operator=(ForgeSharedArena&& other) noexcept {
+        if (this != &other) { close(); move_from(other); }
+        return *this;
+    }
+
+    Offset store(ValueType type, const void* payload, std::uint64_t size) {
+        if (size && !payload) throw std::invalid_argument("ForgeSharedArena: payload nulo");
+        Lock guard(*this);
+        const auto record_offset = align_up(header_->used.load(std::memory_order_acquire));
+        const auto payload_offset = align_up(record_offset + sizeof(RecordHeader));
+        if (size > header_->capacity || payload_offset > header_->capacity - size)
+            throw std::runtime_error("ForgeSharedArena: espacio agotado");
+        auto* record = new (address(record_offset, sizeof(RecordHeader))) RecordHeader{};
+        record->type = static_cast<std::uint32_t>(type);
+        record->payload_size = size;
+        record->payload_offset = payload_offset;
+        record->generation = header_->generation.fetch_add(1, std::memory_order_acq_rel);
+        void* destination = address(payload_offset, size);
+        if (size) std::memcpy(destination, payload, static_cast<std::size_t>(size));
+        record->checksum = checksum32(destination, static_cast<std::size_t>(size));
+        header_->used.store(align_up(payload_offset + size), std::memory_order_release);
+        header_->live_records.fetch_add(1, std::memory_order_acq_rel);
+        return record_offset;
+    }
+
+    Offset store_text(ValueType type, std::string_view value) {
+        if (type != ValueType::Utf8 && type != ValueType::Json)
+            throw std::invalid_argument("ForgeSharedArena: store_text requiere Utf8 o Json");
+        return store(type, value.data(), value.size());
+    }
+
+    ByteView view(Offset offset) const {
+        validate_arena();
+        const auto* record = record_at(offset);
+        if (record->state.load(std::memory_order_acquire) != kRecordLive)
+            throw std::runtime_error("ForgeSharedArena: registro liberado");
+        const auto* payload = static_cast<const std::byte*>(address(record->payload_offset, record->payload_size));
+        if (checksum32(payload, static_cast<std::size_t>(record->payload_size)) != record->checksum)
+            throw std::runtime_error("ForgeSharedArena: checksum inválido");
+        return {payload, record->payload_size, static_cast<ValueType>(record->type), offset};
+    }
+
+    void retain(Offset offset) {
+        auto* record = record_at(offset);
+        if (record->state.load(std::memory_order_acquire) != kRecordLive)
+            throw std::runtime_error("ForgeSharedArena: retain sobre registro liberado");
+        record->references.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    void release(Offset offset) {
+        auto* record = record_at(offset);
+        const auto previous = record->references.fetch_sub(1, std::memory_order_acq_rel);
+        if (previous == 0) {
+            record->references.fetch_add(1, std::memory_order_relaxed);
+            throw std::runtime_error("ForgeSharedArena: doble liberación");
+        }
+        if (previous == 1) {
+            record->state.store(kRecordReleased, std::memory_order_release);
+            header_->live_records.fetch_sub(1, std::memory_order_acq_rel);
+        }
+    }
+
+    std::uint64_t capacity() const noexcept { return header_ ? header_->capacity : 0; }
+    std::uint64_t used() const noexcept {
+        return header_ ? header_->used.load(std::memory_order_acquire) : 0;
+    }
+    std::uint64_t live_records() const noexcept {
+        return header_ ? header_->live_records.load(std::memory_order_acquire) : 0;
+    }
+
+private:
+    class Lock final {
+    public:
+        explicit Lock(ForgeSharedArena& arena) : arena_(arena) { arena_.lock(); }
+        ~Lock() { arena_.unlock(); }
+        Lock(const Lock&) = delete;
+        Lock& operator=(const Lock&) = delete;
+    private:
+        ForgeSharedArena& arena_;
+    };
+
+    void validate_arena() const {
+        if (!header_ || header_->magic != kMagic || header_->version != kVersion ||
+            header_->header_size != sizeof(ArenaHeader))
+            throw std::runtime_error("ForgeSharedArena: cabecera incompatible");
+        const auto used = header_->used.load(std::memory_order_acquire);
+        if (used < align_up(sizeof(ArenaHeader)) || used > header_->capacity)
+            throw std::runtime_error("ForgeSharedArena: límites corruptos");
+    }
+
+    RecordHeader* record_at(Offset offset) const {
+        auto* record = static_cast<RecordHeader*>(address(offset, sizeof(RecordHeader)));
+        if (record->magic != kMagic || record->version != kVersion)
+            throw std::runtime_error("ForgeSharedArena: registro incompatible");
+        if (record->payload_offset < offset + sizeof(RecordHeader))
+            throw std::runtime_error("ForgeSharedArena: offset de payload corrupto");
+        address(record->payload_offset, record->payload_size);
+        return record;
+    }
+
+    void* address(Offset offset, std::uint64_t size) const {
+        if (!base_ || offset > mapped_size_ || size > mapped_size_ - offset)
+            throw std::out_of_range("ForgeSharedArena: acceso fuera de límites");
+        return static_cast<std::byte*>(base_) + offset;
+    }
+
+    void lock() {
+#ifdef _WIN32
+        const DWORD result = WaitForSingleObject(mutex_, INFINITE);
+        if (result != WAIT_OBJECT_0 && result != WAIT_ABANDONED)
+            throw std::runtime_error("ForgeSharedArena: WaitForSingleObject falló");
+#else
+        const int result = pthread_mutex_lock(&header_->mutex);
+#if defined(EOWNERDEAD) && !defined(__APPLE__)
+        if (result == EOWNERDEAD) { pthread_mutex_consistent(&header_->mutex); return; }
+#endif
+        if (result != 0) throw std::runtime_error("ForgeSharedArena: lock falló");
+#endif
+    }
+
+    void unlock() noexcept {
+#ifdef _WIN32
+        if (mutex_) ReleaseMutex(mutex_);
+#else
+        if (header_) pthread_mutex_unlock(&header_->mutex);
+#endif
+    }
+
+    void open_mapping(const std::filesystem::path& path, std::uint64_t size, bool create) {
+#ifdef _WIN32
+        const auto wide = path.wstring();
+        file_ = CreateFileW(wide.c_str(), GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+            create ? CREATE_ALWAYS : OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file_ == INVALID_HANDLE_VALUE) throw std::runtime_error("ForgeSharedArena: CreateFile falló");
+        if (!create) {
+            LARGE_INTEGER value{};
+            if (!GetFileSizeEx(file_, &value) || value.QuadPart <= 0) throw std::runtime_error("ForgeSharedArena: tamaño inválido");
+            size = static_cast<std::uint64_t>(value.QuadPart);
+        } else {
+            LARGE_INTEGER value{}; value.QuadPart = static_cast<LONGLONG>(size);
+            if (!SetFilePointerEx(file_, value, nullptr, FILE_BEGIN) || !SetEndOfFile(file_))
+                throw std::runtime_error("ForgeSharedArena: no se pudo dimensionar");
+        }
+        mapping_ = CreateFileMappingW(file_, nullptr, PAGE_READWRITE,
+            static_cast<DWORD>(size >> 32), static_cast<DWORD>(size), nullptr);
+        if (!mapping_) throw std::runtime_error("ForgeSharedArena: CreateFileMapping falló");
+        base_ = MapViewOfFile(mapping_, FILE_MAP_ALL_ACCESS, 0, 0, static_cast<SIZE_T>(size));
+        if (!base_) throw std::runtime_error("ForgeSharedArena: MapViewOfFile falló");
+        const auto mutex_name = L"Local\\CForgeArena-" + std::to_wstring(checksum32(wide.data(), wide.size() * sizeof(wchar_t)));
+        mutex_ = CreateMutexW(nullptr, FALSE, mutex_name.c_str());
+        if (!mutex_) throw std::runtime_error("ForgeSharedArena: CreateMutex falló");
+#else
+        descriptor_ = ::open(path.c_str(), create ? (O_RDWR | O_CREAT | O_TRUNC) : O_RDWR, 0600);
+        if (descriptor_ < 0) throw std::runtime_error("ForgeSharedArena: open falló");
+        if (create) {
+            if (ftruncate(descriptor_, static_cast<off_t>(size)) != 0)
+                throw std::runtime_error("ForgeSharedArena: ftruncate falló");
+        } else {
+            struct stat info{};
+            if (fstat(descriptor_, &info) != 0 || info.st_size <= 0)
+                throw std::runtime_error("ForgeSharedArena: fstat falló");
+            size = static_cast<std::uint64_t>(info.st_size);
+        }
+        base_ = mmap(nullptr, static_cast<std::size_t>(size), PROT_READ | PROT_WRITE, MAP_SHARED, descriptor_, 0);
+        if (base_ == MAP_FAILED) { base_ = nullptr; throw std::runtime_error("ForgeSharedArena: mmap falló"); }
+#endif
+        mapped_size_ = size;
+    }
+
+    void close() noexcept {
+#ifdef _WIN32
+        if (base_) UnmapViewOfFile(base_);
+        if (mapping_) CloseHandle(mapping_);
+        if (file_ != INVALID_HANDLE_VALUE) CloseHandle(file_);
+        if (mutex_) CloseHandle(mutex_);
+        mapping_ = nullptr; file_ = INVALID_HANDLE_VALUE; mutex_ = nullptr;
+#else
+        if (base_) munmap(base_, static_cast<std::size_t>(mapped_size_));
+        if (descriptor_ >= 0) ::close(descriptor_);
+        descriptor_ = -1;
+#endif
+        base_ = nullptr; header_ = nullptr; mapped_size_ = 0;
+    }
+
+    void move_from(ForgeSharedArena& other) noexcept {
+        base_ = other.base_; header_ = other.header_; mapped_size_ = other.mapped_size_;
+#ifdef _WIN32
+        file_ = other.file_; mapping_ = other.mapping_; mutex_ = other.mutex_;
+        other.file_ = INVALID_HANDLE_VALUE; other.mapping_ = nullptr; other.mutex_ = nullptr;
+#else
+        descriptor_ = other.descriptor_; other.descriptor_ = -1;
+#endif
+        other.base_ = nullptr; other.header_ = nullptr; other.mapped_size_ = 0;
+    }
+
+    void* base_ = nullptr;
+    ArenaHeader* header_ = nullptr;
+    std::uint64_t mapped_size_ = 0;
+#ifdef _WIN32
+    HANDLE file_ = INVALID_HANDLE_VALUE;
+    HANDLE mapping_ = nullptr;
+    HANDLE mutex_ = nullptr;
+#else
+    int descriptor_ = -1;
+#endif
+};
+
+}  // namespace cforge::arena
+
+#endif
+)CFV9DATA"},
+        {R"CFV10DATA(herramientas/cforgev_ffi_runner.cpp)CFV10DATA", R"CFV11DATA(#include "cforgev_ffi.h"
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -3335,8 +3753,8 @@ int main(int argc, char** argv) {
     if (result.release) result.release(result.owner);
     return 0;
 }
-)CFV9DATA"},
-        {R"CFV10DATA(herramientas/cforge_cli.cpp)CFV10DATA", R"CFV11DATA(#include <cerrno>
+)CFV11DATA"},
+        {R"CFV12DATA(herramientas/cforge_cli.cpp)CFV12DATA", R"CFV13DATA(#include <cerrno>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -3407,8 +3825,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-)CFV11DATA"},
-        {R"CFV12DATA(herramientas/vscode-cforgev/package.json)CFV12DATA", R"CFV13DATA({
+)CFV13DATA"},
+        {R"CFV14DATA(herramientas/vscode-cforgev/package.json)CFV14DATA", R"CFV15DATA({
   "name": "cforgev-language",
   "displayName": "C-Forge Language Support",
   "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
@@ -3446,8 +3864,8 @@ int main(int argc, char** argv) {
     }]
   }
 }
-)CFV13DATA"},
-        {R"CFV14DATA(herramientas/vscode-cforgev/language-configuration.json)CFV14DATA", R"CFV15DATA({
+)CFV15DATA"},
+        {R"CFV16DATA(herramientas/vscode-cforgev/language-configuration.json)CFV16DATA", R"CFV17DATA({
   "comments": { "lineComment": "//" },
   "brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
   "autoClosingPairs": [
@@ -3457,8 +3875,8 @@ int main(int argc, char** argv) {
     { "open": "\"", "close": "\"" }
   ]
 }
-)CFV15DATA"},
-        {R"CFV16DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV16DATA", R"CFV17DATA({
+)CFV17DATA"},
+        {R"CFV18DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV18DATA", R"CFV19DATA({
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "C-Forge",
   "scopeName": "source.cforgev",
@@ -3492,7 +3910,7 @@ int main(int argc, char** argv) {
     "functions": { "patterns": [{ "name": "support.function.cforgev", "match": "\\b(mostrar|print|leer|leer_archivo|escribir_archivo|existe_archivo|file_read|file_write|file_append|sys_run|sys_info|net_listen|net_send|matrix|array_fast|longitud|agregar|a_numero|a_texto|raiz|potencia|absoluto|redondear|tiempo_actual|argumentos|use_python|use_csharp|use_native|use_cpp|use_javascript|use_typescript|use_java|cluster_estado|jit_estado|jit_caliente|paralelo)\\b" }] }
   }
 }
-)CFV17DATA"}
+)CFV19DATA"}
     };
     return resources;
 }

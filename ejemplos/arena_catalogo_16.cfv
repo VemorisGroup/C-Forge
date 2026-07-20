@@ -1,0 +1,19 @@
+// Forge Shared Arena 1.0 y catálogo declarativo de conectores.
+datos = json_parse("{\"proyecto\":\"C-Forge\",\"valor\":42}")
+estado = forge_arena_estado()
+mapa_catalogo = forge_catalogo()
+
+mostrar("=== Forge Shared Arena 1.0 ===")
+mostrar(datos.proyecto)
+mostrar(datos.valor)
+mostrar(estado.registros_vivos > 0)
+mostrar(mapa_catalogo.ia_)
+mostrar(mapa_catalogo.ui_)
+mostrar(mapa_catalogo.web_)
+
+// El enrutamiento se realiza antes de invocar el adaptador.
+intentar {
+    ia_procesar(datos)
+} capturar(error_conector) {
+    mostrar("Ruta ia_ validada; falta configurar el adaptador externo.")
+}

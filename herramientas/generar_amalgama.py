@@ -14,6 +14,7 @@ RESOURCES = {
     "compilador_nativo.py": ROOT / "compilador_nativo.py",
     "compilador_wasm.py": ROOT / "compilador_wasm.py",
     "include/cforgev_ffi.h": ROOT / "include" / "cforgev_ffi.h",
+    "include/cforge_shared_arena.h": ROOT / "include" / "cforge_shared_arena.h",
     "herramientas/cforgev_ffi_runner.cpp": ROOT / "herramientas" / "cforgev_ffi_runner.cpp",
     "herramientas/cforge_cli.cpp": ROOT / "herramientas" / "cforge_cli.cpp",
     "herramientas/vscode-cforgev/package.json": ROOT / "herramientas" / "vscode-cforgev" / "package.json",
