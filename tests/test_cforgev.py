@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -566,16 +567,19 @@ std::cout << value << std::endl;
     def test_dynamic_library_common_abi(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            library = root / "libnative_math.dylib"
+            suffix = ".dylib" if sys.platform == "darwin" else ".so"
+            library_name = "libnative_math" + suffix
+            library = root / library_name
+            library_flags = ["-dynamiclib"] if sys.platform == "darwin" else ["-shared", "-fPIC"]
             subprocess.run(
-                ["clang++", "-std=c++17", "-dynamiclib", "-DCFV_NO_AUTO_REGISTER",
+                ["clang++", "-std=c++17", *library_flags, "-DCFV_NO_AUTO_REGISTER",
                  "ejemplos/interop/native_math.cpp",
                  "-I", "include", "-o", str(library)], check=True
             )
             source = (
-                'mostrar(use_native("libnative_math.dylib", "native_multiply", [6, 7]));'
-                'mostrar(use_native("libnative_math.dylib", "native_half", [5.0]));'
-                'mostrar(use_native("libnative_math.dylib", "native_greet", ["Javier"]));'
+                f'mostrar(use_native("{library_name}", "native_multiply", [6, 7]));'
+                f'mostrar(use_native("{library_name}", "native_half", [5.0]));'
+                f'mostrar(use_native("{library_name}", "native_greet", ["Javier"]));'
             )
             source_path, output_path = root / "native.cfv", root / "native"
             source_path.write_text(source, encoding="utf-8")
