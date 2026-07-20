@@ -1,0 +1,27 @@
+// I/O: construye ~4 MiB, escribe, lee y verifica el tamaño.
+bloque = "C-Forge benchmark io 0123456789 abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ\n";
+contenido = "";
+repeticiones = 50000;
+indice = 0;
+
+mientras (indice < repeticiones) {
+    contenido = contenido + bloque;
+    indice = indice + 1;
+}
+
+inicio_escritura = tiempo_actual();
+file_write("../build/benchmarks/io-masiva.txt", contenido);
+fin_escritura = tiempo_actual();
+
+inicio_lectura = tiempo_actual();
+leido = file_read("../build/benchmarks/io-masiva.txt");
+fin_lectura = tiempo_actual();
+
+mostrar("=== I/O: archivo masivo ===");
+mostrar("Bytes aproximados:");
+mostrar(longitud(leido));
+mostrar("Segundos de escritura:");
+mostrar(fin_escritura - inicio_escritura);
+mostrar("Segundos de lectura:");
+mostrar(fin_lectura - inicio_lectura);
+afirmar(longitud(leido) == longitud(contenido), "La lectura no coincide con la escritura");

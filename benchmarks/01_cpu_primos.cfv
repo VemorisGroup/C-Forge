@@ -1,0 +1,32 @@
+// CPU: primalidad por división de prueba usando operaciones C-Forge.
+limite = 20000;
+inicio = tiempo_actual();
+candidato = 2;
+cantidad = 0;
+
+mientras (candidato <= limite) {
+    divisor = 2;
+    es_primo = verdadero;
+    mientras (divisor * divisor <= candidato y es_primo) {
+        cociente = candidato / divisor;
+        si (redondear(cociente) == cociente) {
+            es_primo = falso;
+        }
+        divisor = divisor + 1;
+    }
+    si (es_primo) {
+        cantidad = cantidad + 1;
+    }
+    candidato = candidato + 1;
+}
+
+duracion = tiempo_actual() - inicio;
+mostrar("=== CPU: números primos ===");
+mostrar("Límite:");
+mostrar(limite);
+mostrar("Primos encontrados:");
+mostrar(cantidad);
+mostrar("Segundos:");
+mostrar(duracion);
+afirmar(cantidad == 2262, "El conteo de primos debe ser 2262");
+

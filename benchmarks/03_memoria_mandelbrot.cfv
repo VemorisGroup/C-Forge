@@ -1,0 +1,46 @@
+// Memoria + CPU: genera un fractal monocromático en formato PGM.
+ancho = 160;
+alto = 100;
+max_iteraciones = 40;
+imagen = "P2\n160 100\n255\n";
+fila = 0;
+inicio = tiempo_actual();
+
+mientras (fila < alto) {
+    columna = 0;
+    mientras (columna < ancho) {
+        cx = columna * 3.5 / ancho - 2.5;
+        cy = fila * 2.0 / alto - 1.0;
+        zx = 0.0;
+        zy = 0.0;
+        iteracion = 0;
+        dentro = verdadero;
+        mientras (iteracion < max_iteraciones y dentro) {
+            zx_nuevo = zx * zx - zy * zy + cx;
+            zy = 2.0 * zx * zy + cy;
+            zx = zx_nuevo;
+            si (zx * zx + zy * zy > 4.0) {
+                dentro = falso;
+            }
+            iteracion = iteracion + 1;
+        }
+        si (dentro) {
+            imagen = imagen + "0 ";
+        } sino {
+            imagen = imagen + "255 ";
+        }
+        columna = columna + 1;
+    }
+    imagen = imagen + "\n";
+    fila = fila + 1;
+}
+
+file_write("../build/benchmarks/mandelbrot.pgm", imagen);
+duracion = tiempo_actual() - inicio;
+mostrar("=== Memoria: Mandelbrot ===");
+mostrar("Píxeles:");
+mostrar(ancho * alto);
+mostrar("Bytes generados:");
+mostrar(longitud(imagen));
+mostrar("Segundos:");
+mostrar(duracion);

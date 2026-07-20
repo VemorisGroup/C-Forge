@@ -20,6 +20,19 @@ presenta mediante un alias propio, como `.cfv-gui`, solicita autorización y
 captura la salida del instalador. C-Forge muestra el paquete real antes de
 ejecutarlo y nunca instala dependencias sin consentimiento explícito.
 
+El catálogo de fusión ofrece conectores con sintaxis nativa que intercambian
+`ForgeValue` sin conversiones manuales:
+
+```cfv
+datos = json_parse("{\"valor\":21}")
+huella = forge_hash(datos)
+respuesta = sys_fetch("https://example.com/data.json")
+medicion = forge_bench("procesar", 1000, [datos.valor])
+```
+
+`sys_fetch` acepta únicamente HTTP/HTTPS, limita cada respuesta a 16 MiB y usa
+un tiempo de espera para evitar que una descarga bloquee indefinidamente la VM.
+
 > **Migración de marca:** C-Forge fue publicado inicialmente como C-Forgev.
 > El comando `cforge`, la extensión `.cfv` y los identificadores técnicos
 > `cforgev` se conservan para no romper instalaciones ni proyectos existentes.

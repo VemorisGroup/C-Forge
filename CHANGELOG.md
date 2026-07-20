@@ -2,6 +2,9 @@
 
 ## En desarrollo
 
+- Conectores nativos `forge_hash`, `forge_bench`, `sys_fetch` y `json_parse`.
+- Flujo transparente de mapas, listas, textos y números mediante `ForgeValue`.
+- Programas de fusión compilables sin `extern`, prefijos de runtime ni punto y coma.
 - Gestor seguro de dependencias del sistema con consentimiento explícito.
 - Alias `.cfv-gui` para componentes gráficos utilizados desde C-Forge.
 - Captura de `stdout`/`stderr` y salida limpia del C-Forge Package Manager.

@@ -7,6 +7,7 @@ import argparse
 import builtins
 import concurrent.futures
 import difflib
+import hashlib
 import importlib
 import json
 import math
@@ -19,6 +20,8 @@ import subprocess
 import sys
 import textwrap
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
@@ -955,6 +958,79 @@ class Interpreter:
                 if not self.match_value(","):
                     break
         self.consume_value(")", "Se esperaba ')' después de los argumentos")
+        if name.value == "forge_hash":
+            if len(arguments) != 1 or not is_universal_data(arguments[0]):
+                raise CForgevError(
+                    f"Línea {name.line}: forge_hash requiere un ForgeValue serializable"
+                )
+            canonical = json.dumps(
+                arguments[0], ensure_ascii=False, sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            return hashlib.sha256(canonical).hexdigest()
+        if name.value == "json_parse":
+            if len(arguments) != 1 or not isinstance(arguments[0], str):
+                raise CForgevError(f"Línea {name.line}: json_parse requiere un texto")
+            try:
+                result = json.loads(arguments[0])
+            except json.JSONDecodeError as error:
+                raise CForgevError(
+                    f"Línea {name.line}: JSON inválido en columna {error.colno}: {error.msg}"
+                ) from error
+            if not is_universal_data(result):
+                raise CForgevError(f"Línea {name.line}: JSON produjo un tipo no compatible")
+            return result
+        if name.value == "sys_fetch":
+            if len(arguments) != 1 or not isinstance(arguments[0], str):
+                raise CForgevError(f"Línea {name.line}: sys_fetch requiere una URL")
+            url = arguments[0]
+            if not url.startswith(("https://", "http://")):
+                raise CForgevError(f"Línea {name.line}: sys_fetch solo acepta HTTP o HTTPS")
+            request = urllib.request.Request(
+                url, headers={"User-Agent": f"C-Forge/{VERSION}"}
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    payload = response.read(16 * 1024 * 1024 + 1)
+                    if len(payload) > 16 * 1024 * 1024:
+                        raise CForgevError(
+                            f"Línea {name.line}: sys_fetch superó el límite de 16 MiB"
+                        )
+                    charset = response.headers.get_content_charset() or "utf-8"
+                    return payload.decode(charset)
+            except CForgevError:
+                raise
+            except (OSError, UnicodeError, urllib.error.URLError) as error:
+                raise CForgevError(f"Línea {name.line}: sys_fetch falló: {error}") from error
+        if name.value == "forge_bench":
+            if len(arguments) not in {2, 3} or not isinstance(arguments[0], str):
+                raise CForgevError(
+                    f"Línea {name.line}: forge_bench requiere nombre, iteraciones y argumentos opcionales"
+                )
+            if not isinstance(arguments[1], (int, float)):
+                raise CForgevError(f"Línea {name.line}: las iteraciones deben ser numéricas")
+            iterations = int(arguments[1])
+            if iterations < 1 or iterations > 10_000_000:
+                raise CForgevError(f"Línea {name.line}: iteraciones fuera del rango 1..10.000.000")
+            function = self.functions.get(arguments[0])
+            if function is None:
+                raise CForgevError(
+                    f"Línea {name.line}: función de benchmark desconocida '{arguments[0]}'"
+                )
+            call_arguments = arguments[2] if len(arguments) == 3 else []
+            if not isinstance(call_arguments, list):
+                raise CForgevError(f"Línea {name.line}: los argumentos deben ser una lista")
+            started = time.perf_counter()
+            result = None
+            for _ in range(iterations):
+                result = self.invoke_user_function(function, call_arguments, name.line)
+            seconds = time.perf_counter() - started
+            return {
+                "resultado": result,
+                "iteraciones": iterations,
+                "segundos": seconds,
+                "por_segundo": iterations / seconds if seconds else 0,
+            }
         if name.value == "leer":
             if len(arguments) > 1:
                 raise CForgevError(f"Línea {name.line}: 'leer' acepta cero o un argumento")

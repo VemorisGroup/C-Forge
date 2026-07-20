@@ -1,0 +1,27 @@
+// Concurrencia: trabajos independientes, sin variable compartida ni carrera de datos.
+funcion trabajo(valor) {
+    retornar valor * valor + 1;
+}
+
+tareas = [];
+indice = 0;
+mientras (indice < 500) {
+    agregar(tareas, indice);
+    indice = indice + 1;
+}
+
+inicio = tiempo_actual();
+resultados = paralelo("trabajo", tareas);
+duracion = tiempo_actual() - inicio;
+
+mostrar("=== Concurrencia: trabajos paralelos ===");
+mostrar("Tareas completadas:");
+mostrar(longitud(resultados));
+mostrar("Primer resultado:");
+mostrar(resultados[0]);
+mostrar("Último resultado:");
+mostrar(resultados[499]);
+mostrar("Segundos:");
+mostrar(duracion);
+afirmar(longitud(resultados) == 500, "No finalizaron todas las tareas");
+

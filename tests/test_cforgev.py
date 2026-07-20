@@ -55,6 +55,39 @@ class InterpreterTests(unittest.TestCase):
         self.assertIn("C-Forge Package Manager", branded)
         self.assertIn("sin espacio", branded)
 
+    def test_native_fusion_connectors_without_semicolons(self) -> None:
+        source = r'''
+        funcion duplicar(valor) {
+            retornar valor * 2
+        }
+        datos = json_parse("{\"nombre\":\"C-Forge\",\"valor\":21}")
+        huella = forge_hash(datos)
+        reporte = forge_bench("duplicar", 100, [datos.valor])
+        mostrar(datos.nombre)
+        mostrar(huella)
+        mostrar(reporte.resultado)
+        mostrar(reporte.iteraciones)
+        '''
+        expected = (
+            "C-Forge\n"
+            "112f5f0fa8fe89198cddd25a52eb0174713cb1b2691e2a4c63f8eed25bbee46c\n"
+            "42\n100\n"
+        )
+        self.assertEqual(self.output(source), expected)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_path, output_path = root / "fusion.cfv", root / "fusion"
+            source_path.write_text(source, encoding="utf-8")
+            compile_native(source_path, output_path)
+            result = subprocess.run(
+                [str(output_path)], capture_output=True, text=True, check=True
+            )
+            self.assertEqual(result.stdout, expected)
+
+    def test_sys_fetch_rejects_non_http_urls(self) -> None:
+        with self.assertRaisesRegex(CForgevError, "solo acepta HTTP o HTTPS"):
+            self.output('mostrar(sys_fetch("file:///etc/passwd"))')
+
     def test_if_else_and_comparisons(self) -> None:
         source = """
         sea edad = 20;
