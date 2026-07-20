@@ -12,6 +12,7 @@ dist/
 # Generated and temporary workspaces
 work/
 __pycache__/
+*.egg-info/
 *.py[cod]
 *.cfv.bak
 .DS_Store
