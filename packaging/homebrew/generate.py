@@ -11,9 +11,9 @@ from pathlib import Path
 parser = argparse.ArgumentParser()
 parser.add_argument("version")
 parser.add_argument("archive", type=Path)
-parser.add_argument("-o", "--output", type=Path, default=Path("dist/Formula/cforgev.rb"))
+parser.add_argument("-o", "--output", type=Path, default=Path("dist/Formula/cforge.rb"))
 args = parser.parse_args()
-template = Path(__file__).with_name("Formula").joinpath("cforgev.rb.template").read_text(
+template = Path(__file__).with_name("Formula").joinpath("cforge.rb.template").read_text(
     encoding="utf-8"
 )
 digest = hashlib.sha256(args.archive.read_bytes()).hexdigest()

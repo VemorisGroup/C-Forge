@@ -1,5 +1,12 @@
 # Historial de C-Forge
 
+## 1.4.1-definitive — 2026-07-20
+
+- Sintaxis compatible `console.log`, `System.out.println`, `std::cout` y `cout`.
+- Colecciones compatibles mediante `.append`, `.push`, `.length` y `.len`.
+- Forge Shared Arena 1.0 y catálogo declarativo de conectores.
+- Fórmula Homebrew pública renombrada a `cforge`.
+
 ## En desarrollo
 
 - Conectores nativos `forge_hash`, `forge_bench`, `sys_fetch` y `json_parse`.

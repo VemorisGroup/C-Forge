@@ -39,7 +39,7 @@ def generate() -> str:
             + raw_literal(content, index * 2 + 1) + "}"
         )
     resources = ",\n".join(entries)
-    return f'''// C-Forge 1.4.0 Definitive — distribución monolítica generada.
+    return f'''// C-Forge 1.4.1 Definitive — distribución monolítica generada.
 // Fuente reproducible: herramientas/generar_amalgama.py
 
 #include <Python.h>
@@ -236,7 +236,7 @@ bool command_available(const std::string& command) {{
 }}
 
 int setup_environment() {{
-    std::cout << "C-Forge Setup 1.4.0\\n";
+    std::cout << "C-Forge Setup 1.4.1\\n";
     const bool clang = command_available("clang++");
     const bool python = command_available("python3");
 #ifdef __APPLE__

@@ -8,7 +8,7 @@ la licencia propietaria incluida represente la decisión de Vemoris Group.
 ```bash
 git init
 git add .
-git commit -m "C-Forge 1.4.0 definitive"
+git commit -m "C-Forge 1.4.1 definitive"
 git branch -M main
 git remote add origin https://github.com/VemorisGroup/C-Forge.git
 git push -u origin main
@@ -17,7 +17,7 @@ git push -u origin main
 La configuración `.gitignore` evita subir builds, SDKs locales, cachés,
 temporales y paquetes de distribución duplicados.
 
-Para una versión descargable, crea y publica el tag `v1.4.0`. El workflow
+Para una versión descargable, crea y publica el tag `v1.4.1`. El workflow
 `Publicar paquetes` prueba y genera automáticamente:
 
 - Archivo portable para macOS.

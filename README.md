@@ -7,7 +7,7 @@
 > Lenguaje de programación experimental de Vemoris Group con sintaxis propia,
 > ejecución interactiva, compilación a C++17 e interoperabilidad políglota.
 
-**Versión actual:** `1.4.0-definitive`<br>
+**Versión actual:** `1.4.1-definitive`<br>
 **Extensión oficial:** `.cfv`<br>
 **Estado:** experimental; apto para aprendizaje, demostraciones y desarrollo del motor.
 
@@ -137,7 +137,7 @@ desde [GitHub Releases](https://github.com/VemorisGroup/C-Forge/releases).
 macOS, cuando se publique el tap de Vemoris Group:
 
 ```bash
-brew install VemorisGroup/cforgev/cforgev
+brew install VemorisGroup/cforgev/cforge
 ```
 
 Windows, después de la aceptación del manifiesto en WinGet:
@@ -149,7 +149,7 @@ winget install VemorisGroup.CForgev
 Debian/Ubuntu usando el paquete descargado del lanzamiento:
 
 ```bash
-sudo apt install ./cforgev_1.4.0_all.deb
+sudo apt install ./cforgev_1.4.1_all.deb
 ```
 
 La preparación y las condiciones necesarias para ofrecer los comandos cortos

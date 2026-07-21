@@ -3,22 +3,23 @@
 ## Estado real de los comandos
 
 La automatización del repositorio genera archivos portables para macOS, Linux y
-Windows, además de un paquete `.deb`. Publicar un tag como `v1.4.0` crea una
+Windows, además de un paquete `.deb`. Publicar un tag como `v1.4.1` crea una
 GitHub Release mediante `.github/workflows/release.yml`.
 
 ### Homebrew
 
-La fórmula se genera desde `packaging/homebrew/Formula/cforgev.rb.template` con
+La fórmula se genera desde `packaging/homebrew/Formula/cforge.rb.template` con
 el SHA-256 del código fuente del tag y se adjunta a cada lanzamiento.
 Debe publicarse en un repositorio llamado `VemorisGroup/homebrew-cforgev`.
 Desde ese momento funcionará el comando oficial del tap:
 
 ```bash
-brew install VemorisGroup/cforgev/cforgev
+brew install VemorisGroup/cforgev/cforge
 ```
 
-Después de instalar el tap, también funcionará `brew install cforgev`. Para que
-ese último comando funcione sin tap, Homebrew debe aceptar la fórmula en
+Después de instalar el tap, también funcionará `brew install cforge`. El comando
+`cforgev` se conserva como alias histórico dentro del paquete. Para instalar sin
+tap, Homebrew debe aceptar la fórmula en
 `homebrew/core`; la licencia actual propietaria no cumple sus requisitos de
 software libre.
 
@@ -28,7 +29,7 @@ El lanzamiento genera un ejecutable autónomo con PyInstaller y también un ZIP
 portable para desarrollo. Después se completa el manifiesto con:
 
 ```bash
-python packaging/winget/generate.py 1.4.0 dist/cforge-1.4.0-windows-x64.exe
+python packaging/winget/generate.py 1.4.1 dist/cforge-1.4.1-windows-x64.exe
 ```
 
 El manifiesto resultante debe enviarse a `microsoft/winget-pkgs`. Cuando sea

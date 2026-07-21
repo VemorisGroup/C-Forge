@@ -1,4 +1,4 @@
-// C-Forge 1.4.0 Definitive — distribución monolítica generada.
+// C-Forge 1.4.1 Definitive — distribución monolítica generada.
 // Fuente reproducible: herramientas/generar_amalgama.py
 
 #include <Python.h>
@@ -100,7 +100,7 @@ import urllib.request
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
-VERSION = "1.4.0-definitive"
+VERSION = "1.4.1-definitive"
 
 CONNECTOR_CATALOG = {
     "ia_": "python",
@@ -2068,7 +2068,7 @@ def main() -> int:
 
 def setup_environment() -> int:
     """Diagnostica dependencias sin modificar el equipo silenciosamente."""
-    print("C-Forge Setup 1.4.0")
+    print("C-Forge Setup 1.4.1")
     clang = shutil.which("clang++") is not None
     python = bool(getattr(sys, "frozen", False)) or shutil.which("python3") is not None
     node = shutil.which("node") is not None
@@ -3910,7 +3910,7 @@ std::filesystem::path find_engine(const char* executable) {
 
 void print_help() {
     std::cout
-        << "C-Forge Toolchain 1.4.0\n"
+        << "C-Forge Toolchain 1.4.1\n"
         << "Uso:\n"
         << "  cforge fmt archivo.cfv\n"
         << "  cforge test archivo.cfv\n";
@@ -4206,7 +4206,7 @@ bool command_available(const std::string& command) {
 }
 
 int setup_environment() {
-    std::cout << "C-Forge Setup 1.4.0\n";
+    std::cout << "C-Forge Setup 1.4.1\n";
     const bool clang = command_available("clang++");
     const bool python = command_available("python3");
 #ifdef __APPLE__

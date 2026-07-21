@@ -1,8 +1,8 @@
-// C-Forge 1.4.0 Definitive — demostración maestra oficial
+// C-Forge 1.4.1 Definitive — demostración maestra oficial
 import pip:math;
 import npm:path;
 
-cluster version = "1.4.0-definitive";
+cluster version = "1.4.1-definitive";
 cluster proyecto = "C-Forge";
 
 // Tipado gradual: explícito e inferido.

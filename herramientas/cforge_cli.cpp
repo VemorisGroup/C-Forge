@@ -29,7 +29,7 @@ std::filesystem::path find_engine(const char* executable) {
 
 void print_help() {
     std::cout
-        << "C-Forge Toolchain 1.4.0\n"
+        << "C-Forge Toolchain 1.4.1\n"
         << "Uso:\n"
         << "  cforge fmt archivo.cfv\n"
         << "  cforge test archivo.cfv\n";

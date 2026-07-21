@@ -1,4 +1,4 @@
-class Cforgev < Formula
+class Cforge < Formula
   desc "Lenguaje de programación experimental C-Forge"
   homepage "https://github.com/VemorisGroup/C-Forge"
   url "https://github.com/VemorisGroup/C-Forge/archive/refs/tags/vVERSION.tar.gz"

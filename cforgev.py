@@ -25,7 +25,7 @@ import urllib.request
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
-VERSION = "1.4.0-definitive"
+VERSION = "1.4.1-definitive"
 
 CONNECTOR_CATALOG = {
     "ia_": "python",
@@ -1993,7 +1993,7 @@ def main() -> int:
 
 def setup_environment() -> int:
     """Diagnostica dependencias sin modificar el equipo silenciosamente."""
-    print("C-Forge Setup 1.4.0")
+    print("C-Forge Setup 1.4.1")
     clang = shutil.which("clang++") is not None
     python = bool(getattr(sys, "frozen", False)) or shutil.which("python3") is not None
     node = shutil.which("node") is not None

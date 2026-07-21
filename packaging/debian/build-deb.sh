@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-1.4.0}"
+VERSION="${1:-1.4.1}"
 ARCH="${2:-all}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STAGE="$ROOT/dist/deb-root"

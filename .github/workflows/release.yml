@@ -63,9 +63,9 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz" -o source.tar.gz
-          python packaging/homebrew/generate.py "$VERSION" source.tar.gz -o release-assets/cforgev.rb
+          python packaging/homebrew/generate.py "$VERSION" source.tar.gz -o release-assets/cforge.rb
           python packaging/winget/generate.py "$VERSION" "release-assets/cforge-${VERSION}-windows-x64.exe" -o release-assets/VemorisGroup.CForgev.yaml
       - name: Crear GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release-assets/* --generate-notes --title "C-Forgev $GITHUB_REF_NAME"
+        run: gh release create "$GITHUB_REF_NAME" release-assets/* --generate-notes --title "C-Forge $GITHUB_REF_NAME"
