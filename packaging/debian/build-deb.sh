@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-1.4.1}"
+VERSION="${1:-1.5.0}"
 ARCH="${2:-all}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STAGE="$ROOT/dist/deb-root"
@@ -10,7 +10,9 @@ PACKAGE="$ROOT/dist/cforgev_${VERSION}_${ARCH}.deb"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/DEBIAN" "$STAGE/usr/lib/cforgev" "$STAGE/usr/bin"
 install -m 0644 "$ROOT/cforgev.py" "$ROOT/compilador_nativo.py" \
-  "$ROOT/compilador_wasm.py" "$STAGE/usr/lib/cforgev/"
+  "$ROOT/compilador_wasm.py" "$ROOT/cforge_diagnostics.py" \
+  "$ROOT/cforge_lsp.py" "$ROOT/cforge_packages.py" "$ROOT/cforge_vm.py" \
+  "$STAGE/usr/lib/cforgev/"
 cp -R "$ROOT/include" "$ROOT/ejemplos" "$STAGE/usr/lib/cforgev/"
 
 cat > "$STAGE/DEBIAN/control" <<EOF

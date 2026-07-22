@@ -25,7 +25,7 @@ import urllib.request
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
-VERSION = "1.4.1-definitive"
+VERSION = "1.5.0-developer-preview"
 
 CONNECTOR_CATALOG = {
     "ia_": "python",
@@ -1927,7 +1927,61 @@ def main() -> int:
             print(f"[C-Forge Runtime Exception] {error}", file=sys.stderr)
             return 1
         return 0
-    parser = argparse.ArgumentParser(prog="cforgev", description="Intérprete de C-Forge")
+    if len(sys.argv) >= 2 and sys.argv[1] == "check":
+        import json as json_module
+        from cforge_diagnostics import analyze_file
+        if len(sys.argv) not in {3, 4} or (len(sys.argv) == 4 and sys.argv[3] != "--json"):
+            print("Uso: cforge check archivo.cfv [--json]", file=sys.stderr); return 2
+        diagnostics = analyze_file(Path(sys.argv[2]))
+        if len(sys.argv) == 4:
+            print(json_module.dumps([item.to_dict() for item in diagnostics], ensure_ascii=False))
+        else:
+            for item in diagnostics:
+                print(f"{sys.argv[2]}:{item.line}:{item.column}: {item.severity} {item.code}: {item.message}")
+            if not diagnostics: print(f"[OK] {sys.argv[2]}: sin errores")
+        return 1 if any(item.severity == "error" for item in diagnostics) else 0
+    if len(sys.argv) >= 2 and sys.argv[1] in {"vm", "bytecode", "debug"}:
+        from cforge_vm import VirtualMachine, compile_source, disassemble, execute_file
+        if len(sys.argv) != 3:
+            print(f"Uso: cforge {sys.argv[1]} archivo.cfv", file=sys.stderr); return 2
+        try:
+            path = Path(sys.argv[2])
+            if sys.argv[1] == "vm": execute_file(path)
+            elif sys.argv[1] == "bytecode": print(disassemble(compile_source(path.read_text(encoding="utf-8"))))
+            else:
+                program = compile_source(path.read_text(encoding="utf-8"))
+                def trace(chunk, offset, instruction, scope):
+                    variables = ", ".join(f"{key}={value!r}" for key, value in sorted(scope.items()))
+                    print(f"[debug] {chunk}:{offset:04d} {instruction.op} {instruction.arg!r} | {variables}", file=sys.stderr)
+                VirtualMachine(program, trace=trace).run()
+        except (CForgevError, OSError) as error:
+            print(f"[C-Forge VM Exception] {error}", file=sys.stderr); return 1
+        return 0
+    if len(sys.argv) >= 2 and sys.argv[1] == "lsp":
+        if len(sys.argv) != 2:
+            print("Uso: cforge lsp", file=sys.stderr); return 2
+        from cforge_lsp import run
+        return run()
+    if len(sys.argv) >= 2 and sys.argv[1] == "pkg":
+        from cforge_packages import add, init, list_packages, remove
+        action = sys.argv[2] if len(sys.argv) > 2 else ""
+        try:
+            if action == "init" and len(sys.argv) in {3, 4}:
+                init(Path.cwd(), sys.argv[3] if len(sys.argv) == 4 else None)
+                print(f"Proyecto C-Forge creado: {Path.cwd() / 'cforge.json'}")
+            elif action == "add" and len(sys.argv) == 5:
+                add(Path.cwd(), sys.argv[3], sys.argv[4]); print(f"Dependencia fijada: {Path.cwd() / 'cforge.lock'}")
+            elif action == "remove" and len(sys.argv) == 4:
+                remove(Path.cwd(), sys.argv[3]); print(f"Dependencia eliminada: {sys.argv[3]}")
+            elif action == "list" and len(sys.argv) == 3:
+                packages = list_packages(Path.cwd())
+                print("\n".join(f"{name} -> {path}" for name, path in packages) or "Sin dependencias")
+            else:
+                print("Uso: cforge pkg init [nombre] | add nombre ruta | remove nombre | list", file=sys.stderr); return 2
+        except (CForgevError, OSError, ValueError) as error:
+            print(f"[C-Forge Package Manager] {error}", file=sys.stderr); return 1
+        return 0
+    parser = argparse.ArgumentParser(prog="cforge", description="Intérprete de C-Forge")
     parser.add_argument("archivo", nargs="?", type=Path, help="archivo .cfv que se ejecutará")
     parser.add_argument("--compilar", action="store_true", help="crear un ejecutable nativo")
     parser.add_argument("-o", "--salida", type=Path, help="ruta del ejecutable generado")
@@ -1993,7 +2047,7 @@ def main() -> int:
 
 def setup_environment() -> int:
     """Diagnostica dependencias sin modificar el equipo silenciosamente."""
-    print("C-Forge Setup 1.4.1")
+    print("C-Forge Setup 1.5.0 Developer Preview")
     clang = shutil.which("clang++") is not None
     python = bool(getattr(sys, "frozen", False)) or shutil.which("python3") is not None
     node = shutil.which("node") is not None

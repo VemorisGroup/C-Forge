@@ -8,7 +8,9 @@ class Cforge < Formula
   depends_on "python@3.13"
 
   def install
-    libexec.install "cforgev.py", "compilador_nativo.py", "compilador_wasm.py", "include", "ejemplos"
+    libexec.install "cforgev.py", "compilador_nativo.py", "compilador_wasm.py",
+      "cforge_diagnostics.py", "cforge_lsp.py", "cforge_packages.py", "cforge_vm.py",
+      "include", "ejemplos"
     (bin/"cforge").write <<~SH
       #!/bin/sh
       exec "#{Formula["python@3.13"].opt_bin}/python3.13" "#{libexec}/cforgev.py" "$@"

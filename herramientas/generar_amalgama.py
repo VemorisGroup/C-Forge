@@ -13,6 +13,10 @@ RESOURCES = {
     "cforgev.py": ROOT / "cforgev.py",
     "compilador_nativo.py": ROOT / "compilador_nativo.py",
     "compilador_wasm.py": ROOT / "compilador_wasm.py",
+    "cforge_diagnostics.py": ROOT / "cforge_diagnostics.py",
+    "cforge_lsp.py": ROOT / "cforge_lsp.py",
+    "cforge_packages.py": ROOT / "cforge_packages.py",
+    "cforge_vm.py": ROOT / "cforge_vm.py",
     "include/cforgev_ffi.h": ROOT / "include" / "cforgev_ffi.h",
     "include/cforge_shared_arena.h": ROOT / "include" / "cforge_shared_arena.h",
     "herramientas/cforgev_ffi_runner.cpp": ROOT / "herramientas" / "cforgev_ffi_runner.cpp",
@@ -39,7 +43,7 @@ def generate() -> str:
             + raw_literal(content, index * 2 + 1) + "}"
         )
     resources = ",\n".join(entries)
-    return f'''// C-Forge 1.4.1 Definitive — distribución monolítica generada.
+    return f'''// C-Forge 1.5.0 Developer Preview — distribución monolítica generada.
 // Fuente reproducible: herramientas/generar_amalgama.py
 
 #include <Python.h>
@@ -236,7 +240,7 @@ bool command_available(const std::string& command) {{
 }}
 
 int setup_environment() {{
-    std::cout << "C-Forge Setup 1.4.1\\n";
+    std::cout << "C-Forge Setup 1.5.0 Developer Preview\\n";
     const bool clang = command_available("clang++");
     const bool python = command_available("python3");
 #ifdef __APPLE__

@@ -423,9 +423,12 @@ class StaticTypeAnalyzer:
     """Infiere tipos evidentes y rechaza contradicciones antes de invocar Clang."""
 
     def analyze(self, program: Program) -> None:
-        self.statements(program.statements, {})
+        global_types: dict[str, str] = {}
+        self.statements(program.statements, global_types)
         for function in program.functions:
-            self.statements(function[3], {parameter: "cualquiera" for parameter in function[2]})
+            function_types = dict(global_types)
+            function_types.update({parameter: "cualquiera" for parameter in function[2]})
+            self.statements(function[3], function_types)
 
     def statements(self, statements: list[Stmt], types: dict[str, str]) -> None:
         for statement in statements:
@@ -446,9 +449,11 @@ class StaticTypeAnalyzer:
                         f"Inferencia estática: '{statement[1]}' es {expected} y no puede recibir {inferred}"
                     )
             elif kind == "if":
+                self.expression(statement[1], types)
                 self.statements(statement[2], types)
                 self.statements(statement[3], types)
             elif kind == "while":
+                self.expression(statement[1], types)
                 self.statements(statement[2], types)
             elif kind == "try":
                 self.statements(statement[1], types)
@@ -461,6 +466,10 @@ class StaticTypeAnalyzer:
                 validate_foreign_memory(statement[1], statement[2])
             elif kind == "test":
                 self.statements(statement[2], dict(types))
+            elif kind in {"print", "return", "expression"}:
+                self.expression(statement[1], types)
+            elif kind == "universal_import":
+                types[statement[2]] = "cualquiera"
 
     def expression(self, expression: Expr, types: dict[str, str]) -> str:
         kind = expression[0]
@@ -468,15 +477,46 @@ class StaticTypeAnalyzer:
         if kind == "string": return "texto"
         if kind == "bool": return "booleano"
         if kind == "null": return "nulo"
-        if kind == "list": return "lista"
-        if kind == "map": return "mapa"
+        if kind == "list":
+            for value in expression[1]: self.expression(value, types)
+            return "lista"
+        if kind == "map":
+            for key, value in expression[1]:
+                self.expression(key, types); self.expression(value, types)
+            return "mapa"
         if kind == "variable": return types.get(expression[1], "cualquiera")
-        if kind == "unary": return "booleano" if expression[1] == "no" else "numero"
+        if kind == "unary":
+            value_type = self.expression(expression[2], types)
+            if expression[1] == "-" and value_type not in {"numero", "cualquiera"}:
+                raise CForgevError("Inferencia estática: '-' requiere un número")
+            return "booleano" if expression[1] == "no" else "numero"
         if kind == "binary":
+            left, right = self.expression(expression[2], types), self.expression(expression[3], types)
             if expression[1] in {"==", "!=", ">", ">=", "<", "<=", "y", "o"}:
                 return "booleano"
-            left, right = self.expression(expression[2], types), self.expression(expression[3], types)
+            if expression[1] in {"-", "*", "/"} and any(
+                value not in {"numero", "cualquiera"} for value in (left, right)
+            ):
+                raise CForgevError(
+                    f"Inferencia estática: '{expression[1]}' requiere números, recibió {left} y {right}"
+                )
+            if expression[1] == "+" and left != "cualquiera" and right != "cualquiera" and left != right:
+                raise CForgevError(
+                    f"Inferencia estática: '+' no puede combinar {left} con {right}"
+                )
             return left if left == right else "cualquiera"
+        if kind == "call":
+            for argument in expression[2]: self.expression(argument, types)
+            return "cualquiera"
+        if kind == "method_call":
+            self.expression(expression[1], types)
+            for argument in expression[3]: self.expression(argument, types)
+            return "cualquiera"
+        if kind == "field":
+            self.expression(expression[1], types); return "cualquiera"
+        if kind == "index":
+            self.expression(expression[1], types); self.expression(expression[2], types)
+            return "cualquiera"
         return "cualquiera"
 
 

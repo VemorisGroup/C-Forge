@@ -7,7 +7,7 @@
 > Lenguaje de programación experimental de Vemoris Group con sintaxis propia,
 > ejecución interactiva, compilación a C++17 e interoperabilidad políglota.
 
-**Versión actual:** `1.4.1-definitive`<br>
+**Versión actual:** `1.5.0-developer-preview`<br>
 **Extensión oficial:** `.cfv`<br>
 **Estado:** experimental; apto para aprendizaje, demostraciones y desarrollo del motor.
 
@@ -86,6 +86,23 @@ print(datos.len())
 - Extensión de sintaxis para Visual Studio Code.
 - Distribución monolítica C++ e instalador global para macOS.
 - Paquetes portables y automatización de lanzamientos para macOS, Linux y Windows.
+- Bytecode y VM propios, diagnósticos estructurados, LSP y gestor local reproducible.
+
+## Herramientas profesionales (base 1.0)
+
+```bash
+cforge check programa.cfv          # análisis estático con códigos CFxxxx
+cforge bytecode programa.cfv       # inspeccionar bytecode propio
+cforge vm programa.cfv             # ejecutar en la VM de pila
+cforge debug programa.cfv          # trazar instrucciones y variables
+cforge lsp                          # servidor LSP 3.17 por stdio
+cforge pkg init mi-proyecto        # crear cforge.json y cforge.lock
+```
+
+La matriz honesta de capacidades y trabajo pendiente está en
+[`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md). Una auditoría de
+seguridad independiente y resultados de rendimiento no se sustituyen con afirmaciones:
+deben publicarse como evidencia reproducible antes de declarar el motor apto para producción.
 
 ## Inicio rápido
 

@@ -1,4 +1,4 @@
-# Especificación de C-Forge 1.4.1 Definitive
+# Especificación de C-Forge 1.5.0 Developer Preview
 
 ## Estado
 

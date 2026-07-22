@@ -1,4 +1,4 @@
-// C-Forge 1.4.1 Definitive — distribución monolítica generada.
+// C-Forge 1.5.0 Developer Preview — distribución monolítica generada.
 // Fuente reproducible: herramientas/generar_amalgama.py
 
 #include <Python.h>
@@ -100,7 +100,7 @@ import urllib.request
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
-VERSION = "1.4.1-definitive"
+VERSION = "1.5.0-developer-preview"
 
 CONNECTOR_CATALOG = {
     "ia_": "python",
@@ -2002,7 +2002,61 @@ def main() -> int:
             print(f"[C-Forge Runtime Exception] {error}", file=sys.stderr)
             return 1
         return 0
-    parser = argparse.ArgumentParser(prog="cforgev", description="Intérprete de C-Forge")
+    if len(sys.argv) >= 2 and sys.argv[1] == "check":
+        import json as json_module
+        from cforge_diagnostics import analyze_file
+        if len(sys.argv) not in {3, 4} or (len(sys.argv) == 4 and sys.argv[3] != "--json"):
+            print("Uso: cforge check archivo.cfv [--json]", file=sys.stderr); return 2
+        diagnostics = analyze_file(Path(sys.argv[2]))
+        if len(sys.argv) == 4:
+            print(json_module.dumps([item.to_dict() for item in diagnostics], ensure_ascii=False))
+        else:
+            for item in diagnostics:
+                print(f"{sys.argv[2]}:{item.line}:{item.column}: {item.severity} {item.code}: {item.message}")
+            if not diagnostics: print(f"[OK] {sys.argv[2]}: sin errores")
+        return 1 if any(item.severity == "error" for item in diagnostics) else 0
+    if len(sys.argv) >= 2 and sys.argv[1] in {"vm", "bytecode", "debug"}:
+        from cforge_vm import VirtualMachine, compile_source, disassemble, execute_file
+        if len(sys.argv) != 3:
+            print(f"Uso: cforge {sys.argv[1]} archivo.cfv", file=sys.stderr); return 2
+        try:
+            path = Path(sys.argv[2])
+            if sys.argv[1] == "vm": execute_file(path)
+            elif sys.argv[1] == "bytecode": print(disassemble(compile_source(path.read_text(encoding="utf-8"))))
+            else:
+                program = compile_source(path.read_text(encoding="utf-8"))
+                def trace(chunk, offset, instruction, scope):
+                    variables = ", ".join(f"{key}={value!r}" for key, value in sorted(scope.items()))
+                    print(f"[debug] {chunk}:{offset:04d} {instruction.op} {instruction.arg!r} | {variables}", file=sys.stderr)
+                VirtualMachine(program, trace=trace).run()
+        except (CForgevError, OSError) as error:
+            print(f"[C-Forge VM Exception] {error}", file=sys.stderr); return 1
+        return 0
+    if len(sys.argv) >= 2 and sys.argv[1] == "lsp":
+        if len(sys.argv) != 2:
+            print("Uso: cforge lsp", file=sys.stderr); return 2
+        from cforge_lsp import run
+        return run()
+    if len(sys.argv) >= 2 and sys.argv[1] == "pkg":
+        from cforge_packages import add, init, list_packages, remove
+        action = sys.argv[2] if len(sys.argv) > 2 else ""
+        try:
+            if action == "init" and len(sys.argv) in {3, 4}:
+                init(Path.cwd(), sys.argv[3] if len(sys.argv) == 4 else None)
+                print(f"Proyecto C-Forge creado: {Path.cwd() / 'cforge.json'}")
+            elif action == "add" and len(sys.argv) == 5:
+                add(Path.cwd(), sys.argv[3], sys.argv[4]); print(f"Dependencia fijada: {Path.cwd() / 'cforge.lock'}")
+            elif action == "remove" and len(sys.argv) == 4:
+                remove(Path.cwd(), sys.argv[3]); print(f"Dependencia eliminada: {sys.argv[3]}")
+            elif action == "list" and len(sys.argv) == 3:
+                packages = list_packages(Path.cwd())
+                print("\n".join(f"{name} -> {path}" for name, path in packages) or "Sin dependencias")
+            else:
+                print("Uso: cforge pkg init [nombre] | add nombre ruta | remove nombre | list", file=sys.stderr); return 2
+        except (CForgevError, OSError, ValueError) as error:
+            print(f"[C-Forge Package Manager] {error}", file=sys.stderr); return 1
+        return 0
+    parser = argparse.ArgumentParser(prog="cforge", description="Intérprete de C-Forge")
     parser.add_argument("archivo", nargs="?", type=Path, help="archivo .cfv que se ejecutará")
     parser.add_argument("--compilar", action="store_true", help="crear un ejecutable nativo")
     parser.add_argument("-o", "--salida", type=Path, help="ruta del ejecutable generado")
@@ -2068,7 +2122,7 @@ def main() -> int:
 
 def setup_environment() -> int:
     """Diagnostica dependencias sin modificar el equipo silenciosamente."""
-    print("C-Forge Setup 1.4.1")
+    print("C-Forge Setup 1.5.0 Developer Preview")
     clang = shutil.which("clang++") is not None
     python = bool(getattr(sys, "frozen", False)) or shutil.which("python3") is not None
     node = shutil.which("node") is not None
@@ -2555,9 +2609,12 @@ class StaticTypeAnalyzer:
     """Infiere tipos evidentes y rechaza contradicciones antes de invocar Clang."""
 
     def analyze(self, program: Program) -> None:
-        self.statements(program.statements, {})
+        global_types: dict[str, str] = {}
+        self.statements(program.statements, global_types)
         for function in program.functions:
-            self.statements(function[3], {parameter: "cualquiera" for parameter in function[2]})
+            function_types = dict(global_types)
+            function_types.update({parameter: "cualquiera" for parameter in function[2]})
+            self.statements(function[3], function_types)
 
     def statements(self, statements: list[Stmt], types: dict[str, str]) -> None:
         for statement in statements:
@@ -2578,9 +2635,11 @@ class StaticTypeAnalyzer:
                         f"Inferencia estática: '{statement[1]}' es {expected} y no puede recibir {inferred}"
                     )
             elif kind == "if":
+                self.expression(statement[1], types)
                 self.statements(statement[2], types)
                 self.statements(statement[3], types)
             elif kind == "while":
+                self.expression(statement[1], types)
                 self.statements(statement[2], types)
             elif kind == "try":
                 self.statements(statement[1], types)
@@ -2593,6 +2652,10 @@ class StaticTypeAnalyzer:
                 validate_foreign_memory(statement[1], statement[2])
             elif kind == "test":
                 self.statements(statement[2], dict(types))
+            elif kind in {"print", "return", "expression"}:
+                self.expression(statement[1], types)
+            elif kind == "universal_import":
+                types[statement[2]] = "cualquiera"
 
     def expression(self, expression: Expr, types: dict[str, str]) -> str:
         kind = expression[0]
@@ -2600,15 +2663,46 @@ class StaticTypeAnalyzer:
         if kind == "string": return "texto"
         if kind == "bool": return "booleano"
         if kind == "null": return "nulo"
-        if kind == "list": return "lista"
-        if kind == "map": return "mapa"
+        if kind == "list":
+            for value in expression[1]: self.expression(value, types)
+            return "lista"
+        if kind == "map":
+            for key, value in expression[1]:
+                self.expression(key, types); self.expression(value, types)
+            return "mapa"
         if kind == "variable": return types.get(expression[1], "cualquiera")
-        if kind == "unary": return "booleano" if expression[1] == "no" else "numero"
+        if kind == "unary":
+            value_type = self.expression(expression[2], types)
+            if expression[1] == "-" and value_type not in {"numero", "cualquiera"}:
+                raise CForgevError("Inferencia estática: '-' requiere un número")
+            return "booleano" if expression[1] == "no" else "numero"
         if kind == "binary":
+            left, right = self.expression(expression[2], types), self.expression(expression[3], types)
             if expression[1] in {"==", "!=", ">", ">=", "<", "<=", "y", "o"}:
                 return "booleano"
-            left, right = self.expression(expression[2], types), self.expression(expression[3], types)
+            if expression[1] in {"-", "*", "/"} and any(
+                value not in {"numero", "cualquiera"} for value in (left, right)
+            ):
+                raise CForgevError(
+                    f"Inferencia estática: '{expression[1]}' requiere números, recibió {left} y {right}"
+                )
+            if expression[1] == "+" and left != "cualquiera" and right != "cualquiera" and left != right:
+                raise CForgevError(
+                    f"Inferencia estática: '+' no puede combinar {left} con {right}"
+                )
             return left if left == right else "cualquiera"
+        if kind == "call":
+            for argument in expression[2]: self.expression(argument, types)
+            return "cualquiera"
+        if kind == "method_call":
+            self.expression(expression[1], types)
+            for argument in expression[3]: self.expression(argument, types)
+            return "cualquiera"
+        if kind == "field":
+            self.expression(expression[1], types); return "cualquiera"
+        if kind == "index":
+            self.expression(expression[1], types); self.expression(expression[2], types)
+            return "cualquiera"
         return "cualquiera"
 
 
@@ -3431,7 +3525,565 @@ def compile_wasm(source_path: Path, output_path: Path) -> Path:
     output_path.write_text(WasmGenerator(program).generate(), encoding="utf-8")
     return output_path
 )CFV5DATA"},
-        {R"CFV6DATA(include/cforgev_ffi.h)CFV6DATA", R"CFV7DATA(#ifndef CFORGEV_FFI_H
+        {R"CFV6DATA(cforge_diagnostics.py)CFV6DATA", R"CFV7DATA("""Diagnósticos estructurados de C-Forge para CLI, editores y CI."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+from cforgev import CForgevError, tokenize
+from compilador_nativo import Parser, StaticTypeAnalyzer
+
+
+@dataclass(frozen=True)
+class Diagnostic:
+    line: int
+    column: int
+    severity: str
+    code: str
+    message: str
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def _from_error(error: Exception, code: str) -> Diagnostic:
+    message = str(error)
+    found = re.search(r"Línea\s+(\d+)", message)
+    line = int(found.group(1)) if found else 1
+    return Diagnostic(line, 1, "error", code, message)
+
+
+def analyze_source(source: str) -> list[Diagnostic]:
+    try:
+        tokens = tokenize(source)
+    except CForgevError as error:
+        return [_from_error(error, "CF1001")]
+    try:
+        program = Parser(tokens).program()
+    except CForgevError as error:
+        return [_from_error(error, "CF1002")]
+    try:
+        StaticTypeAnalyzer().analyze(program)
+    except CForgevError as error:
+        return [_from_error(error, "CF2001")]
+    return []
+
+
+def analyze_file(path: Path) -> list[Diagnostic]:
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError as error:
+        return [Diagnostic(1, 1, "error", "CF0001", f"No se pudo abrir {path}: {error}")]
+    return analyze_source(source)
+)CFV7DATA"},
+        {R"CFV8DATA(cforge_lsp.py)CFV8DATA", R"CFV9DATA("""Servidor LSP 3.17 mínimo de C-Forge mediante JSON-RPC por stdio."""
+
+from __future__ import annotations
+
+import json
+import sys
+from typing import BinaryIO
+
+from cforge_diagnostics import analyze_source
+
+
+KEYWORDS = [
+    "sea", "si", "sino", "mientras", "funcion", "retornar", "estructura",
+    "clase", "campo", "metodo", "intentar", "capturar", "gpu", "cluster",
+    "test", "verdadero", "falso", "nulo", "mostrar", "print", "console.log",
+    "System.out.println", "file_read", "file_write", "json_parse", "sys_fetch",
+    "forge_hash", "forge_bench", "forge_catalogo", "forge_arena_estado",
+]
+
+
+def _read(stream: BinaryIO) -> dict[str, object] | None:
+    headers: dict[str, str] = {}
+    while True:
+        line = stream.readline()
+        if not line:
+            return None
+        if line in {b"\r\n", b"\n"}:
+            break
+        key, _, value = line.decode("ascii").partition(":")
+        headers[key.lower()] = value.strip()
+    size = int(headers.get("content-length", "0"))
+    if size <= 0:
+        return None
+    return json.loads(stream.read(size).decode("utf-8"))
+
+
+def _write(stream: BinaryIO, payload: dict[str, object]) -> None:
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    stream.write(f"Content-Length: {len(raw)}\r\n\r\n".encode("ascii") + raw)
+    stream.flush()
+
+
+def _publish(output: BinaryIO, uri: str, source: str) -> None:
+    diagnostics = []
+    for item in analyze_source(source):
+        line = max(0, item.line - 1)
+        column = max(0, item.column - 1)
+        diagnostics.append({
+            "range": {
+                "start": {"line": line, "character": column},
+                "end": {"line": line, "character": column + 1},
+            },
+            "severity": 1 if item.severity == "error" else 2,
+            "code": item.code,
+            "source": "C-Forge",
+            "message": item.message,
+        })
+    _write(output, {
+        "jsonrpc": "2.0", "method": "textDocument/publishDiagnostics",
+        "params": {"uri": uri, "diagnostics": diagnostics},
+    })
+
+
+def run(input_stream: BinaryIO | None = None, output_stream: BinaryIO | None = None) -> int:
+    input_stream = input_stream or sys.stdin.buffer
+    output_stream = output_stream or sys.stdout.buffer
+    documents: dict[str, str] = {}
+    while True:
+        message = _read(input_stream)
+        if message is None:
+            return 0
+        method = message.get("method")
+        request_id = message.get("id")
+        params = message.get("params", {})
+        if method == "initialize":
+            _write(output_stream, {
+                "jsonrpc": "2.0", "id": request_id,
+                "result": {"serverInfo": {"name": "C-Forge LSP", "version": "1.5.0"},
+                           "capabilities": {"textDocumentSync": 1,
+                                            "completionProvider": {"triggerCharacters": ["."]},
+                                            "hoverProvider": True}},
+            })
+        elif method == "shutdown":
+            _write(output_stream, {"jsonrpc": "2.0", "id": request_id, "result": None})
+        elif method == "exit":
+            return 0
+        elif method in {"textDocument/didOpen", "textDocument/didChange"}:
+            assert isinstance(params, dict)
+            document = params.get("textDocument", {})
+            assert isinstance(document, dict)
+            uri = str(document.get("uri", ""))
+            if method.endswith("didOpen"):
+                source = str(document.get("text", ""))
+            else:
+                changes = params.get("contentChanges", [])
+                source = str(changes[-1].get("text", "")) if isinstance(changes, list) and changes else ""
+            documents[uri] = source
+            _publish(output_stream, uri, source)
+        elif method == "textDocument/completion":
+            _write(output_stream, {"jsonrpc": "2.0", "id": request_id,
+                                   "result": [{"label": word, "kind": 14} for word in KEYWORDS]})
+        elif method == "textDocument/hover":
+            _write(output_stream, {"jsonrpc": "2.0", "id": request_id,
+                                   "result": {"contents": {"kind": "markdown",
+                                                            "value": "**C-Forge 1.5.0** — ForgeValue y sintaxis `.cfv`."}}})
+        elif request_id is not None:
+            _write(output_stream, {"jsonrpc": "2.0", "id": request_id, "result": None})
+
+
+if __name__ == "__main__":
+    raise SystemExit(run())
+)CFV9DATA"},
+        {R"CFV10DATA(cforge_packages.py)CFV10DATA", R"CFV11DATA("""Gestor local, reproducible y seguro de paquetes C-Forge."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from pathlib import Path
+
+from cforgev import CForgevError
+
+
+MANIFEST = "cforge.json"
+LOCKFILE = "cforge.lock"
+NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+
+
+def _load(root: Path) -> dict[str, object]:
+    path = root / MANIFEST
+    if not path.exists():
+        raise CForgevError("No existe cforge.json; ejecuta 'cforge pkg init'")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise CForgevError(f"Manifiesto inválido: {error}") from error
+    if not isinstance(value, dict) or not isinstance(value.get("dependencies", {}), dict):
+        raise CForgevError("cforge.json no posee un mapa dependencies válido")
+    return value
+
+
+def init(root: Path, name: str | None = None) -> None:
+    project = name or root.name.lower().replace(" ", "-")
+    if not NAME_RE.fullmatch(project):
+        project = "proyecto-cforge"
+    path = root / MANIFEST
+    if path.exists():
+        raise CForgevError(f"{MANIFEST} ya existe")
+    value = {"name": project, "version": "0.1.0", "language": ">=1.5.0", "dependencies": {}}
+    path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_lock(root, value)
+
+
+def add(root: Path, name: str, source: str) -> None:
+    if not NAME_RE.fullmatch(name):
+        raise CForgevError("Nombre de paquete inválido")
+    manifest = _load(root)
+    candidate = Path(source).expanduser()
+    if not candidate.is_absolute():
+        candidate = (root / candidate).resolve()
+    if not candidate.exists():
+        raise CForgevError(f"La dependencia local no existe: {candidate}")
+    dependencies = manifest.setdefault("dependencies", {})
+    assert isinstance(dependencies, dict)
+    dependencies[name] = {"path": str(candidate)}
+    (root / MANIFEST).write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    _write_lock(root, manifest)
+
+
+def remove(root: Path, name: str) -> None:
+    manifest = _load(root)
+    dependencies = manifest.get("dependencies", {})
+    assert isinstance(dependencies, dict)
+    if name not in dependencies:
+        raise CForgevError(f"Paquete no registrado: {name}")
+    del dependencies[name]
+    (root / MANIFEST).write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    _write_lock(root, manifest)
+
+
+def list_packages(root: Path) -> list[tuple[str, str]]:
+    manifest = _load(root)
+    dependencies = manifest.get("dependencies", {})
+    assert isinstance(dependencies, dict)
+    return sorted(
+        (name, str(spec.get("path", "")))
+        for name, spec in dependencies.items() if isinstance(spec, dict)
+    )
+
+
+def _write_lock(root: Path, manifest: dict[str, object]) -> None:
+    dependencies = manifest.get("dependencies", {})
+    assert isinstance(dependencies, dict)
+    locked: dict[str, object] = {"format": 1, "dependencies": {}}
+    target = locked["dependencies"]
+    assert isinstance(target, dict)
+    for name, spec in sorted(dependencies.items()):
+        if not isinstance(spec, dict):
+            continue
+        path = Path(str(spec.get("path", "")))
+        digest = hashlib.sha256()
+        files = sorted(path.rglob("*.cfv")) if path.is_dir() else [path]
+        for file in files:
+            if file.is_file():
+                digest.update(file.read_bytes())
+        target[name] = {"path": str(path), "sha256": digest.hexdigest()}
+    (root / LOCKFILE).write_text(
+        json.dumps(locked, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+)CFV11DATA"},
+        {R"CFV12DATA(cforge_vm.py)CFV12DATA", R"CFV13DATA("""Compilador de bytecode y máquina virtual alojada de C-Forge.
+
+El formato es propio de C-Forge; esta primera versión se aloja en Python para
+facilitar su auditoría y portabilidad. No ejecuta código extranjero.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+
+from cforgev import CForgevError, tokenize
+from compilador_nativo import Parser, Program, StaticTypeAnalyzer
+
+
+@dataclass(frozen=True)
+class Instruction:
+    op: str
+    arg: Any = None
+
+
+@dataclass
+class Chunk:
+    name: str
+    parameters: list[str] = field(default_factory=list)
+    code: list[Instruction] = field(default_factory=list)
+
+    def emit(self, op: str, arg: Any = None) -> int:
+        self.code.append(Instruction(op, arg))
+        return len(self.code) - 1
+
+    def patch(self, position: int, target: int) -> None:
+        old = self.code[position]
+        self.code[position] = Instruction(old.op, target)
+
+
+@dataclass
+class BytecodeProgram:
+    main: Chunk
+    functions: dict[str, Chunk]
+
+
+class BytecodeCompiler:
+    """Baja el AST verificado a instrucciones de pila de C-Forge."""
+
+    def compile(self, program: Program) -> BytecodeProgram:
+        functions: dict[str, Chunk] = {}
+        for node in program.functions:
+            chunk = Chunk(node[1], list(node[2]))
+            self._statements(chunk, node[3])
+            chunk.emit("CONST", None)
+            chunk.emit("RETURN")
+            functions[node[1]] = chunk
+        main = Chunk("<main>")
+        self._statements(main, program.statements)
+        main.emit("HALT")
+        return BytecodeProgram(main, functions)
+
+    def _statements(self, chunk: Chunk, statements: list[tuple]) -> None:
+        for statement in statements:
+            kind = statement[0]
+            if kind == "let":
+                self._expression(chunk, statement[3]); chunk.emit("STORE", statement[1])
+            elif kind == "assign":
+                self._expression(chunk, statement[2]); chunk.emit("STORE", statement[1])
+            elif kind == "print":
+                self._expression(chunk, statement[1]); chunk.emit("PRINT")
+            elif kind == "expression":
+                self._expression(chunk, statement[1]); chunk.emit("POP")
+            elif kind == "return":
+                self._expression(chunk, statement[1]); chunk.emit("RETURN")
+            elif kind == "if":
+                self._expression(chunk, statement[1])
+                false_jump = chunk.emit("JUMP_IF_FALSE", -1)
+                self._statements(chunk, statement[2])
+                end_jump = chunk.emit("JUMP", -1)
+                chunk.patch(false_jump, len(chunk.code))
+                self._statements(chunk, statement[3])
+                chunk.patch(end_jump, len(chunk.code))
+            elif kind == "while":
+                start = len(chunk.code)
+                self._expression(chunk, statement[1])
+                done = chunk.emit("JUMP_IF_FALSE", -1)
+                self._statements(chunk, statement[2])
+                chunk.emit("JUMP", start)
+                chunk.patch(done, len(chunk.code))
+            elif kind in {"gpu", "test"}:
+                self._statements(chunk, statement[-1])
+            elif kind == "try":
+                protected = Chunk(f"{chunk.name}:try")
+                handler = Chunk(f"{chunk.name}:catch")
+                self._statements(protected, statement[1]); protected.emit("CONST", None); protected.emit("RETURN")
+                self._statements(handler, statement[3]); handler.emit("CONST", None); handler.emit("RETURN")
+                chunk.emit("TRY", (protected, statement[2], handler))
+            elif kind in {"structure", "class", "import", "universal_import"}:
+                continue
+            else:
+                raise CForgevError(f"Bytecode 1.0 todavía no admite la sentencia '{kind}'")
+
+    def _expression(self, chunk: Chunk, expression: tuple) -> None:
+        kind = expression[0]
+        if kind == "number":
+            raw = expression[1]; chunk.emit("CONST", float(raw) if "." in raw else int(raw))
+        elif kind == "string": chunk.emit("CONST", json.loads(expression[1]))
+        elif kind == "bool": chunk.emit("CONST", expression[1])
+        elif kind == "null": chunk.emit("CONST", None)
+        elif kind == "variable": chunk.emit("LOAD", expression[1])
+        elif kind == "list":
+            for item in expression[1]: self._expression(chunk, item)
+            chunk.emit("BUILD_LIST", len(expression[1]))
+        elif kind == "map":
+            for key, value in expression[1]:
+                self._expression(chunk, key); self._expression(chunk, value)
+            chunk.emit("BUILD_MAP", len(expression[1]))
+        elif kind == "unary":
+            self._expression(chunk, expression[2]); chunk.emit("UNARY", expression[1])
+        elif kind == "binary":
+            self._expression(chunk, expression[2]); self._expression(chunk, expression[3])
+            chunk.emit("BINARY", expression[1])
+        elif kind == "index":
+            self._expression(chunk, expression[1]); self._expression(chunk, expression[2]); chunk.emit("INDEX")
+        elif kind == "field":
+            self._expression(chunk, expression[1]); chunk.emit("FIELD", expression[2])
+        elif kind == "method_call":
+            self._expression(chunk, expression[1])
+            for argument in expression[3]: self._expression(chunk, argument)
+            chunk.emit("METHOD", (expression[2], len(expression[3])))
+        elif kind == "call":
+            for argument in expression[2]: self._expression(chunk, argument)
+            chunk.emit("CALL", (expression[1], len(expression[2])))
+        else:
+            raise CForgevError(f"Bytecode 1.0 todavía no admite la expresión '{kind}'")
+
+
+class VirtualMachine:
+    """VM de pila determinista, con límite de instrucciones y ámbitos aislados."""
+
+    def __init__(self, program: BytecodeProgram, output: Callable[[str], None] = print,
+                 max_steps: int = 10_000_000,
+                 trace: Callable[[str, int, Instruction, dict[str, Any]], None] | None = None) -> None:
+        self.program, self.output, self.max_steps = program, output, max_steps
+        self.globals: dict[str, Any] = {}
+        self.steps = 0
+        self.trace = trace
+        self.builtins: dict[str, Callable[..., Any]] = {
+            "longitud": len, "len": len, "raiz": math.sqrt, "potencia": pow,
+            "absoluto": abs, "redondear": round, "a_texto": str,
+            "a_numero": lambda value: float(value) if "." in str(value) else int(value),
+            "agregar": self._append, "afirmar": self._assert,
+        }
+
+    def run(self) -> Any:
+        return self._run_chunk(self.program.main, self.globals)
+
+    def _run_chunk(self, chunk: Chunk, scope: dict[str, Any]) -> Any:
+        stack: list[Any] = []; ip = 0
+        while ip < len(chunk.code):
+            self.steps += 1
+            if self.steps > self.max_steps: raise CForgevError("VM: límite de instrucciones excedido")
+            instruction = chunk.code[ip]; ip += 1
+            if self.trace is not None:
+                self.trace(chunk.name, ip - 1, instruction, dict(scope))
+            op, arg = instruction.op, instruction.arg
+            if op == "CONST": stack.append(arg)
+            elif op == "LOAD":
+                if arg in scope: stack.append(scope[arg])
+                elif arg in self.globals: stack.append(self.globals[arg])
+                else: raise CForgevError(f"VM: variable desconocida '{arg}'")
+            elif op == "STORE": scope[arg] = stack.pop()
+            elif op == "POP": stack.pop()
+            elif op == "PRINT": self.output(self._display(stack.pop()))
+            elif op == "BUILD_LIST":
+                values = stack[-arg:] if arg else []; self._drop(stack, arg); stack.append(values)
+            elif op == "BUILD_MAP":
+                values = stack[-2 * arg:] if arg else []; self._drop(stack, 2 * arg)
+                stack.append({values[i]: values[i + 1] for i in range(0, len(values), 2)})
+            elif op == "UNARY": stack.append((not stack.pop()) if arg == "no" else -stack.pop())
+            elif op == "BINARY":
+                right, left = stack.pop(), stack.pop(); stack.append(self._binary(arg, left, right))
+            elif op == "INDEX":
+                key, owner = stack.pop(), stack.pop(); stack.append(owner[key])
+            elif op == "FIELD": stack.append(self._field(stack.pop(), arg))
+            elif op == "METHOD":
+                name, count = arg; args = stack[-count:] if count else []; self._drop(stack, count)
+                owner = stack.pop(); stack.append(self._method(owner, name, args))
+            elif op == "CALL":
+                name, count = arg; args = stack[-count:] if count else []; self._drop(stack, count)
+                stack.append(self._call(name, args))
+            elif op == "TRY":
+                protected, error_name, handler = arg
+                try:
+                    self._run_chunk(protected, scope)
+                except Exception as error:
+                    scope[error_name] = str(error)
+                    self._run_chunk(handler, scope)
+            elif op == "JUMP": ip = arg
+            elif op == "JUMP_IF_FALSE":
+                if not stack.pop(): ip = arg
+            elif op == "RETURN": return stack.pop()
+            elif op == "HALT": return stack[-1] if stack else None
+            else: raise CForgevError(f"VM: opcode desconocido '{op}'")
+        return None
+
+    @staticmethod
+    def _drop(stack: list[Any], count: int, keep: bool = False) -> None:
+        if count:
+            if keep:
+                value = stack[-count:]
+                del stack[-count:]
+                stack.append(value)
+            else: del stack[-count:]
+
+    def _call(self, name: str, args: list[Any]) -> Any:
+        if name in self.builtins: return self.builtins[name](*args)
+        if name not in self.program.functions: raise CForgevError(f"VM: función desconocida '{name}'")
+        chunk = self.program.functions[name]
+        if len(args) != len(chunk.parameters): raise CForgevError(f"VM: '{name}' requiere {len(chunk.parameters)} argumentos")
+        return self._run_chunk(chunk, dict(zip(chunk.parameters, args)))
+
+    @staticmethod
+    def _binary(op: str, left: Any, right: Any) -> Any:
+        if op == "+": return left + right
+        if op == "-": return left - right
+        if op == "*": return left * right
+        if op == "/":
+            if right == 0: raise CForgevError("VM: no se puede dividir por cero")
+            return left / right
+        if op == "==": return left == right
+        if op == "!=": return left != right
+        if op == ">": return left > right
+        if op == ">=": return left >= right
+        if op == "<": return left < right
+        if op == "<=": return left <= right
+        if op == "y": return bool(left and right)
+        if op == "o": return bool(left or right)
+        raise CForgevError(f"VM: operador desconocido '{op}'")
+
+    @staticmethod
+    def _field(owner: Any, name: str) -> Any:
+        if name in {"length", "len"}: return len(owner)
+        if isinstance(owner, dict) and name in owner: return owner[name]
+        raise CForgevError(f"VM: miembro desconocido '{name}'")
+
+    @staticmethod
+    def _method(owner: Any, name: str, args: list[Any]) -> Any:
+        if name in {"append", "push", "agregar"} and isinstance(owner, list) and len(args) == 1:
+            owner.append(args[0]); return owner
+        if name in {"length", "len"} and not args: return len(owner)
+        raise CForgevError(f"VM: método incompatible '{name}'")
+
+    @staticmethod
+    def _append(owner: list[Any], value: Any) -> list[Any]: owner.append(value); return owner
+
+    @staticmethod
+    def _assert(condition: Any, message: str = "afirmación fallida") -> bool:
+        if not condition: raise CForgevError(message)
+        return True
+
+    @staticmethod
+    def _display(value: Any) -> str:
+        if value is True: return "verdadero"
+        if value is False: return "falso"
+        if value is None: return "nulo"
+        return str(value)
+
+
+def compile_source(source: str) -> BytecodeProgram:
+    program = Parser(tokenize(source)).program()
+    StaticTypeAnalyzer().analyze(program)
+    return BytecodeCompiler().compile(program)
+
+
+def execute_file(path: Path, output: Callable[[str], None] = print) -> VirtualMachine:
+    try: source = path.read_text(encoding="utf-8")
+    except OSError as error: raise CForgevError(f"No se pudo abrir {path}: {error.strerror or error}") from error
+    vm = VirtualMachine(compile_source(source), output)
+    vm.run(); return vm
+
+
+def disassemble(program: BytecodeProgram) -> str:
+    chunks = [program.main, *program.functions.values()]; lines: list[str] = []
+    for chunk in chunks:
+        lines.append(f"== {chunk.name}({', '.join(chunk.parameters)}) ==")
+        lines.extend(f"{index:04d} {item.op:<14} {item.arg!r}" for index, item in enumerate(chunk.code))
+    return "\n".join(lines)
+)CFV13DATA"},
+        {R"CFV14DATA(include/cforgev_ffi.h)CFV14DATA", R"CFV15DATA(#ifndef CFORGEV_FFI_H
 #define CFORGEV_FFI_H
 
 #include <stddef.h>
@@ -3480,8 +4132,8 @@ CFV_EXPORT int cfv_register_function(const char* name, CfvForeignFunction functi
 #endif
 
 #endif
-)CFV7DATA"},
-        {R"CFV8DATA(include/cforge_shared_arena.h)CFV8DATA", R"CFV9DATA(#ifndef CFORGE_SHARED_ARENA_H
+)CFV15DATA"},
+        {R"CFV16DATA(include/cforge_shared_arena.h)CFV16DATA", R"CFV17DATA(#ifndef CFORGE_SHARED_ARENA_H
 #define CFORGE_SHARED_ARENA_H
 
 #include <atomic>
@@ -3831,8 +4483,8 @@ private:
 }  // namespace cforge::arena
 
 #endif
-)CFV9DATA"},
-        {R"CFV10DATA(herramientas/cforgev_ffi_runner.cpp)CFV10DATA", R"CFV11DATA(#include "cforgev_ffi.h"
+)CFV17DATA"},
+        {R"CFV18DATA(herramientas/cforgev_ffi_runner.cpp)CFV18DATA", R"CFV19DATA(#include "cforgev_ffi.h"
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -3878,8 +4530,8 @@ int main(int argc, char** argv) {
     if (result.release) result.release(result.owner);
     return 0;
 }
-)CFV11DATA"},
-        {R"CFV12DATA(herramientas/cforge_cli.cpp)CFV12DATA", R"CFV13DATA(#include <cerrno>
+)CFV19DATA"},
+        {R"CFV20DATA(herramientas/cforge_cli.cpp)CFV20DATA", R"CFV21DATA(#include <cerrno>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -3910,7 +4562,7 @@ std::filesystem::path find_engine(const char* executable) {
 
 void print_help() {
     std::cout
-        << "C-Forge Toolchain 1.4.1\n"
+        << "C-Forge Toolchain 1.5.0 Developer Preview\n"
         << "Uso:\n"
         << "  cforge fmt archivo.cfv\n"
         << "  cforge test archivo.cfv\n";
@@ -3950,12 +4602,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-)CFV13DATA"},
-        {R"CFV14DATA(herramientas/vscode-cforgev/package.json)CFV14DATA", R"CFV15DATA({
+)CFV21DATA"},
+        {R"CFV22DATA(herramientas/vscode-cforgev/package.json)CFV22DATA", R"CFV23DATA({
   "name": "cforgev-language",
   "displayName": "C-Forge Language Support",
   "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "publisher": "vemoris-group",
   "author": {
     "name": "Vemoris Group"
@@ -4025,8 +4677,8 @@ int main(int argc, char** argv) {
     ]
   }
 }
-)CFV15DATA"},
-        {R"CFV16DATA(herramientas/vscode-cforgev/language-configuration.json)CFV16DATA", R"CFV17DATA({
+)CFV23DATA"},
+        {R"CFV24DATA(herramientas/vscode-cforgev/language-configuration.json)CFV24DATA", R"CFV25DATA({
   "comments": { "lineComment": "//" },
   "brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
   "autoClosingPairs": [
@@ -4036,8 +4688,8 @@ int main(int argc, char** argv) {
     { "open": "\"", "close": "\"" }
   ]
 }
-)CFV17DATA"},
-        {R"CFV18DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV18DATA", R"CFV19DATA({
+)CFV25DATA"},
+        {R"CFV26DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV26DATA", R"CFV27DATA({
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "C-Forge",
   "scopeName": "source.cforgev",
@@ -4081,7 +4733,7 @@ int main(int argc, char** argv) {
     ] }
   }
 }
-)CFV19DATA"}
+)CFV27DATA"}
     };
     return resources;
 }
@@ -4206,7 +4858,7 @@ bool command_available(const std::string& command) {
 }
 
 int setup_environment() {
-    std::cout << "C-Forge Setup 1.4.1\n";
+    std::cout << "C-Forge Setup 1.5.0 Developer Preview\n";
     const bool clang = command_available("clang++");
     const bool python = command_available("python3");
 #ifdef __APPLE__

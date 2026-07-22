@@ -2,7 +2,7 @@
   "name": "cforgev-language",
   "displayName": "C-Forge Language Support",
   "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "publisher": "vemoris-group",
   "author": {
     "name": "Vemoris Group"

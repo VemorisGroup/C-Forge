@@ -1,5 +1,16 @@
 # Historial de C-Forge
 
+## 1.5.0-developer-preview — 2026-07-22
+
+- Bytecode propio y máquina virtual de pila con límites de ejecución.
+- VM con funciones, ciclos, colecciones, compatibilidad de sintaxis y excepciones.
+- Diagnósticos estructurados `CFxxxx` y análisis gradual reforzado.
+- Servidor LSP 3.17 inicial con diagnósticos, autocompletado y hover.
+- Depurador inicial de bytecode con traza de instrucciones y variables.
+- Gestor local reproducible con `cforge.json`, `cforge.lock` y SHA-256.
+- Empaquetado Homebrew, Debian, portable y Windows actualizado con los módulos nuevos.
+- Matriz pública de preparación para producción y límites verificables.
+
 ## 1.4.1-definitive — 2026-07-20
 
 - Sintaxis compatible `console.log`, `System.out.println`, `std::cout` y `cout`.

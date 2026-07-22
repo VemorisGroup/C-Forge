@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cforgev"
-version = "1.4.1"
+version = "1.5.0"
 description = "Lenguaje de programación experimental C-Forge"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -28,4 +28,4 @@ cforge = "cforgev:main"
 cforgev = "cforgev:main"
 
 [tool.setuptools]
-py-modules = ["cforgev", "compilador_nativo", "compilador_wasm"]
+py-modules = ["cforgev", "compilador_nativo", "compilador_wasm", "cforge_diagnostics", "cforge_lsp", "cforge_packages", "cforge_vm"]

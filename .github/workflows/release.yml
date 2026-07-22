@@ -33,7 +33,9 @@ jobs:
         run: |
           python -m pip install pyinstaller
           pyinstaller --onefile --name "cforge-${GITHUB_REF_NAME#v}-windows-x64" \
-            --hidden-import compilador_nativo --hidden-import compilador_wasm cforgev.py
+            --hidden-import compilador_nativo --hidden-import compilador_wasm \
+            --hidden-import cforge_diagnostics --hidden-import cforge_lsp \
+            --hidden-import cforge_packages --hidden-import cforge_vm cforgev.py
       - uses: actions/upload-artifact@v4
         with:
           name: cforgev-${{ matrix.platform }}
