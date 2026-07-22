@@ -13,7 +13,7 @@ install -m 0644 "$ROOT/cforgev.py" "$ROOT/compilador_nativo.py" \
   "$ROOT/compilador_wasm.py" "$ROOT/cforge_diagnostics.py" \
   "$ROOT/cforge_lsp.py" "$ROOT/cforge_packages.py" "$ROOT/cforge_vm.py" \
   "$STAGE/usr/lib/cforgev/"
-cp -R "$ROOT/include" "$ROOT/ejemplos" "$STAGE/usr/lib/cforgev/"
+cp -R "$ROOT/include" "$ROOT/ejemplos" "$ROOT/registry" "$STAGE/usr/lib/cforgev/"
 
 cat > "$STAGE/DEBIAN/control" <<EOF
 Package: cforgev

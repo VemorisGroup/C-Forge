@@ -1942,17 +1942,26 @@ def main() -> int:
         return 1 if any(item.severity == "error" for item in diagnostics) else 0
     if len(sys.argv) >= 2 and sys.argv[1] in {"vm", "bytecode", "debug"}:
         from cforge_vm import VirtualMachine, compile_source, disassemble, execute_file
-        if len(sys.argv) != 3:
-            print(f"Uso: cforge {sys.argv[1]} archivo.cfv", file=sys.stderr); return 2
+        if len(sys.argv) < 3:
+            print(f"Uso: cforge {sys.argv[1]} archivo.cfv [--break offset]", file=sys.stderr); return 2
         try:
             path = Path(sys.argv[2])
             if sys.argv[1] == "vm": execute_file(path)
             elif sys.argv[1] == "bytecode": print(disassemble(compile_source(path.read_text(encoding="utf-8"))))
             else:
+                breakpoints: set[int] = set()
+                cursor = 3
+                while cursor < len(sys.argv):
+                    if sys.argv[cursor] != "--break" or cursor + 1 >= len(sys.argv):
+                        raise CForgevError("debug acepta únicamente --break offset")
+                    breakpoints.add(int(sys.argv[cursor + 1])); cursor += 2
                 program = compile_source(path.read_text(encoding="utf-8"))
                 def trace(chunk, offset, instruction, scope):
+                    if breakpoints and offset not in breakpoints: return
                     variables = ", ".join(f"{key}={value!r}" for key, value in sorted(scope.items()))
-                    print(f"[debug] {chunk}:{offset:04d} {instruction.op} {instruction.arg!r} | {variables}", file=sys.stderr)
+                    marker = "breakpoint" if offset in breakpoints else "debug"
+                    print(f"[{marker}] {chunk}:{offset:04d} {instruction.op} {instruction.arg!r} | {variables}", file=sys.stderr)
+                    if offset in breakpoints and sys.stdin.isatty(): input("[C-Forge Debug] Enter para continuar...")
                 VirtualMachine(program, trace=trace).run()
         except (CForgevError, OSError) as error:
             print(f"[C-Forge VM Exception] {error}", file=sys.stderr); return 1
@@ -1963,7 +1972,7 @@ def main() -> int:
         from cforge_lsp import run
         return run()
     if len(sys.argv) >= 2 and sys.argv[1] == "pkg":
-        from cforge_packages import add, init, list_packages, remove
+        from cforge_packages import add, build_package, init, install_registry, list_packages, remove, search_registry
         action = sys.argv[2] if len(sys.argv) > 2 else ""
         try:
             if action == "init" and len(sys.argv) in {3, 4}:
@@ -1976,8 +1985,17 @@ def main() -> int:
             elif action == "list" and len(sys.argv) == 3:
                 packages = list_packages(Path.cwd())
                 print("\n".join(f"{name} -> {path}" for name, path in packages) or "Sin dependencias")
+            elif action == "search" and len(sys.argv) == 4:
+                matches = search_registry(sys.argv[3])
+                print("\n".join(f"{name}@{version} — {description}" for name, version, description in matches) or "Sin resultados")
+            elif action == "install" and len(sys.argv) in {4, 5}:
+                destination = install_registry(Path.cwd(), sys.argv[3], sys.argv[4] if len(sys.argv) == 5 else None)
+                print(f"Paquete verificado e instalado: {destination}")
+            elif action == "build" and len(sys.argv) in {3, 4}:
+                archive, digest = build_package(Path.cwd(), Path(sys.argv[3]) if len(sys.argv) == 4 else Path("dist"))
+                print(f"Paquete creado: {archive}\nSHA-256: {digest}")
             else:
-                print("Uso: cforge pkg init [nombre] | add nombre ruta | remove nombre | list", file=sys.stderr); return 2
+                print("Uso: cforge pkg init [nombre] | add nombre ruta | remove nombre | list | search texto | install nombre [versión] | build [salida]", file=sys.stderr); return 2
         except (CForgevError, OSError, ValueError) as error:
             print(f"[C-Forge Package Manager] {error}", file=sys.stderr); return 1
         return 0

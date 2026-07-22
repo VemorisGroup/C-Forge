@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 
 from cforge_diagnostics import analyze_source
-from cforge_lsp import run
-from cforge_packages import add, init, list_packages, remove
+from cforge_lsp import _definitions, _locations, _symbols, run
+from cforge_packages import add, build_package, init, list_packages, remove
 from cforge_vm import VirtualMachine, compile_source, disassemble
 
 
@@ -29,6 +29,14 @@ class ProfessionalToolingTests(unittest.TestCase):
             remove(project, "biblioteca")
             self.assertEqual(list_packages(project), [])
 
+    def test_package_builder_produces_a_verifiable_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); init(root, "paquete-seguro")
+            (root / "modulo.cfv").write_text("mostrar(42)\n", encoding="utf-8")
+            archive, digest = build_package(root, root / "salida")
+            self.assertTrue(archive.is_file())
+            self.assertEqual(len(digest), 64)
+
     @staticmethod
     def _rpc(message: dict) -> bytes:
         body = json.dumps(message).encode()
@@ -45,6 +53,13 @@ class ProfessionalToolingTests(unittest.TestCase):
         self.assertEqual(run(io.BytesIO(incoming), output), 0)
         text = output.getvalue().decode()
         self.assertIn("C-Forge LSP", text); self.assertIn("console.log", text)
+        self.assertIn("definitionProvider", text); self.assertIn("renameProvider", text)
+
+    def test_lsp_symbols_definitions_and_references(self):
+        source = "sea valor = 21\nfuncion doble(x) { retornar x * 2 }\nmostrar(valor)\n"
+        self.assertEqual(_symbols(source)[0]["name"], "valor")
+        self.assertEqual(_definitions("file:///main.cfv", source, "valor")[0]["range"]["start"]["line"], 0)
+        self.assertEqual(len(_locations("file:///main.cfv", source, "valor")), 2)
 
     def test_bytecode_vm_functions_loops_and_compatibility_syntax(self):
         source = """

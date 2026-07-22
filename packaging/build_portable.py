@@ -23,8 +23,9 @@ FILES = (
     "CHANGELOG.md",
     "ESPECIFICACION.md",
     "INTEROPERABILIDAD.md",
+    "SECURITY.md",
 )
-DIRECTORIES = ("include", "ejemplos")
+DIRECTORIES = ("include", "ejemplos", "registry")
 IGNORED = shutil.ignore_patterns("build", "bin", "obj", "__pycache__", "*.pyc", ".DS_Store")
 
 

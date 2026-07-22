@@ -23,6 +23,10 @@ jobs:
         run: |
           python cforgev.py --version
           python cforgev.py ejemplos/hola.cfv
+          python cforgev.py check ejemplos/hola.cfv
+          python cforgev.py vm ejemplos/hola.cfv
+      - name: Herramientas profesionales
+        run: python -m unittest tests.test_professional_tooling -v
       - name: Suite completa Unix
         if: runner.os != 'Windows'
         run: python -m unittest discover -s tests -v

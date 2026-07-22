@@ -2017,17 +2017,26 @@ def main() -> int:
         return 1 if any(item.severity == "error" for item in diagnostics) else 0
     if len(sys.argv) >= 2 and sys.argv[1] in {"vm", "bytecode", "debug"}:
         from cforge_vm import VirtualMachine, compile_source, disassemble, execute_file
-        if len(sys.argv) != 3:
-            print(f"Uso: cforge {sys.argv[1]} archivo.cfv", file=sys.stderr); return 2
+        if len(sys.argv) < 3:
+            print(f"Uso: cforge {sys.argv[1]} archivo.cfv [--break offset]", file=sys.stderr); return 2
         try:
             path = Path(sys.argv[2])
             if sys.argv[1] == "vm": execute_file(path)
             elif sys.argv[1] == "bytecode": print(disassemble(compile_source(path.read_text(encoding="utf-8"))))
             else:
+                breakpoints: set[int] = set()
+                cursor = 3
+                while cursor < len(sys.argv):
+                    if sys.argv[cursor] != "--break" or cursor + 1 >= len(sys.argv):
+                        raise CForgevError("debug acepta únicamente --break offset")
+                    breakpoints.add(int(sys.argv[cursor + 1])); cursor += 2
                 program = compile_source(path.read_text(encoding="utf-8"))
                 def trace(chunk, offset, instruction, scope):
+                    if breakpoints and offset not in breakpoints: return
                     variables = ", ".join(f"{key}={value!r}" for key, value in sorted(scope.items()))
-                    print(f"[debug] {chunk}:{offset:04d} {instruction.op} {instruction.arg!r} | {variables}", file=sys.stderr)
+                    marker = "breakpoint" if offset in breakpoints else "debug"
+                    print(f"[{marker}] {chunk}:{offset:04d} {instruction.op} {instruction.arg!r} | {variables}", file=sys.stderr)
+                    if offset in breakpoints and sys.stdin.isatty(): input("[C-Forge Debug] Enter para continuar...")
                 VirtualMachine(program, trace=trace).run()
         except (CForgevError, OSError) as error:
             print(f"[C-Forge VM Exception] {error}", file=sys.stderr); return 1
@@ -2038,7 +2047,7 @@ def main() -> int:
         from cforge_lsp import run
         return run()
     if len(sys.argv) >= 2 and sys.argv[1] == "pkg":
-        from cforge_packages import add, init, list_packages, remove
+        from cforge_packages import add, build_package, init, install_registry, list_packages, remove, search_registry
         action = sys.argv[2] if len(sys.argv) > 2 else ""
         try:
             if action == "init" and len(sys.argv) in {3, 4}:
@@ -2051,8 +2060,17 @@ def main() -> int:
             elif action == "list" and len(sys.argv) == 3:
                 packages = list_packages(Path.cwd())
                 print("\n".join(f"{name} -> {path}" for name, path in packages) or "Sin dependencias")
+            elif action == "search" and len(sys.argv) == 4:
+                matches = search_registry(sys.argv[3])
+                print("\n".join(f"{name}@{version} — {description}" for name, version, description in matches) or "Sin resultados")
+            elif action == "install" and len(sys.argv) in {4, 5}:
+                destination = install_registry(Path.cwd(), sys.argv[3], sys.argv[4] if len(sys.argv) == 5 else None)
+                print(f"Paquete verificado e instalado: {destination}")
+            elif action == "build" and len(sys.argv) in {3, 4}:
+                archive, digest = build_package(Path.cwd(), Path(sys.argv[3]) if len(sys.argv) == 4 else Path("dist"))
+                print(f"Paquete creado: {archive}\nSHA-256: {digest}")
             else:
-                print("Uso: cforge pkg init [nombre] | add nombre ruta | remove nombre | list", file=sys.stderr); return 2
+                print("Uso: cforge pkg init [nombre] | add nombre ruta | remove nombre | list | search texto | install nombre [versión] | build [salida]", file=sys.stderr); return 2
         except (CForgevError, OSError, ValueError) as error:
             print(f"[C-Forge Package Manager] {error}", file=sys.stderr); return 1
         return 0
@@ -3584,10 +3602,12 @@ def analyze_file(path: Path) -> list[Diagnostic]:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import BinaryIO
 
 from cforge_diagnostics import analyze_source
+from cforgev import format_source
 
 
 KEYWORDS = [
@@ -3642,6 +3662,62 @@ def _publish(output: BinaryIO, uri: str, source: str) -> None:
     })
 
 
+def _position_offset(source: str, position: dict[str, object]) -> int:
+    lines = source.splitlines(keepends=True)
+    line = max(0, int(position.get("line", 0)))
+    character = max(0, int(position.get("character", 0)))
+    return sum(len(value) for value in lines[:line]) + min(character, len(lines[line]) if line < len(lines) else 0)
+
+
+def _word_at(source: str, position: dict[str, object]) -> str:
+    offset = _position_offset(source, position)
+    for match in re.finditer(r"[A-Za-z_][A-Za-z0-9_]*", source):
+        if match.start() <= offset <= match.end():
+            return match.group(0)
+    return ""
+
+
+def _locations(uri: str, source: str, word: str) -> list[dict[str, object]]:
+    if not word: return []
+    result = []
+    for line_number, line in enumerate(source.splitlines()):
+        for match in re.finditer(rf"\b{re.escape(word)}\b", line):
+            result.append({"uri": uri, "range": {
+                "start": {"line": line_number, "character": match.start()},
+                "end": {"line": line_number, "character": match.end()},
+            }})
+    return result
+
+
+def _definitions(uri: str, source: str, word: str) -> list[dict[str, object]]:
+    pattern = re.compile(rf"^\s*(?:sea\s+|funcion\s+|estructura\s+|clase\s+)?({re.escape(word)})\b")
+    for line_number, line in enumerate(source.splitlines()):
+        match = pattern.search(line)
+        if match:
+            return [{"uri": uri, "range": {
+                "start": {"line": line_number, "character": match.start(1)},
+                "end": {"line": line_number, "character": match.end(1)},
+            }}]
+    return []
+
+
+def _symbols(source: str) -> list[dict[str, object]]:
+    result = []
+    patterns = ((r"^\s*(?:cluster\s+)?funcion\s+([A-Za-z_]\w*)", 12),
+                (r"^\s*(?:cluster\s+)?sea\s+([A-Za-z_]\w*)", 13),
+                (r"^\s*estructura\s+([A-Za-z_]\w*)", 23),
+                (r"^\s*clase\s+([A-Za-z_]\w*)", 5))
+    for line_number, line in enumerate(source.splitlines()):
+        for pattern, kind in patterns:
+            match = re.search(pattern, line)
+            if match:
+                area = {"start": {"line": line_number, "character": match.start(1)},
+                        "end": {"line": line_number, "character": match.end(1)}}
+                result.append({"name": match.group(1), "kind": kind, "range": area, "selectionRange": area})
+                break
+    return result
+
+
 def run(input_stream: BinaryIO | None = None, output_stream: BinaryIO | None = None) -> int:
     input_stream = input_stream or sys.stdin.buffer
     output_stream = output_stream or sys.stdout.buffer
@@ -3659,7 +3735,12 @@ def run(input_stream: BinaryIO | None = None, output_stream: BinaryIO | None = N
                 "result": {"serverInfo": {"name": "C-Forge LSP", "version": "1.5.0"},
                            "capabilities": {"textDocumentSync": 1,
                                             "completionProvider": {"triggerCharacters": ["."]},
-                                            "hoverProvider": True}},
+                                            "hoverProvider": True,
+                                            "definitionProvider": True,
+                                            "referencesProvider": True,
+                                            "renameProvider": {"prepareProvider": False},
+                                            "documentSymbolProvider": True,
+                                            "documentFormattingProvider": True}},
             })
         elif method == "shutdown":
             _write(output_stream, {"jsonrpc": "2.0", "id": request_id, "result": None})
@@ -3684,6 +3765,41 @@ def run(input_stream: BinaryIO | None = None, output_stream: BinaryIO | None = N
             _write(output_stream, {"jsonrpc": "2.0", "id": request_id,
                                    "result": {"contents": {"kind": "markdown",
                                                             "value": "**C-Forge 1.5.0** — ForgeValue y sintaxis `.cfv`."}}})
+        elif method in {"textDocument/definition", "textDocument/references", "textDocument/rename"}:
+            assert isinstance(params, dict)
+            document = params.get("textDocument", {}); position = params.get("position", {})
+            assert isinstance(document, dict) and isinstance(position, dict)
+            uri = str(document.get("uri", "")); source = documents.get(uri, "")
+            word = _word_at(source, position)
+            if method.endswith("definition"):
+                result = _definitions(uri, source, word)
+            elif method.endswith("references"):
+                result = _locations(uri, source, word)
+            else:
+                new_name = str(params.get("newName", ""))
+                if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", new_name):
+                    _write(output_stream, {"jsonrpc": "2.0", "id": request_id,
+                                           "error": {"code": -32602, "message": "Nombre C-Forge inválido"}})
+                    continue
+                edits = [{"range": item["range"], "newText": new_name} for item in _locations(uri, source, word)]
+                result = {"changes": {uri: edits}}
+            _write(output_stream, {"jsonrpc": "2.0", "id": request_id, "result": result})
+        elif method == "textDocument/documentSymbol":
+            assert isinstance(params, dict)
+            document = params.get("textDocument", {}); assert isinstance(document, dict)
+            uri = str(document.get("uri", ""))
+            _write(output_stream, {"jsonrpc": "2.0", "id": request_id,
+                                   "result": _symbols(documents.get(uri, ""))})
+        elif method == "textDocument/formatting":
+            assert isinstance(params, dict)
+            document = params.get("textDocument", {}); assert isinstance(document, dict)
+            uri = str(document.get("uri", "")); source = documents.get(uri, "")
+            end_line = len(source.splitlines()) + 1
+            _write(output_stream, {"jsonrpc": "2.0", "id": request_id, "result": [{
+                "range": {"start": {"line": 0, "character": 0},
+                          "end": {"line": end_line, "character": 0}},
+                "newText": format_source(source),
+            }]})
         elif request_id is not None:
             _write(output_stream, {"jsonrpc": "2.0", "id": request_id, "result": None})
 
@@ -3698,6 +3814,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import tarfile
+import tempfile
+import urllib.request
 from pathlib import Path
 
 from cforgev import CForgevError
@@ -3706,6 +3825,9 @@ from cforgev import CForgevError
 MANIFEST = "cforge.json"
 LOCKFILE = "cforge.lock"
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$")
+DEFAULT_REGISTRY = "https://raw.githubusercontent.com/VemorisGroup/C-Forge/main/registry/index.json"
+MAX_PACKAGE_BYTES = 32 * 1024 * 1024
 
 
 def _load(root: Path) -> dict[str, object]:
@@ -3772,6 +3894,90 @@ def list_packages(root: Path) -> list[tuple[str, str]]:
         (name, str(spec.get("path", "")))
         for name, spec in dependencies.items() if isinstance(spec, dict)
     )
+
+
+def fetch_registry(url: str = DEFAULT_REGISTRY) -> dict[str, object]:
+    if not url.startswith("https://"):
+        raise CForgevError("El registro debe usar HTTPS")
+    try:
+        with urllib.request.urlopen(url, timeout=15) as response:
+            raw = response.read(MAX_PACKAGE_BYTES + 1)
+    except Exception as error:
+        raise CForgevError(f"No se pudo consultar el registro: {error}") from error
+    if len(raw) > MAX_PACKAGE_BYTES:
+        raise CForgevError("Respuesta del registro demasiado grande")
+    try: value = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise CForgevError(f"Índice del registro inválido: {error}") from error
+    if not isinstance(value, dict) or value.get("format") != 1 or not isinstance(value.get("packages"), dict):
+        raise CForgevError("Formato de registro C-Forge incompatible")
+    return value
+
+
+def search_registry(query: str, url: str = DEFAULT_REGISTRY) -> list[tuple[str, str, str]]:
+    packages = fetch_registry(url)["packages"]
+    assert isinstance(packages, dict)
+    lowered = query.lower()
+    result = []
+    for name, metadata in sorted(packages.items()):
+        if not isinstance(metadata, dict): continue
+        description = str(metadata.get("description", ""))
+        if lowered in name.lower() or lowered in description.lower():
+            versions = metadata.get("versions", {})
+            latest = sorted(versions, reverse=True)[0] if isinstance(versions, dict) and versions else ""
+            result.append((name, latest, description))
+    return result
+
+
+def install_registry(root: Path, name: str, version: str | None = None,
+                     url: str = DEFAULT_REGISTRY) -> Path:
+    if not NAME_RE.fullmatch(name): raise CForgevError("Nombre de paquete inválido")
+    index = fetch_registry(url); packages = index["packages"]; assert isinstance(packages, dict)
+    metadata = packages.get(name)
+    if not isinstance(metadata, dict): raise CForgevError(f"Paquete no encontrado: {name}")
+    versions = metadata.get("versions", {})
+    if not isinstance(versions, dict) or not versions: raise CForgevError(f"Paquete sin versiones: {name}")
+    selected = version or max(versions, key=lambda item: tuple(int(part) for part in item.split("-")[0].split(".")))
+    release = versions.get(selected)
+    if not isinstance(release, dict): raise CForgevError(f"Versión no encontrada: {name}@{selected}")
+    download_url, expected = str(release.get("url", "")), str(release.get("sha256", "")).lower()
+    if not download_url.startswith("https://") or not re.fullmatch(r"[0-9a-f]{64}", expected):
+        raise CForgevError("Metadatos de descarga inseguros")
+    try:
+        with urllib.request.urlopen(download_url, timeout=30) as response:
+            payload = response.read(MAX_PACKAGE_BYTES + 1)
+    except Exception as error:
+        raise CForgevError(f"No se pudo descargar {name}: {error}") from error
+    if len(payload) > MAX_PACKAGE_BYTES or hashlib.sha256(payload).hexdigest() != expected:
+        raise CForgevError("El paquete excede el límite o su SHA-256 no coincide")
+    destination = root / ".cforge" / "packages" / name / selected
+    destination.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".tar.gz") as temporary:
+        temporary.write(payload); temporary.flush()
+        with tarfile.open(temporary.name, "r:gz") as archive:
+            base = destination.resolve()
+            for member in archive.getmembers():
+                target = (destination / member.name).resolve()
+                if base != target and base not in target.parents:
+                    raise CForgevError("Paquete rechazado: ruta fuera del destino")
+                if member.issym() or member.islnk():
+                    raise CForgevError("Paquete rechazado: enlaces no permitidos")
+            archive.extractall(destination)
+    add(root, name, str(destination))
+    return destination
+
+
+def build_package(root: Path, output: Path) -> tuple[Path, str]:
+    manifest = _load(root)
+    name, version = str(manifest.get("name", "")), str(manifest.get("version", ""))
+    if not NAME_RE.fullmatch(name) or not VERSION_RE.fullmatch(version):
+        raise CForgevError("El manifiesto requiere name y version semántica válidos")
+    output.mkdir(parents=True, exist_ok=True)
+    target = output / f"{name}-{version}.tar.gz"
+    files = [path for path in sorted(root.rglob("*")) if path.is_file() and ".cforge" not in path.parts and ".git" not in path.parts]
+    with tarfile.open(target, "w:gz") as archive:
+        for path in files: archive.add(path, arcname=Path(name) / path.relative_to(root))
+    return target, hashlib.sha256(target.read_bytes()).hexdigest()
 
 
 def _write_lock(root: Path, manifest: dict[str, object]) -> None:
@@ -4083,7 +4289,26 @@ def disassemble(program: BytecodeProgram) -> str:
         lines.extend(f"{index:04d} {item.op:<14} {item.arg!r}" for index, item in enumerate(chunk.code))
     return "\n".join(lines)
 )CFV13DATA"},
-        {R"CFV14DATA(include/cforgev_ffi.h)CFV14DATA", R"CFV15DATA(#ifndef CFORGEV_FFI_H
+        {R"CFV14DATA(registry/index.json)CFV14DATA", R"CFV15DATA({
+  "format": 1,
+  "registry": "C-Forge Community Registry",
+  "packages": {}
+}
+)CFV15DATA"},
+        {R"CFV16DATA(registry/README.md)CFV16DATA", R"CFV17DATA(# Registro público de paquetes C-Forge
+
+Este directorio define el índice público, auditable y versionado del gestor `cforge pkg`.
+Cada versión debe publicar una URL HTTPS y el SHA-256 exacto del archivo `.tar.gz`.
+
+La publicación se realiza mediante pull request para conservar revisión, historial y
+protecciones de rama. `cforge pkg build` crea el archivo y su digest; ningún paquete se
+ejecuta durante instalación. El cliente rechaza HTTP, rutas ascendentes, enlaces,
+archivos mayores a 32 MiB y hashes incorrectos.
+
+El registro está vacío hasta que el primer paquete sea revisado y aceptado. Esto evita
+presentar paquetes de ejemplo como dependencias oficiales.
+)CFV17DATA"},
+        {R"CFV18DATA(include/cforgev_ffi.h)CFV18DATA", R"CFV19DATA(#ifndef CFORGEV_FFI_H
 #define CFORGEV_FFI_H
 
 #include <stddef.h>
@@ -4132,8 +4357,8 @@ CFV_EXPORT int cfv_register_function(const char* name, CfvForeignFunction functi
 #endif
 
 #endif
-)CFV15DATA"},
-        {R"CFV16DATA(include/cforge_shared_arena.h)CFV16DATA", R"CFV17DATA(#ifndef CFORGE_SHARED_ARENA_H
+)CFV19DATA"},
+        {R"CFV20DATA(include/cforge_shared_arena.h)CFV20DATA", R"CFV21DATA(#ifndef CFORGE_SHARED_ARENA_H
 #define CFORGE_SHARED_ARENA_H
 
 #include <atomic>
@@ -4483,8 +4708,8 @@ private:
 }  // namespace cforge::arena
 
 #endif
-)CFV17DATA"},
-        {R"CFV18DATA(herramientas/cforgev_ffi_runner.cpp)CFV18DATA", R"CFV19DATA(#include "cforgev_ffi.h"
+)CFV21DATA"},
+        {R"CFV22DATA(herramientas/cforgev_ffi_runner.cpp)CFV22DATA", R"CFV23DATA(#include "cforgev_ffi.h"
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -4530,8 +4755,8 @@ int main(int argc, char** argv) {
     if (result.release) result.release(result.owner);
     return 0;
 }
-)CFV19DATA"},
-        {R"CFV20DATA(herramientas/cforge_cli.cpp)CFV20DATA", R"CFV21DATA(#include <cerrno>
+)CFV23DATA"},
+        {R"CFV24DATA(herramientas/cforge_cli.cpp)CFV24DATA", R"CFV25DATA(#include <cerrno>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -4602,8 +4827,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-)CFV21DATA"},
-        {R"CFV22DATA(herramientas/vscode-cforgev/package.json)CFV22DATA", R"CFV23DATA({
+)CFV25DATA"},
+        {R"CFV26DATA(herramientas/vscode-cforgev/package.json)CFV26DATA", R"CFV27DATA({
   "name": "cforgev-language",
   "displayName": "C-Forge Language Support",
   "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
@@ -4615,6 +4840,8 @@ int main(int argc, char** argv) {
   "license": "SEE LICENSE IN LICENSE",
   "icon": "images/icon.png",
   "preview": true,
+  "main": "./extension.js",
+  "activationEvents": ["onLanguage:cforgev", "onCommand:cforge.runFile", "onCommand:cforge.checkFile", "onCommand:cforge.debugBreakpoint"],
   "pricing": "Free",
   "engines": {
     "vscode": "^1.80.0"
@@ -4651,6 +4878,11 @@ int main(int argc, char** argv) {
     "@vscode/vsce": "^3.6.2"
   },
   "contributes": {
+    "commands": [
+      {"command": "cforge.runFile", "title": "C-Forge: Ejecutar archivo"},
+      {"command": "cforge.checkFile", "title": "C-Forge: Comprobar archivo"},
+      {"command": "cforge.debugBreakpoint", "title": "C-Forge: Depurar con breakpoint de bytecode"}
+    ],
     "languages": [
       {
         "id": "cforgev",
@@ -4677,8 +4909,81 @@ int main(int argc, char** argv) {
     ]
   }
 }
-)CFV23DATA"},
-        {R"CFV24DATA(herramientas/vscode-cforgev/language-configuration.json)CFV24DATA", R"CFV25DATA({
+)CFV27DATA"},
+        {R"CFV28DATA(herramientas/vscode-cforgev/extension.js)CFV28DATA", R"CFV29DATA("use strict";
+
+const vscode = require("vscode");
+const { execFile } = require("child_process");
+
+const words = [
+  "sea", "si", "sino", "mientras", "funcion", "retornar", "estructura",
+  "clase", "campo", "metodo", "intentar", "capturar", "gpu", "cluster",
+  "test", "mostrar", "print", "verdadero", "falso", "nulo", "file_read",
+  "file_write", "json_parse", "sys_fetch", "forge_hash", "forge_bench"
+];
+
+function runCForge(args, callback) {
+  execFile("cforge", args, { timeout: 30000, maxBuffer: 4 * 1024 * 1024 }, callback);
+}
+
+function activate(context) {
+  const diagnostics = vscode.languages.createDiagnosticCollection("cforge");
+  context.subscriptions.push(diagnostics);
+
+  function check(document) {
+    if (document.languageId !== "cforgev" || document.isUntitled) return;
+    runCForge(["check", document.uri.fsPath, "--json"], (error, stdout) => {
+      let values = [];
+      try { values = JSON.parse(stdout || "[]"); } catch (_) { return; }
+      diagnostics.set(document.uri, values.map(item => {
+        const line = Math.max(0, Number(item.line || 1) - 1);
+        const column = Math.max(0, Number(item.column || 1) - 1);
+        const diagnostic = new vscode.Diagnostic(
+          new vscode.Range(line, column, line, column + 1),
+          `${item.code}: ${item.message}`,
+          item.severity === "error" ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning
+        );
+        diagnostic.source = "C-Forge";
+        diagnostic.code = item.code;
+        return diagnostic;
+      }));
+    });
+  }
+
+  context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(check));
+  if (vscode.window.activeTextEditor) check(vscode.window.activeTextEditor.document);
+  context.subscriptions.push(vscode.languages.registerCompletionItemProvider("cforgev", {
+    provideCompletionItems() {
+      return words.map(word => new vscode.CompletionItem(word, vscode.CompletionItemKind.Keyword));
+    }
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand("cforge.checkFile", () => {
+    const editor = vscode.window.activeTextEditor;
+    if (editor) { check(editor.document); vscode.window.showInformationMessage("C-Forge: comprobación finalizada"); }
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand("cforge.runFile", () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.isUntitled) return;
+    const terminal = vscode.window.createTerminal("C-Forge");
+    terminal.show();
+    terminal.sendText(`cforge ${JSON.stringify(editor.document.uri.fsPath)}`);
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand("cforge.debugBreakpoint", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.isUntitled) return;
+    const offset = await vscode.window.showInputBox({ prompt: "Offset de bytecode", value: "0", validateInput: value => /^\d+$/.test(value) ? undefined : "Escribe un número" });
+    if (offset === undefined) return;
+    const terminal = vscode.window.createTerminal("C-Forge Debug");
+    terminal.show();
+    terminal.sendText(`cforge debug ${JSON.stringify(editor.document.uri.fsPath)} --break ${offset}`);
+  }));
+}
+
+function deactivate() {}
+
+module.exports = { activate, deactivate };
+)CFV29DATA"},
+        {R"CFV30DATA(herramientas/vscode-cforgev/language-configuration.json)CFV30DATA", R"CFV31DATA({
   "comments": { "lineComment": "//" },
   "brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
   "autoClosingPairs": [
@@ -4688,8 +4993,8 @@ int main(int argc, char** argv) {
     { "open": "\"", "close": "\"" }
   ]
 }
-)CFV25DATA"},
-        {R"CFV26DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV26DATA", R"CFV27DATA({
+)CFV31DATA"},
+        {R"CFV32DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV32DATA", R"CFV33DATA({
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "C-Forge",
   "scopeName": "source.cforgev",
@@ -4733,7 +5038,7 @@ int main(int argc, char** argv) {
     ] }
   }
 }
-)CFV27DATA"}
+)CFV33DATA"}
     };
     return resources;
 }

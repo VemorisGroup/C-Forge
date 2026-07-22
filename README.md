@@ -95,8 +95,12 @@ cforge check programa.cfv          # análisis estático con códigos CFxxxx
 cforge bytecode programa.cfv       # inspeccionar bytecode propio
 cforge vm programa.cfv             # ejecutar en la VM de pila
 cforge debug programa.cfv          # trazar instrucciones y variables
+cforge debug programa.cfv --break 20 # detenerse en un offset de bytecode
 cforge lsp                          # servidor LSP 3.17 por stdio
 cforge pkg init mi-proyecto        # crear cforge.json y cforge.lock
+cforge pkg build                   # crear paquete y SHA-256
+cforge pkg search consulta         # consultar el índice público
+cforge pkg install paquete         # descargar y verificar por HTTPS/SHA-256
 ```
 
 La matriz honesta de capacidades y trabajo pendiente está en

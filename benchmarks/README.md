@@ -24,6 +24,17 @@ Desde la raíz del repositorio:
 
 Los ejecutables y archivos temporales se guardan en `build/benchmarks`.
 
+Para producir un resultado JSON reproducible con calentamiento, muestras crudas y
+mediana:
+
+```bash
+python3 benchmarks/run_reproducible.py --runs 7
+```
+
+Una comparación contra otro lenguaje solo es válida si usa el mismo algoritmo, entrada,
+hardware, configuración energética y número de repeticiones. El repositorio no publica
+cifras inventadas ni mezcla tiempo de compilación con tiempo de ejecución.
+
 ## Límites importantes
 
 - No se crean un millón de hilos del sistema. El benchmark usa 500 trabajos;
@@ -35,4 +46,3 @@ Los ejecutables y archivos temporales se guardan en `build/benchmarks`.
   deja documentada esa limitación y mide los bucles disponibles actualmente.
 - Antes de publicar cifras, ejecuta cada prueba al menos cinco veces, descarta
   la primera y reporta mediana, hardware, sistema operativo y versión.
-

@@ -9,11 +9,13 @@ independientes reproducibles.
 - Lexer, parser, intérprete, backend C++ experimental y backend WebAssembly `.wat`.
 - Compilador de bytecode y VM de pila propios (`cforge vm` y `cforge bytecode`).
 - Inferencia y comprobación estática gradual, con diagnósticos `CFxxxx` (`cforge check`).
-- Servidor LSP 3.17 por entrada/salida estándar con diagnósticos, autocompletado y hover
+- Servidor LSP 3.17 por entrada/salida estándar con diagnósticos, autocompletado, hover,
+  símbolos, definiciones, referencias, renombrado y formateo
   (`cforge lsp`).
-- Depurador de bytecode inicial con traza de instrucciones y variables (`cforge debug`).
-- Gestor local reproducible con manifiesto y archivo de bloqueo SHA-256
-  (`cforge pkg init/add/remove/list`).
+- Depurador de bytecode inicial con traza, variables y breakpoints por offset, accesible
+  también desde la extensión (`cforge debug`).
+- Gestor reproducible con manifiesto, lock SHA-256, construcción, búsqueda e instalación
+  segura desde un índice público (`cforge pkg`).
 - REPL, formateador, pruebas, empaquetado multiplataforma y CI.
 - Contrato C ABI y Forge Shared Arena con offsets, cabeceras validadas y sincronización.
 
@@ -21,8 +23,8 @@ independientes reproducibles.
 
 - La VM 1.0 ejecuta el núcleo seguro del lenguaje; los bloques extranjeros y algunas
   construcciones avanzadas continúan en el intérprete principal.
-- El gestor de paquetes acepta rutas locales deliberadamente. Un registro remoto exige
-  firma de artefactos, política de nombres, revocación y operación de infraestructura.
+- El protocolo de registro remoto verifica HTTPS, límites, rutas y SHA-256. El índice
+  público comienza vacío; todavía requiere operación, moderación, firmas y revocación.
 - El depurador muestra trazas verificables, pero todavía no implementa DAP, breakpoints
   remotos ni integración visual completa.
 - GPU, JIT, cluster y bridges son infraestructura experimental y no garantías universales.

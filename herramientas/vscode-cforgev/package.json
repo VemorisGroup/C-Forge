@@ -10,6 +10,8 @@
   "license": "SEE LICENSE IN LICENSE",
   "icon": "images/icon.png",
   "preview": true,
+  "main": "./extension.js",
+  "activationEvents": ["onLanguage:cforgev", "onCommand:cforge.runFile", "onCommand:cforge.checkFile", "onCommand:cforge.debugBreakpoint"],
   "pricing": "Free",
   "engines": {
     "vscode": "^1.80.0"
@@ -46,6 +48,11 @@
     "@vscode/vsce": "^3.6.2"
   },
   "contributes": {
+    "commands": [
+      {"command": "cforge.runFile", "title": "C-Forge: Ejecutar archivo"},
+      {"command": "cforge.checkFile", "title": "C-Forge: Comprobar archivo"},
+      {"command": "cforge.debugBreakpoint", "title": "C-Forge: Depurar con breakpoint de bytecode"}
+    ],
     "languages": [
       {
         "id": "cforgev",
