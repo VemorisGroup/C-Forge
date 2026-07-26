@@ -60,6 +60,11 @@ El código literal puede acceder al host con los permisos del proceso. Por ello
 no forma parte de una prueba de paridad pura salvo que todos los entornos,
 permisos y adaptadores sean idénticos.
 
+El intérprete pide confirmación en una terminal interactiva y bloquea `extern`
+en ejecuciones no interactivas. `--allow-extern` concede autorización explícita
+para un archivo confiable. La compilación nativa también rechaza esos bloques
+si el autor no entrega esa opción.
+
 ## Capacidades y seguridad
 
 Archivos, red, procesos, GPU, cluster, dependencias y código extranjero requieren

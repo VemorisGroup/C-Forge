@@ -122,6 +122,31 @@ class CForgevError(Exception):
     pass
 
 
+@dataclass
+class ExternExecutionPolicy:
+    """Consentimiento compartido para fronteras que ejecutan código del host."""
+    allow_all: bool = False
+    approved_languages: set[str] = dc_field(default_factory=set)
+
+    def authorize(self, language: str, line: int) -> None:
+        if self.allow_all or language in self.approved_languages:
+            return
+        warning = (
+            f'[C-Forge Security] extern("{language}") ejecutará código extranjero '
+            "con los permisos de tu usuario."
+        )
+        if not sys.stdin.isatty():
+            raise CForgevError(
+                f"Línea {line}: {warning} Ejecución bloqueada; "
+                "usa --allow-extern únicamente si confías en el archivo."
+            )
+        print(warning, file=sys.stderr)
+        answer = input("¿Deseas autorizar este lenguaje durante la ejecución? (S/N): ")
+        if answer.strip().lower() not in {"s", "si", "sí", "y", "yes"}:
+            raise CForgevError(f"Línea {line}: ejecución extern cancelada por el usuario")
+        self.approved_languages.add(language)
+
+
 class ReturnSignal(Exception):
     def __init__(self, value: object) -> None:
         self.value = value
@@ -365,6 +390,7 @@ class Interpreter:
         jit_counts: dict[str, int] | None = None,
         cluster_symbols: dict[str, str] | None = None,
         test_results: list[str] | None = None,
+        extern_policy: ExternExecutionPolicy | None = None,
     ) -> None:
         self.tokens = tokens
         self.current = 0
@@ -379,6 +405,7 @@ class Interpreter:
         self.cluster_symbols = cluster_symbols if cluster_symbols is not None else {}
         self.cluster_mode = False
         self.test_results = test_results
+        self.extern_policy = extern_policy or ExternExecutionPolicy()
 
     def run(self) -> None:
         while not self.check("EOF"):
@@ -391,6 +418,7 @@ class Interpreter:
                 body, self.variables, self.functions, self.variable_types,
                 self.base_dir, self.imported_modules, self.structures,
                 self.program_arguments, self.jit_counts, self.cluster_symbols,
+                extern_policy=self.extern_policy,
             ).run()
             return
         if self.match_ident("cluster"):
@@ -647,7 +675,8 @@ class Interpreter:
         self.imported_modules.add(module_path)
         Interpreter(
             tokenize(source), self.variables, self.functions, self.variable_types,
-            module_path.parent, self.imported_modules, self.structures, self.program_arguments
+            module_path.parent, self.imported_modules, self.structures, self.program_arguments,
+            extern_policy=self.extern_policy,
         ).run()
 
     def universal_import_statement(self) -> None:
@@ -675,6 +704,7 @@ class Interpreter:
         self.consume_value("{", "Se esperaba '{' para abrir extern")
         body = self.consume("FOREIGN", "Se esperaba código extranjero literal")
         self.consume_value("}", "Se esperaba '}' para cerrar extern")
+        self.extern_policy.authorize(language, body.line)
         validate_foreign_memory(language, body.value, body.line)
         if language == "python":
             namespace = {"__name__": "__cforgev_extern__", **self.variables}
@@ -775,6 +805,7 @@ class Interpreter:
                 self.base_dir, self.imported_modules, self.structures,
                 self.program_arguments, self.jit_counts, self.cluster_symbols,
                 self.test_results,
+                extern_policy=self.extern_policy,
             ).run()
         except CForgevError as error:
             raise CForgevError(f"Test '{name}' falló: {error}") from error
@@ -789,6 +820,7 @@ class Interpreter:
                 body, self.variables, self.functions, self.variable_types,
                 self.base_dir, self.imported_modules, self.structures,
                 self.program_arguments, self.jit_counts, self.cluster_symbols,
+                extern_policy=self.extern_policy,
             ).run()
         # Backend CPU funcional. La misma frontera permite sustituirlo por Metal/CUDA.
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -805,14 +837,16 @@ class Interpreter:
         try:
             Interpreter(
                 protected, self.variables, self.functions, self.variable_types,
-                self.base_dir, self.imported_modules, self.structures, self.program_arguments
+                self.base_dir, self.imported_modules, self.structures, self.program_arguments,
+                extern_policy=self.extern_policy,
             ).run()
         except CForgevError as error:
             self.variables[error_name.value] = str(error)
             self.variable_types[error_name.value] = "texto"
             Interpreter(
                 handler, self.variables, self.functions, self.variable_types,
-                self.base_dir, self.imported_modules, self.structures, self.program_arguments
+                self.base_dir, self.imported_modules, self.structures, self.program_arguments,
+                extern_policy=self.extern_policy,
             ).run()
 
     def function_declaration(self, is_async: bool = False) -> None:
@@ -870,7 +904,8 @@ class Interpreter:
         while True:
             condition = Interpreter(
                 condition_tokens, self.variables, self.functions, self.variable_types,
-                self.base_dir, self.imported_modules, self.structures, self.program_arguments
+                self.base_dir, self.imported_modules, self.structures, self.program_arguments,
+                extern_policy=self.extern_policy,
             ).evaluate_only()
             if not isinstance(condition, bool):
                 line = condition_tokens[0].line if condition_tokens else self.peek().line
@@ -881,7 +916,8 @@ class Interpreter:
                 break
             Interpreter(
                 body, self.variables, self.functions, self.variable_types,
-                self.base_dir, self.imported_modules, self.structures, self.program_arguments
+                self.base_dir, self.imported_modules, self.structures, self.program_arguments,
+                extern_policy=self.extern_policy,
             ).run()
             iterations += 1
             if iterations >= self.MAX_LOOP_ITERATIONS:
@@ -926,7 +962,8 @@ class Interpreter:
         if selected is not None:
             Interpreter(
                 selected, self.variables, self.functions, self.variable_types,
-                self.base_dir, self.imported_modules, self.structures, self.program_arguments
+                self.base_dir, self.imported_modules, self.structures, self.program_arguments,
+                extern_policy=self.extern_policy,
             ).run()
 
     def block(self) -> list[Token]:
@@ -1126,7 +1163,8 @@ class Interpreter:
         types = {key: value_type(value) for key, value in variables.items()}
         interpreter = Interpreter(
             method.body, variables, self.functions, types, self.base_dir,
-            self.imported_modules, self.structures, self.program_arguments
+            self.imported_modules, self.structures, self.program_arguments,
+            extern_policy=self.extern_policy,
         )
         try:
             interpreter.run()
@@ -1662,6 +1700,7 @@ class Interpreter:
             function.body, local_variables, self.functions, local_types,
             self.base_dir, self.imported_modules, self.structures, self.program_arguments,
             self.jit_counts, self.cluster_symbols,
+            extern_policy=self.extern_policy,
         )
         try:
             interpreter.run()
@@ -1797,13 +1836,25 @@ public final class CForgevJavaBridge {
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); source = root / "CForgevJavaBridge.java"
             source.write_text(bridge, encoding="utf-8")
-            compiled = subprocess.run(["javac", str(source)], capture_output=True, text=True)
+            try:
+                compiled = subprocess.run(
+                    ["javac", str(source)], capture_output=True, text=True
+                )
+            except FileNotFoundError as error:
+                raise CForgevError(
+                    f"Línea {line}: JNI/JDK no disponible; no se encontró javac"
+                ) from error
             if compiled.returncode:
                 raise CForgevError(f"Línea {line}: JNI/JDK no disponible: {compiled.stderr.strip()}")
-            invoked = subprocess.run(
-                ["java", "-cp", str(root), "CForgevJavaBridge", jar, class_name, method, *tagged],
-                capture_output=True, text=True,
-            )
+            try:
+                invoked = subprocess.run(
+                    ["java", "-cp", str(root), "CForgevJavaBridge", jar, class_name, method, *tagged],
+                    capture_output=True, text=True,
+                )
+            except FileNotFoundError as error:
+                raise CForgevError(
+                    f"Línea {line}: JVM no disponible; no se encontró java"
+                ) from error
         if invoked.returncode:
             raise CForgevError(f"Línea {line}: Java falló: {invoked.stderr.strip()}")
         tag, payload = invoked.stdout[:2], invoked.stdout[2:]
@@ -1965,7 +2016,11 @@ def require_bool(value: object, line: int) -> bool:
     return value
 
 
-def execute(path: Path, program_arguments: list[str] | None = None) -> None:
+def execute(
+    path: Path,
+    program_arguments: list[str] | None = None,
+    allow_extern: bool = False,
+) -> None:
     try:
         source = path.read_text(encoding="utf-8")
     except OSError as error:
@@ -1978,7 +2033,8 @@ def execute(path: Path, program_arguments: list[str] | None = None) -> None:
         MemorySafetyAnalyzer().analyze(checked)
         Interpreter(
             tokenize(source), base_dir=path.resolve().parent,
-            program_arguments=program_arguments
+            program_arguments=program_arguments,
+            extern_policy=ExternExecutionPolicy(allow_all=allow_extern),
         ).run()
     except ReturnSignal as signal:
         raise CForgevError("'retornar' solo se puede usar dentro de una función") from signal
@@ -2375,6 +2431,10 @@ def main() -> int:
     parser.add_argument("--wasm", action="store_true", help="exportar un módulo WebAssembly .wat")
     parser.add_argument("--llvm", action="store_true", help="exportar LLVM IR textual real (.ll)")
     parser.add_argument("--compilar-llvm", action="store_true", help="compilar el núcleo numérico mediante LLVM IR y Clang")
+    parser.add_argument(
+        "--allow-extern", action="store_true",
+        help="autorizar bloques extern de código extranjero en archivos confiables",
+    )
     args, program_arguments = parser.parse_known_args()
     if args.archivo is None:
         if args.compilar or args.salida or args.vincular or args.reparar or args.vigilar or args.wasm or args.llvm or args.compilar_llvm:
@@ -2422,10 +2482,13 @@ def main() -> int:
             from compilador_nativo import compile_native
 
             output = args.salida or args.archivo.with_suffix("")
-            compile_native(args.archivo, output, args.vincular)
+            compile_native(
+                args.archivo, output, args.vincular,
+                allow_extern=args.allow_extern,
+            )
             print(f"Ejecutable C-Forge creado: {output}")
         else:
-            execute(args.archivo, program_arguments)
+            execute(args.archivo, program_arguments, allow_extern=args.allow_extern)
     except CForgevError as error:
         print(f"[C-Forge Runtime Exception] {error}", file=sys.stderr)
         try:
@@ -3972,12 +4035,18 @@ def compile_native(
     source_path: Path,
     output_path: Path,
     extra_sources: list[Path] | None = None,
+    allow_extern: bool = False,
 ) -> Path:
     try:
         source = source_path.read_text(encoding="utf-8")
     except OSError as error:
         raise CForgevError(f"No se pudo abrir {source_path}: {error}") from error
     program = resolve_imports(Parser(tokenize(source)).program(), source_path.resolve().parent, set())
+    if "'extern'," in repr(program) and not allow_extern:
+        raise CForgevError(
+            "el programa contiene bloques extern; vuelve a compilar con "
+            "--allow-extern únicamente si confías en todo su código extranjero"
+        )
     StaticTypeAnalyzer().analyze(program)
     from cforge_memory import MemorySafetyAnalyzer
     MemorySafetyAnalyzer().analyze(program)
@@ -7569,9 +7638,11 @@ class MemoryState:
     destroyed: bool = False
     owns: set[str] = field(default_factory=set)
     parameter: bool = False
+    type_name: str = "cualquiera"
     def clone(self):
         return MemoryState(self.moved, self.shared, self.mutable, self.owner,
-                           self.borrow_kind, self.destroyed, set(self.owns), self.parameter)
+                           self.borrow_kind, self.destroyed, set(self.owns), self.parameter,
+                           self.type_name)
 
 
 @dataclass(frozen=True)
@@ -7747,6 +7818,35 @@ class MemorySafetyAnalyzer:
             }
         return set()
 
+    def expression_type(self, expression, states):
+        """Conserva el tipo mínimo necesario para decidir copia frente a movimiento."""
+        kind = expression[0]
+        if kind == "variable":
+            return self.state(expression[1], states).type_name
+        if kind == "call" and expression[1] in self.constructor_names:
+            return expression[1]
+        if kind in {"list", "map", "tuple", "set"}:
+            return kind
+        if kind == "string":
+            return "texto"
+        if kind == "number":
+            return "numero"
+        if kind == "bool":
+            return "booleano"
+        if kind == "null":
+            return "nulo"
+        return "cualquiera"
+
+    def transfer_variable_initializer(self, expression, declared_type, states):
+        """Una asignación de un valor no copiable transfiere ownership implícitamente."""
+        if expression[0] != "variable":
+            return
+        source_name = expression[1]
+        source = self.state(source_name, states)
+        effective_type = declared_type or source.type_name
+        if not self.copy_type(effective_type):
+            self.consume(source_name, states)
+
     def reaches(self, source, target, states, visited=None):
         if source == target: return True
         visited = set() if visited is None else visited
@@ -7782,8 +7882,11 @@ class MemorySafetyAnalyzer:
             kind = statement[0]
             if kind == "let":
                 self.expression(statement[3], states)
-                alias = MemoryState()
                 expression = statement[3]
+                declared_type = statement[2]
+                inferred_type = declared_type or self.expression_type(expression, states)
+                self.transfer_variable_initializer(expression, inferred_type, states)
+                alias = MemoryState(type_name=inferred_type)
                 borrowed = self.returned_alias(expression)
                 if borrowed:
                     alias.owner, alias.borrow_kind = borrowed
@@ -7807,7 +7910,9 @@ class MemorySafetyAnalyzer:
                     self.error(f"no se puede reasignar el préstamo '{statement[1]}'")
                 if state.shared or state.mutable:
                     self.error(f"no se puede reasignar '{statement[1]}' mientras está prestada")
-                self.expression(statement[2], states); state.moved = False; state.destroyed = False
+                self.expression(statement[2], states)
+                self.transfer_variable_initializer(statement[2], state.type_name, states)
+                state.moved = False; state.destroyed = False
                 state.owns.clear()
                 self.attach_ownership(statement[1], self.owned_references(statement[2]), states)
             elif kind in {"print", "return", "expression"}:

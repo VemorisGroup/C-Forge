@@ -1,5 +1,8 @@
 # C-Forge
 
+[![CI multiplataforma](https://github.com/VemorisGroup/C-Forge/actions/workflows/ci.yml/badge.svg)](https://github.com/VemorisGroup/C-Forge/actions/workflows/ci.yml)
+[![Seguridad](https://github.com/VemorisGroup/C-Forge/actions/workflows/security.yml/badge.svg)](https://github.com/VemorisGroup/C-Forge/actions/workflows/security.yml)
+
 <p align="center">
   <img src="assets/cforgev-logo.svg" width="128" height="128" alt="Logo de C-Forge">
 </p>
@@ -110,6 +113,7 @@ cforge pkg search consulta         # consultar el índice público
 cforge pkg install paquete         # verificar HTTPS, SHA-256, firma, cuenta y revocación
 cforge dap                         # servidor de depuración DAP para editores
 cforge --compilar-llvm ejemplos/llvm_objetos_16.cfv -o contador
+cforge programa_confiable.cfv --allow-extern # autorizar código extranjero explícitamente
 ```
 
 La matriz honesta de capacidades y trabajo pendiente está en

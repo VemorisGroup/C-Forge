@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,7 +14,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 from cforgev import (
-    CForgevError, Interpreter, SystemDependency, branded_process_output,
+    CForgevError, ExternExecutionPolicy, Interpreter, SystemDependency, branded_process_output,
     ensure_system_dependency, execute, execute_watch, format_source, repair_source,
     run_repl, run_test_file, tokenize,
 )
@@ -25,7 +26,10 @@ class InterpreterTests(unittest.TestCase):
     def output(self, source: str) -> str:
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            Interpreter(tokenize(source)).run()
+            Interpreter(
+                tokenize(source),
+                extern_policy=ExternExecutionPolicy(allow_all=True),
+            ).run()
         return buffer.getvalue()
 
     def test_variables_math_and_strings(self) -> None:
@@ -224,7 +228,7 @@ class InterpreterTests(unittest.TestCase):
             self.assertEqual(interpreted, "demo.js\nCFV\n3\nJS externo\n42\n")
             path, output = root / "polyglot.cfv", root / "polyglot"
             path.write_text(source, encoding="utf-8")
-            compile_native(path, output)
+            compile_native(path, output, allow_extern=True)
             result = subprocess.run([str(output)], capture_output=True, text=True, check=True)
             self.assertEqual(result.stdout, interpreted)
 
@@ -285,9 +289,43 @@ std::cout << value << std::endl;
             root = Path(directory)
             source_path, output_path = root / "extern.cfv", root / "extern"
             source_path.write_text(source, encoding="utf-8")
-            compile_native(source_path, output_path)
+            compile_native(source_path, output_path, allow_extern=True)
             result = subprocess.run([str(output_path)], capture_output=True, text=True, check=True)
             self.assertEqual(result.stdout, "Python externo\n{C++ literal}\n")
+
+    def test_extern_is_denied_without_explicit_consent_in_noninteractive_mode(self) -> None:
+        source = 'extern("python") { print("no debe ejecutarse") }'
+        with patch.object(sys.stdin, "isatty", return_value=False):
+            with self.assertRaisesRegex(CForgevError, "--allow-extern"):
+                Interpreter(tokenize(source)).run()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "extern.cfv"
+            path.write_text(source, encoding="utf-8")
+            with self.assertRaisesRegex(CForgevError, "--allow-extern"):
+                compile_native(path, Path(directory) / "extern")
+
+    def test_extern_interactive_consent_is_required_and_cached(self) -> None:
+        source = '''
+        extern("python") { print("primero") }
+        extern("python") { print("segundo") }
+        '''
+        policy = ExternExecutionPolicy()
+        output = io.StringIO()
+        with (
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch("builtins.input", return_value="S") as consent,
+            contextlib.redirect_stdout(output),
+        ):
+            Interpreter(tokenize(source), extern_policy=policy).run()
+        self.assertEqual(output.getvalue(), "primero\nsegundo\n")
+        consent.assert_called_once()
+
+        with (
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch("builtins.input", return_value="N"),
+            self.assertRaisesRegex(CForgevError, "cancelada por el usuario"),
+        ):
+            Interpreter(tokenize('extern("python") { print("bloqueado") }')).run()
 
     def test_memory_safety_rejects_manual_native_memory(self) -> None:
         source = 'extern("cpp") { int* data = new int(10); delete data; }'
@@ -475,7 +513,7 @@ mostrar(use_python("__main__", "cfv_collection_types", [version, motores]))
             root = Path(directory)
             source_path, output_path = root / "interop.cfv", root / "interop"
             source_path.write_text(source, encoding="utf-8")
-            compile_native(source_path, output_path)
+            compile_native(source_path, output_path, allow_extern=True)
             result = subprocess.run([str(output_path)], capture_output=True, text=True, check=True)
             self.assertEqual(result.stdout, "(tuple, set, 2, 2)\n")
 
@@ -865,6 +903,64 @@ mostrar(use_cpp("release_count", []))
                 [str(output_path)], capture_output=True, text=True, check=True, env=environment,
             )
             self.assertEqual(result.stdout, "3\n3\n[3]\n")
+
+
+_CLANG_REQUIRED_TESTS = {
+    "test_class_field_mutation_rejects_wrong_type",
+    "test_cluster_symbol_table_interpreter_and_native",
+    "test_csharp_native_aot_common_abi_when_available",
+    "test_dynamic_library_common_abi",
+    "test_extern_python_and_cpp_are_literal_and_native",
+    "test_gpu_block_interpreter_and_native",
+    "test_javascript_npm_extern_and_universal_data",
+    "test_linked_cpp_function_registry",
+    "test_native_classes_methods_and_mutation",
+    "test_native_collections_logic_and_types",
+    "test_native_compiler_builds_executable",
+    "test_native_compiler_preserves_tuples_and_sets",
+    "test_native_dynamic_abi_roundtrips_boolean",
+    "test_native_dynamic_abi_v2_lists_maps_and_records",
+    "test_native_dynamic_abi_v2_preserves_text_length_and_embedded_nul",
+    "test_native_fusion_connectors_without_semicolons",
+    "test_native_math_and_time_library",
+    "test_native_modules_files_and_errors",
+    "test_native_owned_result_is_released_exactly_once",
+    "test_native_python_bridge_preserves_embedded_nul_with_explicit_lengths",
+    "test_native_system_file_and_fast_math_core",
+    "test_native_typed_structures",
+    "test_native_user_input",
+    "test_program_arguments_in_interpreter_and_native",
+    "test_python_bridge_preserves_tuple_and_set_types",
+    "test_python_bridge_roundtrips_nested_universal_data",
+    "test_python_exception_is_captured_in_interpreter_and_native",
+    "test_real_embedded_python_interop",
+    "test_shared_forge_symbols_and_cross_language_members",
+    "test_universal_nuget_import_when_available",
+}
+for _test_name in _CLANG_REQUIRED_TESTS:
+    _test = getattr(InterpreterTests, _test_name)
+    setattr(
+        InterpreterTests,
+        _test_name,
+        unittest.skipUnless(
+            shutil.which("clang++"),
+            "clang++ no está disponible; prueba nativa omitida",
+        )(_test),
+    )
+
+for _test_name in {
+    "test_javascript_npm_extern_and_universal_data",
+    "test_shared_forge_symbols_and_cross_language_members",
+}:
+    _test = getattr(InterpreterTests, _test_name)
+    setattr(
+        InterpreterTests,
+        _test_name,
+        unittest.skipUnless(
+            shutil.which("node"),
+            "Node.js no está disponible; prueba JavaScript omitida",
+        )(_test),
+    )
 
 
 if __name__ == "__main__":

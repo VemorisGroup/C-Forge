@@ -13,9 +13,11 @@ class MemoryState:
     destroyed: bool = False
     owns: set[str] = field(default_factory=set)
     parameter: bool = False
+    type_name: str = "cualquiera"
     def clone(self):
         return MemoryState(self.moved, self.shared, self.mutable, self.owner,
-                           self.borrow_kind, self.destroyed, set(self.owns), self.parameter)
+                           self.borrow_kind, self.destroyed, set(self.owns), self.parameter,
+                           self.type_name)
 
 
 @dataclass(frozen=True)
@@ -191,6 +193,35 @@ class MemorySafetyAnalyzer:
             }
         return set()
 
+    def expression_type(self, expression, states):
+        """Conserva el tipo mínimo necesario para decidir copia frente a movimiento."""
+        kind = expression[0]
+        if kind == "variable":
+            return self.state(expression[1], states).type_name
+        if kind == "call" and expression[1] in self.constructor_names:
+            return expression[1]
+        if kind in {"list", "map", "tuple", "set"}:
+            return kind
+        if kind == "string":
+            return "texto"
+        if kind == "number":
+            return "numero"
+        if kind == "bool":
+            return "booleano"
+        if kind == "null":
+            return "nulo"
+        return "cualquiera"
+
+    def transfer_variable_initializer(self, expression, declared_type, states):
+        """Una asignación de un valor no copiable transfiere ownership implícitamente."""
+        if expression[0] != "variable":
+            return
+        source_name = expression[1]
+        source = self.state(source_name, states)
+        effective_type = declared_type or source.type_name
+        if not self.copy_type(effective_type):
+            self.consume(source_name, states)
+
     def reaches(self, source, target, states, visited=None):
         if source == target: return True
         visited = set() if visited is None else visited
@@ -226,8 +257,11 @@ class MemorySafetyAnalyzer:
             kind = statement[0]
             if kind == "let":
                 self.expression(statement[3], states)
-                alias = MemoryState()
                 expression = statement[3]
+                declared_type = statement[2]
+                inferred_type = declared_type or self.expression_type(expression, states)
+                self.transfer_variable_initializer(expression, inferred_type, states)
+                alias = MemoryState(type_name=inferred_type)
                 borrowed = self.returned_alias(expression)
                 if borrowed:
                     alias.owner, alias.borrow_kind = borrowed
@@ -251,7 +285,9 @@ class MemorySafetyAnalyzer:
                     self.error(f"no se puede reasignar el préstamo '{statement[1]}'")
                 if state.shared or state.mutable:
                     self.error(f"no se puede reasignar '{statement[1]}' mientras está prestada")
-                self.expression(statement[2], states); state.moved = False; state.destroyed = False
+                self.expression(statement[2], states)
+                self.transfer_variable_initializer(statement[2], state.type_name, states)
+                state.moved = False; state.destroyed = False
                 state.owns.clear()
                 self.attach_ownership(statement[1], self.owned_references(statement[2]), states)
             elif kind in {"print", "return", "expression"}:

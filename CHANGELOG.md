@@ -2,6 +2,12 @@
 
 ## 1.6.0-developer-preview — en desarrollo
 
+- Los bloques `extern` quedan bloqueados por defecto en automatización, solicitan
+  consentimiento en terminal y requieren `--allow-extern` para una autorización
+  explícita; la compilación nativa aplica la misma barrera.
+- El ownership trata la asignación de estructuras y colecciones no copiables
+  como un movimiento implícito y rechaza doble movimiento/use-after-move.
+- La EBNF documenta `este` como autorreferencia exclusiva de métodos.
 - El lenguaje queda definido independientemente de su implementación mediante
   una gramática EBNF normativa, un contrato de tipos/`ForgeValue`/ownership y
   una especificación de semántica observable y paridad de backends. Una prueba

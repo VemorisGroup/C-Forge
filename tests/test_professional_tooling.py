@@ -1167,6 +1167,18 @@ mostrar(await cuadrado(5))
         VirtualMachine(compile_file(example), output.append).run()
         self.assertEqual(output, ["C-Forge formal", "42"])
 
+    def test_ownership_rejects_implicit_double_move_of_structure(self):
+        source = """
+estructura Recurso { id: numero }
+sea a: Recurso = Recurso(1)
+sea b: Recurso = a
+sea c: Recurso = a
+"""
+        diagnostics = analyze_source(source)
+        self.assertTrue(diagnostics)
+        self.assertEqual(diagnostics[0].code, "CF3001")
+        self.assertIn("uso después de mover", diagnostics[0].message)
+
 
 if __name__ == "__main__":
     unittest.main()

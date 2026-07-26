@@ -1460,12 +1460,18 @@ def compile_native(
     source_path: Path,
     output_path: Path,
     extra_sources: list[Path] | None = None,
+    allow_extern: bool = False,
 ) -> Path:
     try:
         source = source_path.read_text(encoding="utf-8")
     except OSError as error:
         raise CForgevError(f"No se pudo abrir {source_path}: {error}") from error
     program = resolve_imports(Parser(tokenize(source)).program(), source_path.resolve().parent, set())
+    if "'extern'," in repr(program) and not allow_extern:
+        raise CForgevError(
+            "el programa contiene bloques extern; vuelve a compilar con "
+            "--allow-extern únicamente si confías en todo su código extranjero"
+        )
     StaticTypeAnalyzer().analyze(program)
     from cforge_memory import MemorySafetyAnalyzer
     MemorySafetyAnalyzer().analyze(program)

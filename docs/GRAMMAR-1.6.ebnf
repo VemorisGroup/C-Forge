@@ -123,6 +123,7 @@ primaria          = numero
                   | "verdadero"
                   | "falso"
                   | "nulo"
+                  | "este"  (* autorreferencia válida únicamente dentro de métodos *)
                   | identificador
                   | lista
                   | mapa
