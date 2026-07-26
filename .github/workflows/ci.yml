@@ -20,6 +20,8 @@ jobs:
           python-version: "3.11"
       - name: Instalar C-Forge y dependencias verificadas
         run: python -m pip install -e .
+      - name: Verificar promesas públicas y evidencias
+        run: python herramientas/verificar_capacidades.py
       - name: Prueba portable
         shell: bash
         run: |

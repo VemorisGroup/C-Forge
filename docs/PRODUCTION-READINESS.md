@@ -119,5 +119,6 @@ cforge bytecode programa.cfv
 cforge vm programa.cfv
 cforge parity programa.cfv
 cforge pkg init mi-proyecto
-python3 -m pytest -q
+python3 herramientas/verificar_capacidades.py
+python3 -m unittest discover -s tests -v
 ```

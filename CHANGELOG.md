@@ -13,6 +13,10 @@
   de su representación textual.
 - LLVM diagnostica firmas sin tipos explícitos mediante un error C-Forge limpio,
   sin filtrar tracebacks internos del implementador.
+- `capabilities.json` establece el estado y evidencia de cada capacidad pública;
+  CI rechaza características del README sin etiqueta oficial o enlaces rotos.
+- `cforge capabilities [--json]` expone la matriz honesta desde instalaciones
+  fuente, portables, monolíticas y Homebrew.
 - La EBNF documenta `este` como autorreferencia exclusiva de métodos.
 - El lenguaje queda definido independientemente de su implementación mediante
   una gramática EBNF normativa, un contrato de tipos/`ForgeValue`/ownership y

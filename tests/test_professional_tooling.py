@@ -23,6 +23,25 @@ from compilador_llvm import compile_file as compile_llvm_file, compile_source as
 
 
 class ProfessionalToolingTests(unittest.TestCase):
+    def test_public_capability_manifest_and_readme_are_consistent(self):
+        result = subprocess.run(
+            [sys.executable, "herramientas/verificar_capacidades.py"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[C-Forge Capability Gate] OK", result.stdout)
+
+        command = subprocess.run(
+            [sys.executable, "cforgev.py", "capabilities", "--json"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(command.returncode, 0, command.stderr)
+        manifest = json.loads(command.stdout)
+        self.assertEqual(manifest["overall_status"], "developer-preview")
+        self.assertTrue(any(item["status"] == "planned" for item in manifest["capabilities"]))
+
     def test_interpreter_vm_llvm_parity_gate(self):
         if not shutil.which("clang"):
             self.skipTest("clang no está disponible")

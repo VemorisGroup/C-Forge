@@ -23,6 +23,7 @@ FILES = (
     "cforge_vm.py",
     "cforge_memory.py",
     "cforge_parity.py",
+    "capabilities.json",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
@@ -30,7 +31,7 @@ FILES = (
     "INTEROPERABILIDAD.md",
     "SECURITY.md",
 )
-DIRECTORIES = ("include", "ejemplos", "registry")
+DIRECTORIES = ("include", "ejemplos", "registry", "docs")
 IGNORED = shutil.ignore_patterns("build", "bin", "obj", "__pycache__", "*.pyc", ".DS_Store")
 
 

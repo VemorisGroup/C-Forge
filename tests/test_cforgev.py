@@ -327,6 +327,31 @@ std::cout << value << std::endl;
         ):
             Interpreter(tokenize('extern("python") { print("bloqueado") }')).run()
 
+    def test_test_command_requires_explicit_extern_authorization(self) -> None:
+        source = '''
+        extern("python") { valor_externo = 42 }
+        test "extern confiable" {
+            afirmar(valor_externo == 42, "el valor extranjero debe compartirse")
+        }
+        '''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "extern_test.cfv"
+            path.write_text(source, encoding="utf-8")
+            denied = subprocess.run(
+                [sys.executable, "cforgev.py", "test", str(path)],
+                capture_output=True,
+                text=True,
+            )
+            allowed = subprocess.run(
+                [sys.executable, "cforgev.py", "test", str(path), "--allow-extern"],
+                capture_output=True,
+                text=True,
+            )
+        self.assertNotEqual(denied.returncode, 0)
+        self.assertIn("--allow-extern", denied.stderr)
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        self.assertIn("C-Forge Test: 1 aprobados, 0 fallidos", allowed.stdout)
+
     def test_memory_safety_rejects_manual_native_memory(self) -> None:
         source = 'extern("cpp") { int* data = new int(10); delete data; }'
         with self.assertRaisesRegex(CForgevError, "Memory Safety"):

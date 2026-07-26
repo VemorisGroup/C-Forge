@@ -73,25 +73,38 @@ print(datos.len())
 
 ## Características
 
-- Variables inferidas y declaraciones con tipo explícito.
-- Números, textos, booleanos, listas, mapas, estructuras y clases.
-- Condiciones, ciclos, funciones, métodos y excepciones controladas.
-- REPL persistente para ejecutar instrucciones en vivo.
-- Compilación de `.cfv` a C++17 y después a un ejecutable nativo.
-- Módulos locales y acceso homogéneo mediante `objeto.miembro`.
-- Interoperabilidad con Python, C/C++, C# Native AOT, Java, JavaScript y TypeScript.
-- Bloques literales `extern("lenguaje") { ... }`.
-- FFI LLVM tipado mediante `extern_c funcion` y `--vincular`, con escalares y
+- **[Verificado en Developer Preview]** Variables inferidas, tipos explícitos,
+  valores escalares, colecciones, estructuras, clases y control de flujo.
+- **[Verificado en Developer Preview]** REPL, intérprete, bytecode y VM para el
+  subconjunto cubierto por la suite automatizada.
+- **[Experimental]** Compilación de `.cfv` a C++17 y posteriormente a ejecutable.
+- **[Parcial]** Backend LLVM nativo para las capacidades enumeradas en
+  [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md).
+- **[Experimental]** Módulos locales y acceso mediante `objeto.miembro`.
+- **[Parcial]** Adaptadores para Python, C/C++, C# Native AOT, Java,
+  JavaScript y TypeScript; no existe todavía paridad completa en tres sistemas.
+- **[Experimental]** Bloques literales `extern("lenguaje") { ... }`, siempre
+  sujetos a autorización de seguridad.
+- **[Parcial]** FFI LLVM tipado mediante `extern_c funcion` y `--vincular`, con escalares y
   vistas zero-copy prestadas para parámetros `lista<numero>`.
-- Tabla compartida `ForgeValue` y símbolos `cluster`.
-- Tareas paralelas, bloques `gpu` y contadores para perfil adaptativo/JIT.
-- Archivos, procesos, información del hardware y sockets TCP.
-- `array_fast` y matrices densas con almacenamiento numérico contiguo al compilar.
-- Formateador, pruebas nativas, hot reload, reparación conservadora y salida WAT.
-- Extensión de sintaxis para Visual Studio Code.
-- Distribución monolítica C++ e instalador global para macOS.
-- Paquetes portables y automatización de lanzamientos para macOS, Linux y Windows.
-- Bytecode y VM propios, diagnósticos estructurados, LSP y gestor local reproducible.
+- **[Experimental]** `ForgeValue`, Forge Shared Arena y símbolos `cluster`.
+- **[Parcial]** Tareas paralelas y `async/await`; `gpu` ejecuta actualmente en
+  CPU y el JIT solamente perfila rutas calientes.
+- **[Experimental]** Archivos, procesos, hardware, sockets TCP, `array_fast`
+  y matrices en los backends documentados.
+- **[Experimental]** Formateador, pruebas, hot reload, reparación conservadora,
+  LSP, DAP y extensión de Visual Studio Code.
+- **[Parcial]** WebAssembly emite WAT para un subconjunto, no para todo C-Forge.
+- **[Parcial]** Empaquetado para macOS, Linux y Windows; la validación física y
+  los catálogos públicos aún no están completos.
+- **[Planeado]** Núcleo autónomo C++/LLVM que no necesite Python para existir.
+- **[No certificado]** Uso bancario o crítico; requiere auditoría profesional,
+  LTS, cumplimiento y evidencia externa.
+
+La fuente de verdad legible por máquinas es
+[`capabilities.json`](capabilities.json). La
+[`política de completitud`](docs/COMPLETENESS-POLICY.md) prohíbe presentar una
+capacidad parcial o planeada como terminada.
 
 ## Herramientas profesionales (base 1.0)
 
@@ -171,9 +184,10 @@ El instalador copia la distribución monolítica a `/usr/local/bin/cforge`.
 
 ## Instalación multiplataforma
 
-Los lanzamientos etiquetados generan automáticamente paquetes para los tres
-sistemas. Mientras los catálogos públicos revisan los manifiestos, se instalan
-desde [GitHub Releases](https://github.com/VemorisGroup/C-Forge/releases).
+El workflow de lanzamientos está preparado para generar paquetes en los tres
+sistemas. Cada artefacto solo se considera publicado y soportado cuando aparece
+como evidencia en [GitHub Releases](https://github.com/VemorisGroup/C-Forge/releases)
+y en la matriz de validación.
 
 macOS, cuando se publique el tap de Vemoris Group:
 
@@ -198,12 +212,12 @@ están documentadas en [`DISTRIBUCION.md`](DISTRIBUCION.md).
 
 ## Prueba maestra
 
-El archivo [`main.cfv`](main.cfv) demuestra tipado, clases, Python, JavaScript,
+El archivo experimental [`main.cfv`](main.cfv) demuestra tipado, clases, Python, JavaScript,
 TypeScript, Java, C#, C++, ForgeValue, archivos, hardware, procesos, matrices,
 paralelismo, GPU/CPU, JIT, `cluster`, networking y manejo de errores.
 
 ```bash
-cforge test main.cfv
+cforge test main.cfv --allow-extern
 ```
 
 Resultado esperado:
@@ -211,6 +225,9 @@ Resultado esperado:
 ```text
 C-Forge Test: 10 aprobados, 0 fallidos
 ```
+
+`main.cfv` contiene bloques extranjeros deliberados; `--allow-extern` confirma
+que se confía en el archivo. Las pruebas normales no deben usar esa opción.
 
 Para comprobar también el backend nativo:
 

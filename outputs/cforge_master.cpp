@@ -2148,13 +2148,18 @@ def format_file(path: Path) -> bool:
     return True
 
 
-def run_test_file(path: Path) -> int:
+def run_test_file(path: Path, allow_extern: bool = False) -> int:
     try:
         source = path.read_text(encoding="utf-8")
     except OSError as error:
         raise CForgevError(f"No se pudo abrir {path}: {error.strerror or error}") from error
     results: list[str] = []
-    Interpreter(tokenize(source), base_dir=path.resolve().parent, test_results=results).run()
+    Interpreter(
+        tokenize(source),
+        base_dir=path.resolve().parent,
+        test_results=results,
+        extern_policy=ExternExecutionPolicy(allow_all=allow_extern),
+    ).run()
     if not results:
         raise CForgevError(f"{path} no contiene bloques test")
     print(f"C-Forge Test: {len(results)} aprobados, 0 fallidos")
@@ -2290,10 +2295,30 @@ def main() -> int:
         return setup_environment()
     if len(sys.argv) == 2 and sys.argv[1] == "--install":
         return install_global()
+    if len(sys.argv) in {2, 3} and sys.argv[1] == "capabilities":
+        if len(sys.argv) == 3 and sys.argv[2] != "--json":
+            print("Uso: cforge capabilities [--json]", file=sys.stderr)
+            return 2
+        manifest = Path(__file__).resolve().parent / "capabilities.json"
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"[C-Forge Capability Gate] {error}", file=sys.stderr)
+            return 1
+        if len(sys.argv) == 3:
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+        else:
+            print(f"C-Forge {data['language_version']} — {data['overall_status']}")
+            for item in data["capabilities"]:
+                print(f"[{item['status']}] {item['name']}: {item['scope']}")
+        return 0
     if len(sys.argv) >= 2 and sys.argv[1] in {"fmt", "test"}:
         command = sys.argv[1]
-        if len(sys.argv) != 3:
-            print(f"Uso: cforge {command} archivo.cfv", file=sys.stderr)
+        allow_extern = command == "test" and "--allow-extern" in sys.argv[3:]
+        expected = 4 if allow_extern else 3
+        if len(sys.argv) != expected:
+            suffix = " [--allow-extern]" if command == "test" else ""
+            print(f"Uso: cforge {command} archivo.cfv{suffix}", file=sys.stderr)
             return 2
         path = Path(sys.argv[2])
         try:
@@ -2301,7 +2326,7 @@ def main() -> int:
                 changed = format_file(path)
                 print(f"C-Forge fmt: {'formateado' if changed else 'sin cambios'} — {path}")
             else:
-                run_test_file(path)
+                run_test_file(path, allow_extern=allow_extern)
         except CForgevError as error:
             print(f"[C-Forge Runtime Exception] {error}", file=sys.stderr)
             return 1
@@ -8222,15 +8247,128 @@ def reports_json(reports: list[ParityReport]) -> str:
         sort_keys=True,
     )
 )CFV21DATA"},
-        {R"CFV22DATA(registry/index.json)CFV22DATA", R"CFV23DATA({
+        {R"CFV22DATA(capabilities.json)CFV22DATA", R"CFV23DATA({
+  "schema": 1,
+  "language_version": "1.6.0-developer-preview",
+  "overall_status": "developer-preview",
+  "statuses": [
+    "verified-preview",
+    "experimental",
+    "partial",
+    "planned",
+    "not-certified"
+  ],
+  "capabilities": [
+    {
+      "id": "reference-interpreter",
+      "name": "Intérprete de referencia",
+      "status": "verified-preview",
+      "scope": "Sintaxis y semántica cubiertas por la suite de intérprete",
+      "evidence": ["tests/test_cforgev.py", "ejemplos/hola.cfv"]
+    },
+    {
+      "id": "bytecode-vm",
+      "name": "Bytecode y VM propios",
+      "status": "verified-preview",
+      "scope": "Subconjunto seguro documentado, formato 1.1",
+      "evidence": ["cforge_vm.py", "tests/test_professional_tooling.py"]
+    },
+    {
+      "id": "ownership",
+      "name": "Ownership y préstamos",
+      "status": "experimental",
+      "scope": "Movimientos, préstamos, regiones y Option; no es aún un verificador formal completo de tiempos de vida",
+      "evidence": ["cforge_memory.py", "docs/TYPE-SYSTEM-1.6.md"]
+    },
+    {
+      "id": "llvm-backend",
+      "name": "Backend LLVM",
+      "status": "partial",
+      "scope": "Escalares, textos, colecciones seleccionadas, objetos, módulos, genéricos básicos y FFI documentada",
+      "evidence": ["compilador_llvm.py", "docs/PRODUCTION-READINESS.md"]
+    },
+    {
+      "id": "cpp17-backend",
+      "name": "Backend C++17",
+      "status": "experimental",
+      "scope": "Traducción nativa del subconjunto aceptado por compilador_nativo.py",
+      "evidence": ["compilador_nativo.py", "tests/test_cforgev.py"]
+    },
+    {
+      "id": "wasm-backend",
+      "name": "Backend WebAssembly",
+      "status": "partial",
+      "scope": "Emisión WAT para un subconjunto; no cubre todo el lenguaje",
+      "evidence": ["compilador_wasm.py", "docs/PRODUCTION-READINESS.md"]
+    },
+    {
+      "id": "polyglot-adapters",
+      "name": "Adaptadores políglotas",
+      "status": "partial",
+      "scope": "C/C++, Python, Java, .NET, JavaScript y TypeScript con alcances y dependencias diferentes",
+      "evidence": ["docs/PRODUCTION-READINESS.md", "ejemplos/interop"]
+    },
+    {
+      "id": "async-concurrency",
+      "name": "Async y concurrencia",
+      "status": "partial",
+      "scope": "Tareas, await y canales en backends documentados; paridad total pendiente",
+      "evidence": ["ejemplos/async_await_16.cfv", "ejemplos/concurrencia_16.cfv"]
+    },
+    {
+      "id": "developer-tools",
+      "name": "LSP, DAP, formatter y diagnósticos",
+      "status": "experimental",
+      "scope": "Implementaciones iniciales funcionales sin garantía de estabilidad",
+      "evidence": ["cforge_lsp.py", "cforge_dap.py", "tests/test_professional_tooling.py"]
+    },
+    {
+      "id": "package-manager",
+      "name": "Gestor y registro de paquetes",
+      "status": "partial",
+      "scope": "Cliente, firmas e índice en repositorio; servicio público operado y cuentas pendientes",
+      "evidence": ["cforge_packages.py", "registry/index.json", "registry/README.md"]
+    },
+    {
+      "id": "gpu-jit-cluster",
+      "name": "GPU, JIT y cluster",
+      "status": "partial",
+      "scope": "GPU emulada en CPU, JIT de perfilado y metadatos cluster; backends físicos pendientes",
+      "evidence": ["docs/PRODUCTION-READINESS.md", "ejemplos/arquitectura_10.cfv"]
+    },
+    {
+      "id": "multiplatform-distribution",
+      "name": "Distribución multiplataforma",
+      "status": "partial",
+      "scope": "CI y empaquetado preparados; validación física completa y catálogos pendientes",
+      "evidence": [".github/workflows/ci.yml", "docs/PLATFORM-VALIDATION.md"]
+    },
+    {
+      "id": "autonomous-native-core",
+      "name": "Núcleo autónomo C++/LLVM",
+      "status": "planned",
+      "scope": "Migración futura; el frontend principal todavía usa la implementación Python",
+      "evidence": ["docs/COMPLETENESS-POLICY.md"]
+    },
+    {
+      "id": "critical-production",
+      "name": "Producción bancaria o crítica",
+      "status": "not-certified",
+      "scope": "Requiere auditoría profesional, LTS, builds firmados y cumplimiento",
+      "evidence": ["docs/EXTERNAL-AUDIT-SCOPE.md", "SECURITY.md"]
+    }
+  ]
+}
+)CFV23DATA"},
+        {R"CFV24DATA(registry/index.json)CFV24DATA", R"CFV25DATA({
   "format": 2,
   "registry": "C-Forge Community Registry",
   "publishers": {},
   "revocations": [],
   "packages": {}
 }
-)CFV23DATA"},
-        {R"CFV24DATA(registry/README.md)CFV24DATA", R"CFV25DATA(# Registro público de paquetes C-Forge
+)CFV25DATA"},
+        {R"CFV26DATA(registry/README.md)CFV26DATA", R"CFV27DATA(# Registro público de paquetes C-Forge
 
 Este directorio define el índice público, auditable y versionado del gestor `cforge pkg`.
 Cada versión del formato 2 debe publicar una URL HTTPS, el SHA-256 exacto del
@@ -8257,8 +8395,8 @@ que cada paquete señale un publicador `active` y que su `key_id` esté autoriza
 por esa cuenta. Esta fase usa
 identidades de GitHub y revisión por pull request; todavía no existe un servicio
 central de inicio de sesión, recuperación de cuenta ni publicación automática.
-)CFV25DATA"},
-        {R"CFV26DATA(include/cforgev_ffi.h)CFV26DATA", R"CFV27DATA(#ifndef CFORGEV_FFI_H
+)CFV27DATA"},
+        {R"CFV28DATA(include/cforgev_ffi.h)CFV28DATA", R"CFV29DATA(#ifndef CFORGEV_FFI_H
 #define CFORGEV_FFI_H
 
 #include <stddef.h>
@@ -8403,8 +8541,8 @@ CFV_EXPORT int cfv_register_function_v2(const char* name, CfvForeignFunctionV2 f
 #endif
 
 #endif
-)CFV27DATA"},
-        {R"CFV28DATA(include/cforge_shared_arena.h)CFV28DATA", R"CFV29DATA(#ifndef CFORGE_SHARED_ARENA_H
+)CFV29DATA"},
+        {R"CFV30DATA(include/cforge_shared_arena.h)CFV30DATA", R"CFV31DATA(#ifndef CFORGE_SHARED_ARENA_H
 #define CFORGE_SHARED_ARENA_H
 
 #include <atomic>
@@ -8754,8 +8892,8 @@ private:
 }  // namespace cforge::arena
 
 #endif
-)CFV29DATA"},
-        {R"CFV30DATA(herramientas/cforgev_ffi_runner.cpp)CFV30DATA", R"CFV31DATA(#include "cforgev_ffi.h"
+)CFV31DATA"},
+        {R"CFV32DATA(herramientas/cforgev_ffi_runner.cpp)CFV32DATA", R"CFV33DATA(#include "cforgev_ffi.h"
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -8803,8 +8941,8 @@ int main(int argc, char** argv) {
     if (result.release) result.release(result.owner);
     return 0;
 }
-)CFV31DATA"},
-        {R"CFV32DATA(herramientas/cforge_cli.cpp)CFV32DATA", R"CFV33DATA(#include <cerrno>
+)CFV33DATA"},
+        {R"CFV34DATA(herramientas/cforge_cli.cpp)CFV34DATA", R"CFV35DATA(#include <cerrno>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -8875,8 +9013,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-)CFV33DATA"},
-        {R"CFV34DATA(herramientas/vscode-cforgev/package.json)CFV34DATA", R"CFV35DATA({
+)CFV35DATA"},
+        {R"CFV36DATA(herramientas/vscode-cforgev/package.json)CFV36DATA", R"CFV37DATA({
   "name": "cforgev-language",
   "displayName": "C-Forge Language Support",
   "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
@@ -8976,8 +9114,8 @@ int main(int argc, char** argv) {
     ]
   }
 }
-)CFV35DATA"},
-        {R"CFV36DATA(herramientas/vscode-cforgev/extension.js)CFV36DATA", R"CFV37DATA("use strict";
+)CFV37DATA"},
+        {R"CFV38DATA(herramientas/vscode-cforgev/extension.js)CFV38DATA", R"CFV39DATA("use strict";
 
 const vscode = require("vscode");
 const { execFile, spawn } = require("child_process");
@@ -9223,8 +9361,8 @@ function activate(context) {
 async function deactivate() { if (languageServer) await languageServer.stop(); }
 
 module.exports = { activate, deactivate };
-)CFV37DATA"},
-        {R"CFV38DATA(herramientas/vscode-cforgev/language-configuration.json)CFV38DATA", R"CFV39DATA({
+)CFV39DATA"},
+        {R"CFV40DATA(herramientas/vscode-cforgev/language-configuration.json)CFV40DATA", R"CFV41DATA({
   "comments": { "lineComment": "//" },
   "brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
   "autoClosingPairs": [
@@ -9234,8 +9372,8 @@ module.exports = { activate, deactivate };
     { "open": "\"", "close": "\"" }
   ]
 }
-)CFV39DATA"},
-        {R"CFV40DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV40DATA", R"CFV41DATA({
+)CFV41DATA"},
+        {R"CFV42DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV42DATA", R"CFV43DATA({
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "C-Forge",
   "scopeName": "source.cforgev",
@@ -9281,7 +9419,7 @@ module.exports = { activate, deactivate };
     ] }
   }
 }
-)CFV41DATA"}
+)CFV43DATA"}
     };
     return resources;
 }

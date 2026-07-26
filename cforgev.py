@@ -2073,13 +2073,18 @@ def format_file(path: Path) -> bool:
     return True
 
 
-def run_test_file(path: Path) -> int:
+def run_test_file(path: Path, allow_extern: bool = False) -> int:
     try:
         source = path.read_text(encoding="utf-8")
     except OSError as error:
         raise CForgevError(f"No se pudo abrir {path}: {error.strerror or error}") from error
     results: list[str] = []
-    Interpreter(tokenize(source), base_dir=path.resolve().parent, test_results=results).run()
+    Interpreter(
+        tokenize(source),
+        base_dir=path.resolve().parent,
+        test_results=results,
+        extern_policy=ExternExecutionPolicy(allow_all=allow_extern),
+    ).run()
     if not results:
         raise CForgevError(f"{path} no contiene bloques test")
     print(f"C-Forge Test: {len(results)} aprobados, 0 fallidos")
@@ -2215,10 +2220,30 @@ def main() -> int:
         return setup_environment()
     if len(sys.argv) == 2 and sys.argv[1] == "--install":
         return install_global()
+    if len(sys.argv) in {2, 3} and sys.argv[1] == "capabilities":
+        if len(sys.argv) == 3 and sys.argv[2] != "--json":
+            print("Uso: cforge capabilities [--json]", file=sys.stderr)
+            return 2
+        manifest = Path(__file__).resolve().parent / "capabilities.json"
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"[C-Forge Capability Gate] {error}", file=sys.stderr)
+            return 1
+        if len(sys.argv) == 3:
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+        else:
+            print(f"C-Forge {data['language_version']} — {data['overall_status']}")
+            for item in data["capabilities"]:
+                print(f"[{item['status']}] {item['name']}: {item['scope']}")
+        return 0
     if len(sys.argv) >= 2 and sys.argv[1] in {"fmt", "test"}:
         command = sys.argv[1]
-        if len(sys.argv) != 3:
-            print(f"Uso: cforge {command} archivo.cfv", file=sys.stderr)
+        allow_extern = command == "test" and "--allow-extern" in sys.argv[3:]
+        expected = 4 if allow_extern else 3
+        if len(sys.argv) != expected:
+            suffix = " [--allow-extern]" if command == "test" else ""
+            print(f"Uso: cforge {command} archivo.cfv{suffix}", file=sys.stderr)
             return 2
         path = Path(sys.argv[2])
         try:
@@ -2226,7 +2251,7 @@ def main() -> int:
                 changed = format_file(path)
                 print(f"C-Forge fmt: {'formateado' if changed else 'sin cambios'} — {path}")
             else:
-                run_test_file(path)
+                run_test_file(path, allow_extern=allow_extern)
         except CForgevError as error:
             print(f"[C-Forge Runtime Exception] {error}", file=sys.stderr)
             return 1

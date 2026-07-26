@@ -1,8 +1,8 @@
-// C-Forge 1.4.1 Definitive — demostración maestra oficial
+// C-Forge 1.6 Developer Preview — demostración experimental
 import pip:math;
 import npm:path;
 
-cluster version = "1.4.1-definitive";
+cluster version = "1.6.0-developer-preview";
 cluster proyecto = "C-Forge";
 
 // Tipado gradual: explícito e inferido.
@@ -37,7 +37,7 @@ persona = Persona(creador, 20);
 contador = Contador(0);
 lenguajes = ["C++", "C#", "Python", "Java", "JavaScript", "TypeScript"];
 
-print("=== C-Forge 1.3: demostración maestra ===");
+print("=== C-Forge 1.6 Developer Preview: demostración ===");
 mostrar("Creador: " + persona.nombre);
 mostrar("Empresa: " + empresa);
 mostrar(lenguajes);
@@ -59,7 +59,7 @@ mostrar(proceso.salida);
 
 // Archivos UTF-8 nativos.
 file_write("build/demostracion-maestra.txt", "C-Forge");
-file_append("build/demostracion-maestra.txt", "v 1.3");
+file_append("build/demostracion-maestra.txt", " v 1.6");
 contenido_archivo = file_read("build/demostracion-maestra.txt");
 mostrar(contenido_archivo);
 
@@ -171,7 +171,7 @@ test "sistema y hardware" {
 }
 
 test "archivos nativos" {
-    afirmar(contenido_archivo == "C-Forge 1.3", "file_write y file_append deben conservar datos");
+    afirmar(contenido_archivo == "C-Forge v 1.6", "file_write y file_append deben conservar datos");
 }
 
 test "matrix y array_fast" {

@@ -1,0 +1,48 @@
+# Política de completitud de C-Forge
+
+C-Forge publica únicamente afirmaciones respaldadas por evidencia reproducible.
+La honestidad sobre el alcance es parte de la calidad del lenguaje.
+
+## Estados oficiales
+
+- **Verificado en Developer Preview:** funciona dentro del alcance y plataformas
+  cubiertos por pruebas, pero todavía no posee garantía de estabilidad.
+- **Experimental:** existe y puede probarse; su API o semántica puede cambiar.
+- **Parcial:** solo está implementado el subconjunto expresamente documentado.
+- **Planeado:** es una decisión de hoja de ruta, no una función disponible.
+- **No certificado:** no existe evidencia externa suficiente para la afirmación.
+
+“Estable” se reservará para capacidades con especificación congelada,
+compatibilidad publicada, pruebas multiplataforma, política de soporte y
+artefactos reproducibles.
+
+## Definición de terminado
+
+Una capacidad solo puede anunciarse como terminada cuando:
+
+1. su semántica está documentada sin ambigüedades;
+2. posee pruebas positivas, negativas y de regresión;
+3. funciona en cada backend y plataforma que afirma soportar;
+4. sus errores se muestran como diagnósticos C-Forge sin tracebacks internos;
+5. sus ejemplos y comandos existen y se ejecutan;
+6. sus límites, permisos y dependencias están documentados;
+7. existe evidencia reproducible enlazada desde `capabilities.json`;
+8. CI verifica esa evidencia en cada cambio.
+
+Una función en progreso se marca como experimental o parcial. Una idea futura se
+marca como planeada. Ningún README, anuncio o paquete puede elevar su estado sin
+actualizar primero las pruebas y la evidencia.
+
+## Núcleo autónomo
+
+La implementación Python es el oráculo de referencia actual. El núcleo autónomo
+C++/LLVM está planeado y se migrará incrementalmente. No se declarará autónomo
+hasta que el ejecutable compile y ejecute el núcleo del lenguaje sin depender de
+Python y pase el contrato de paridad correspondiente.
+
+## Producción crítica
+
+C-Forge no está certificado para bancos ni producción crítica. Esa clasificación
+requiere auditoría profesional independiente, corrección verificada de hallazgos,
+versiones LTS, builds firmados, recuperación, observabilidad y cumplimiento
+regulatorio aplicable.
