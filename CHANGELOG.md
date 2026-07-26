@@ -2,6 +2,11 @@
 
 ## 1.6.0-developer-preview — en desarrollo
 
+- `extern("cpp")` detecta `clang++` ausente y emite un diagnóstico C-Forge
+  limpio; la demostración maestra captura esa condición y puede continuar.
+- CI, README y el manifiesto de capacidades fijan una única orden reproducible
+  de fuzzing: `--cases 10000`, equivalente a 20.000 casos en dos pasadas.
+- `verified-preview` incorpora umbrales cuantitativos comprobados por el gate.
 - Los bloques `extern` quedan bloqueados por defecto en automatización, solicitan
   consentimiento en terminal y requieren `--allow-extern` para una autorización
   explícita; la compilación nativa aplica la misma barrera.

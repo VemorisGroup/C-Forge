@@ -77,4 +77,4 @@ jobs:
       - name: Suite completa
         run: python -m unittest discover -s tests -v
       - name: Fuzzing determinista
-        run: python tests/fuzz_smoke.py --cases 6000
+        run: python tests/fuzz_smoke.py --cases 10000

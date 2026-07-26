@@ -101,9 +101,13 @@ extern("typescript") {
     console.log("extern TypeScript: " + respuestaTipada);
 }
 
-extern("cpp") {
-    std::string mensaje_raii = "extern C++: almacenamiento RAII activo";
-    std::cout << mensaje_raii << std::endl;
+intentar {
+    extern("cpp") {
+        std::string mensaje_raii = "extern C++: almacenamiento RAII activo";
+        std::cout << mensaje_raii << std::endl;
+    }
+} capturar(error_cpp) {
+    mostrar("C++ no disponible: " + error_cpp);
 }
 
 intentar {

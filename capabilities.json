@@ -2,6 +2,14 @@
   "schema": 1,
   "language_version": "1.6.0-developer-preview",
   "overall_status": "developer-preview",
+  "quality_gate": {
+    "test_command": "python3 -m unittest discover -s tests -v",
+    "required_test_outcome": "zero failures and zero errors",
+    "fuzz_command": "python3 tests/fuzz_smoke.py --cases 10000",
+    "fuzz_iterations_per_pass": 10000,
+    "fuzz_passes": 2,
+    "fuzz_generated_cases": 20000
+  },
   "statuses": [
     "verified-preview",
     "experimental",

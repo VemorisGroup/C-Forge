@@ -11,6 +11,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "capabilities.json"
 README = ROOT / "README.md"
+CI_WORKFLOWS = (
+    ROOT / ".github" / "workflows" / "ci.yml",
+    ROOT / ".github" / "workflows" / "security.yml",
+)
 ALLOWED = {
     "verified-preview", "experimental", "partial", "planned", "not-certified",
 }
@@ -32,6 +36,19 @@ def verify_manifest() -> dict:
         fail("el estado global debe seguir siendo developer-preview")
     if set(data.get("statuses", [])) != ALLOWED:
         fail("la lista de estados oficiales no coincide con la política")
+    quality = data.get("quality_gate", {})
+    if quality.get("required_test_outcome") != "zero failures and zero errors":
+        fail("el gate debe exigir cero fallos y cero errores")
+    iterations = quality.get("fuzz_iterations_per_pass")
+    passes = quality.get("fuzz_passes")
+    total = quality.get("fuzz_generated_cases")
+    if not all(isinstance(item, int) and item > 0 for item in (iterations, passes, total)):
+        fail("las métricas de fuzzing deben ser enteros positivos")
+    if iterations * passes != total or total < 20_000:
+        fail("el gate de fuzzing debe demostrar al menos 20.000 casos")
+    expected_fuzz = f"python3 tests/fuzz_smoke.py --cases {iterations}"
+    if quality.get("fuzz_command") != expected_fuzz:
+        fail("fuzz_command no coincide con las iteraciones declaradas")
     seen: set[str] = set()
     for capability in data.get("capabilities", []):
         identifier = capability.get("id", "")
@@ -53,7 +70,7 @@ def verify_manifest() -> dict:
     return data
 
 
-def verify_readme() -> None:
+def verify_public_quality_gate(data: dict) -> None:
     text = README.read_text(encoding="utf-8")
     if "`1.6.0-developer-preview`" not in text:
         fail("README no declara la versión Developer Preview")
@@ -80,12 +97,20 @@ def verify_readme() -> None:
         path = target.split("#", 1)[0]
         if path and not (ROOT / path).exists():
             fail(f"README enlaza un archivo inexistente: {path}")
+    quality = data["quality_gate"]
+    command = quality["fuzz_command"]
+    if command not in text or str(quality["fuzz_generated_cases"]) not in text.replace(".", ""):
+        fail("README no documenta la orden y el total oficial de fuzzing")
+    workflow_command = command.replace("python3 ", "python ")
+    for workflow in CI_WORKFLOWS:
+        if workflow_command not in workflow.read_text(encoding="utf-8"):
+            fail(f"{workflow.relative_to(ROOT)} no ejecuta la orden oficial de fuzzing")
 
 
 def main() -> int:
     try:
         data = verify_manifest()
-        verify_readme()
+        verify_public_quality_gate(data)
     except (OSError, json.JSONDecodeError, ValueError) as error:
         print(f"[C-Forge Capability Gate] ERROR: {error}", file=sys.stderr)
         return 1

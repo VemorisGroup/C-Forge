@@ -33,6 +33,19 @@ Una función en progreso se marca como experimental o parcial. Una idea futura s
 marca como planeada. Ningún README, anuncio o paquete puede elevar su estado sin
 actualizar primero las pruebas y la evidencia.
 
+## Umbral cuantitativo de Developer Preview verificado
+
+Una capacidad solo puede usar el estado `verified-preview` si:
+
+1. sus pruebas positivas, negativas y de regresión terminan sin fallos ni errores;
+2. cada comportamiento público nuevo incorpora al menos una prueba de regresión;
+3. el fuzzing determinista del núcleo ejecuta como mínimo 20.000 casos en CI;
+4. el comando, número de pasadas y total están declarados en `capabilities.json`;
+5. cada plataforma incluida en su alcance produce evidencia verde en CI.
+
+El gate comprueba que README, manifiesto y workflows utilicen la misma orden
+oficial. Un cambio de umbral debe actualizar los tres en el mismo commit.
+
 ## Núcleo autónomo
 
 La implementación Python es el oráculo de referencia actual. El núcleo autónomo

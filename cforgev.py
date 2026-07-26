@@ -682,6 +682,11 @@ class Interpreter:
             return
         if language != "cpp":
             raise CForgevError(f"Línea {language_token.line}: lenguaje extern desconocido")
+        if shutil.which("clang++") is None:
+            raise CForgevError(
+                f'Línea {body.line}: extern("cpp"): clang++ no está disponible. '
+                "Instálalo para usar este bloque."
+            )
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -690,10 +695,16 @@ class Interpreter:
                 "#include <iostream>\n#include <string>\nint main(){\n" + body.value + "\n}\n",
                 encoding="utf-8",
             )
-            built = subprocess.run(
-                ["clang++", "-std=c++17", str(source_path), "-o", str(executable)],
-                capture_output=True, text=True,
-            )
+            try:
+                built = subprocess.run(
+                    ["clang++", "-std=c++17", str(source_path), "-o", str(executable)],
+                    capture_output=True, text=True,
+                )
+            except FileNotFoundError as error:
+                raise CForgevError(
+                    f'Línea {body.line}: extern("cpp"): clang++ no está disponible. '
+                    "Instálalo para usar este bloque."
+                ) from error
             if built.returncode:
                 raise CForgevError(f"Línea {body.line}: extern C++ no compiló: {built.stderr}")
             invoked = subprocess.run([str(executable)], capture_output=True, text=True)

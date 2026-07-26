@@ -243,6 +243,16 @@ PYTHONPYCACHEPREFIX=/tmp/cforgev-pycache \
 python3 -m unittest discover -s tests -v
 ```
 
+El gate oficial de fuzzing ejecuta exactamente 20.000 casos deterministas:
+
+```bash
+python3 tests/fuzz_smoke.py --cases 10000
+```
+
+`--cases 10000` ejecuta 10.000 entradas sobre cada una de las dos pasadas del
+fuzzer (lexer/parser y formato/ejecución), para un total verificable de 20.000.
+La misma orden se exige en CI y en [`capabilities.json`](capabilities.json).
+
 ## Sintaxis esencial
 
 ### Tipado gradual

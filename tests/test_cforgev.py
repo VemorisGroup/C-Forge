@@ -293,6 +293,33 @@ std::cout << value << std::endl;
             result = subprocess.run([str(output_path)], capture_output=True, text=True, check=True)
             self.assertEqual(result.stdout, "Python externo\n{C++ literal}\n")
 
+    def test_extern_cpp_without_clang_has_clean_cforge_diagnostic(self) -> None:
+        source = 'extern("cpp") { std::cout << "C-Forge"; }'
+        with (
+            patch("cforgev.shutil.which", return_value=None),
+            self.assertRaisesRegex(
+                CForgevError,
+                r'extern\("cpp"\): clang\+\+ no está disponible',
+            ),
+        ):
+            self.output(source)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sin_clang.cfv"
+            path.write_text(source, encoding="utf-8")
+            environment = dict(os.environ)
+            environment["PATH"] = str(Path(directory) / "sin-herramientas")
+            result = subprocess.run(
+                [sys.executable, "cforgev.py", str(path), "--allow-extern"],
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("[C-Forge Runtime Exception]", result.stderr)
+        self.assertIn("clang++ no está disponible", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_extern_is_denied_without_explicit_consent_in_noninteractive_mode(self) -> None:
         source = 'extern("python") { print("no debe ejecutarse") }'
         with patch.object(sys.stdin, "isatty", return_value=False):

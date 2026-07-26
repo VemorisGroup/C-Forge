@@ -757,6 +757,11 @@ class Interpreter:
             return
         if language != "cpp":
             raise CForgevError(f"Línea {language_token.line}: lenguaje extern desconocido")
+        if shutil.which("clang++") is None:
+            raise CForgevError(
+                f'Línea {body.line}: extern("cpp"): clang++ no está disponible. '
+                "Instálalo para usar este bloque."
+            )
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -765,10 +770,16 @@ class Interpreter:
                 "#include <iostream>\n#include <string>\nint main(){\n" + body.value + "\n}\n",
                 encoding="utf-8",
             )
-            built = subprocess.run(
-                ["clang++", "-std=c++17", str(source_path), "-o", str(executable)],
-                capture_output=True, text=True,
-            )
+            try:
+                built = subprocess.run(
+                    ["clang++", "-std=c++17", str(source_path), "-o", str(executable)],
+                    capture_output=True, text=True,
+                )
+            except FileNotFoundError as error:
+                raise CForgevError(
+                    f'Línea {body.line}: extern("cpp"): clang++ no está disponible. '
+                    "Instálalo para usar este bloque."
+                ) from error
             if built.returncode:
                 raise CForgevError(f"Línea {body.line}: extern C++ no compiló: {built.stderr}")
             invoked = subprocess.run([str(executable)], capture_output=True, text=True)
@@ -8251,6 +8262,14 @@ def reports_json(reports: list[ParityReport]) -> str:
   "schema": 1,
   "language_version": "1.6.0-developer-preview",
   "overall_status": "developer-preview",
+  "quality_gate": {
+    "test_command": "python3 -m unittest discover -s tests -v",
+    "required_test_outcome": "zero failures and zero errors",
+    "fuzz_command": "python3 tests/fuzz_smoke.py --cases 10000",
+    "fuzz_iterations_per_pass": 10000,
+    "fuzz_passes": 2,
+    "fuzz_generated_cases": 20000
+  },
   "statuses": [
     "verified-preview",
     "experimental",
