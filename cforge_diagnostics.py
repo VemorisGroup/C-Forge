@@ -7,7 +7,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from cforgev import CForgevError, tokenize
-from compilador_nativo import Parser, StaticTypeAnalyzer
+from compilador_nativo import Parser, StaticTypeAnalyzer, resolve_imports
+from cforge_memory import MemorySafetyAnalyzer
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,10 @@ def analyze_source(source: str) -> list[Diagnostic]:
         StaticTypeAnalyzer().analyze(program)
     except CForgevError as error:
         return [_from_error(error, "CF2001")]
+    try:
+        MemorySafetyAnalyzer().analyze(program)
+    except CForgevError as error:
+        return [_from_error(error, "CF3001")]
     return []
 
 
@@ -50,4 +55,17 @@ def analyze_file(path: Path) -> list[Diagnostic]:
         source = path.read_text(encoding="utf-8")
     except OSError as error:
         return [Diagnostic(1, 1, "error", "CF0001", f"No se pudo abrir {path}: {error}")]
-    return analyze_source(source)
+    try:
+        tokens = tokenize(source)
+        program = resolve_imports(Parser(tokens).program(), path.resolve().parent, set())
+    except CForgevError as error:
+        return [_from_error(error, "CF1002")]
+    try:
+        StaticTypeAnalyzer().analyze(program)
+    except CForgevError as error:
+        return [_from_error(error, "CF2001")]
+    try:
+        MemorySafetyAnalyzer().analyze(program)
+    except CForgevError as error:
+        return [_from_error(error, "CF3001")]
+    return []

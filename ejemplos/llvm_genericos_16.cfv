@@ -1,0 +1,6 @@
+funcion identidad<T>(valor: T): T {
+    retornar valor
+}
+
+mostrar(identidad(42))
+mostrar(identidad("C-Forge"))

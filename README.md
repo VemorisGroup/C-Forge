@@ -7,7 +7,7 @@
 > Lenguaje de programación experimental de Vemoris Group con sintaxis propia,
 > ejecución interactiva, compilación a C++17 e interoperabilidad políglota.
 
-**Versión actual:** `1.5.0-developer-preview`<br>
+**Versión actual:** `1.6.0-developer-preview`<br>
 **Extensión oficial:** `.cfv`<br>
 **Estado:** experimental; apto para aprendizaje, demostraciones y desarrollo del motor.
 
@@ -78,6 +78,8 @@ print(datos.len())
 - Módulos locales y acceso homogéneo mediante `objeto.miembro`.
 - Interoperabilidad con Python, C/C++, C# Native AOT, Java, JavaScript y TypeScript.
 - Bloques literales `extern("lenguaje") { ... }`.
+- FFI LLVM tipado mediante `extern_c funcion` y `--vincular`, con escalares y
+  vistas zero-copy prestadas para parámetros `lista<numero>`.
 - Tabla compartida `ForgeValue` y símbolos `cluster`.
 - Tareas paralelas, bloques `gpu` y contadores para perfil adaptativo/JIT.
 - Archivos, procesos, información del hardware y sockets TCP.
@@ -93,20 +95,34 @@ print(datos.len())
 ```bash
 cforge check programa.cfv          # análisis estático con códigos CFxxxx
 cforge bytecode programa.cfv       # inspeccionar bytecode propio
+cforge parity programa.cfv         # comparar intérprete, VM y LLVM
 cforge vm programa.cfv             # ejecutar en la VM de pila
+cforge --llvm programa.cfv         # emitir LLVM IR real para el núcleo compatible
+cforge --compilar-llvm programa.cfv -o programa # LLVM IR + Clang
 cforge debug programa.cfv          # trazar instrucciones y variables
 cforge debug programa.cfv --break 20 # detenerse en un offset de bytecode
 cforge lsp                          # servidor LSP 3.17 por stdio
 cforge pkg init mi-proyecto        # crear cforge.json y cforge.lock
 cforge pkg build                   # crear paquete y SHA-256
+cforge pkg keygen                  # crear identidad Ed25519 del publicador
+cforge pkg sign archivo clave nombre versión
 cforge pkg search consulta         # consultar el índice público
-cforge pkg install paquete         # descargar y verificar por HTTPS/SHA-256
+cforge pkg install paquete         # verificar HTTPS, SHA-256, firma, cuenta y revocación
+cforge dap                         # servidor de depuración DAP para editores
+cforge --compilar-llvm ejemplos/llvm_objetos_16.cfv -o contador
 ```
 
 La matriz honesta de capacidades y trabajo pendiente está en
-[`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md). Una auditoría de
+[`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md), con
+[`validación por plataforma`](docs/PLATFORM-VALIDATION.md) y
+[`alcance de auditoría externa`](docs/EXTERNAL-AUDIT-SCOPE.md). Una auditoría de
 seguridad independiente y resultados de rendimiento no se sustituyen con afirmaciones:
 deben publicarse como evidencia reproducible antes de declarar el motor apto para producción.
+
+La definición independiente de la implementación está en la
+[`gramática EBNF`](docs/GRAMMAR-1.6.ebnf), el
+[`sistema de tipos`](docs/TYPE-SYSTEM-1.6.md) y el
+[`contrato de backends`](docs/BACKEND-SEMANTICS-1.6.md).
 
 ## Inicio rápido
 
@@ -199,7 +215,7 @@ cforge --compilar main.cfv -o build/main-final
 ./build/main-final
 ```
 
-La suite interna contiene 55 pruebas:
+La suite interna contiene más de 100 pruebas automatizadas:
 
 ```bash
 PYTHONPYCACHEPREFIX=/tmp/cforgev-pycache \

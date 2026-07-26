@@ -1,10 +1,19 @@
-# Especificación de C-Forge 1.5.0 Developer Preview
+# Especificación de C-Forge 1.6.0 Developer Preview
 
 ## Estado
 
-C-Forge 1.2 es una implementación experimental de un lenguaje compilado de
+C-Forge 1.6 es una implementación Developer Preview de un lenguaje de
 propósito general creado por Vemoris Group. Esta especificación describe solamente
 las capacidades implementadas y no promete compatibilidad futura absoluta.
+
+Los contratos normativos de esta versión son:
+
+- [`docs/GRAMMAR-1.6.ebnf`](docs/GRAMMAR-1.6.ebnf): gramática léxica y sintáctica.
+- [`docs/TYPE-SYSTEM-1.6.md`](docs/TYPE-SYSTEM-1.6.md): tipos, `ForgeValue` y ownership.
+- [`docs/BACKEND-SEMANTICS-1.6.md`](docs/BACKEND-SEMANTICS-1.6.md): traducción y paridad.
+
+Si un ejemplo descriptivo contradice esos contratos, prevalece el contrato
+normativo y la implementación debe corregirse.
 
 ## Filosofía
 
@@ -12,6 +21,29 @@ las capacidades implementadas y no promete compatibilidad futura absoluta.
 - Compilación y rendimiento inspirados en C++.
 - Seguridad, organización y herramientas inspiradas en C#.
 - Errores comprensibles y comportamiento consistente.
+
+## Genéricos e interfaces (Developer Preview 1.6)
+
+```cfv
+funcion identidad<T>(valor: T): T {
+    retornar valor
+}
+
+interfaz Sumable {
+    metodo sumar(x: numero): numero
+}
+
+clase Contador implementa Sumable {
+    campo valor: numero
+    metodo sumar(x: numero): numero {
+        retornar este.valor + x
+    }
+}
+```
+
+Los parámetros de tipo se infieren en cada llamada y deben conservar una
+sustitución coherente. `implementa` es nominal: la clase debe declarar todos los
+métodos exigidos con tipos compatibles.
 
 ## Archivos y ejecución
 
@@ -21,8 +53,8 @@ Sin archivo, `./cforgev` abre un REPL persistente que admite bloques multilínea
 
 ## Valores
 
-La versión 0.2 implementa números, textos Unicode, booleanos (`verdadero` y
-`falso`), listas, mapas y `nulo`. Una variable puede declararse con `sea` o mediante
+La versión de desarrollo implementa números, textos Unicode, booleanos (`verdadero` y
+`falso`), listas, mapas, tuplas, conjuntos y `nulo`. Una variable puede declararse con `sea` o mediante
 una primera asignación como `contador = 10`. Su tipo se infiere y queda fijo. El
 analizador estático rechaza contradicciones evidentes antes de invocar Clang.
 
@@ -49,9 +81,17 @@ mostrar(lenguajes[0]);
 
 sea persona: mapa = {"nombre": "Javier", "edad": 20};
 mostrar(persona["nombre"]);
+
+sea version: tupla = ("C-Forge", 2, verdadero);
+mostrar(version[1]);
+
+sea motores: conjunto = conjunto("LLVM", "VM", "LLVM");
+mostrar(motores); // conjunto(LLVM, VM)
 ```
 
-`longitud` admite textos, listas y mapas. Las claves de mapa son textos.
+`longitud` admite textos y colecciones. Las tuplas son inmutables y admiten
+elementos heterogéneos. Los conjuntos eliminan duplicados y exigen elementos
+inmutables; su presentación es determinista. Las claves de mapa son textos.
 
 ## Control de flujo
 
@@ -135,8 +175,9 @@ mostrar(cuenta.depositar(50));
 ```
 
 `este` referencia la instancia receptora. Las asignaciones de campos conservan el
-tipo declarado. La versión 0.5 usa despacho dinámico y memoria compartida segura;
-todavía no incluye herencia, interfaces ni visibilidad pública/privada.
+tipo declarado. La versión 1.6 usa despacho dinámico e interfaces nominales
+comprobadas; todavía no incluye herencia de implementación ni visibilidad
+pública/privada.
 
 ## Matemáticas, tiempo y argumentos
 
@@ -194,6 +235,34 @@ como un token opaco. Python se entrega al runtime embebido. C++ se compila como
 parte del ejecutable nativo; en el intérprete se construye en un proceso aislado.
 También se admiten `javascript`, `typescript` y `java`. JavaScript/TypeScript usan
 Node aislado. Java genera y ejecuta una clase temporal mediante el JDK disponible.
+Estos bloques son una frontera `unsafe`: ejecutan código extranjero con los
+permisos del proceso anfitrión. No son un sandbox y no deben ejecutar contenido
+no confiable. El modo seguro de la VM los rechaza salvo autorización explícita.
+
+### Frontera C ABI tipada de LLVM
+
+El backend LLVM admite declaraciones externas explícitas:
+
+```cfv
+extern_c funcion native_add(a: numero, b: numero): numero
+mostrar(native_add(20, 22))
+```
+
+La ABI V1 acepta `numero`, `booleano` y `texto`. La ABI V2 experimental agrega
+vistas prestadas de listas numéricas y representaciones recursivas verificadas
+para listas, mapas y registros. Los layouts, límites y ownership se validan al
+cruzar la frontera. La implementación se enlaza con
+`--compilar-llvm --vincular puente.c`; las capacidades incompatibles se
+rechazan en vez de simularse.
+
+Las declaraciones `extern_c segura funcion` usan un contrato C de estado,
+puntero de salida y mensaje UTF-8. Un estado no cero se convierte en excepción
+C-Forge capturable; así ninguna excepción C++ atraviesa directamente el ABI.
+
+LLVM IR 1.4 representa `opcion<numero>`, `opcion<texto>` y
+`opcion<booleano>` mediante una etiqueta y carga útil comprobada. Un
+`desenvolver(ninguno())` transfiere el mensaje al bloque `capturar` activo; si no
+existe manejador, el programa termina con un diagnóstico C-Forge.
 
 ## Puentes npm y Maven
 
@@ -235,9 +304,10 @@ biblioteca C# Native AOT compatible con el ABI.
 
 ## Limitaciones conocidas
 
-Todavía no existen herencia, interfaces, transporte distribuido ni gestor de paquetes.
-El ABI extranjero 1.2 continúa siendo experimental y puede evolucionar.
-El sistema de tipos aún no incluye genéricos y los módulos no poseen espacios de
-nombres ni control de visibilidad. El backend
-nativo actual genera C++17 y requiere Clang. No debe utilizarse aún para software
+No existen todavía herencia, transporte distribuido real, espacios de nombres
+ni control de visibilidad. Interfaces, genéricos, ownership, paquetes, async,
+LLVM, Arena compartida y ABI V2 existen como Developer Preview y pueden
+evolucionar. Los seis adaptadores extranjeros no tienen aún cobertura uniforme
+en macOS, Linux y Windows. LLVM y Wasm admiten subconjuntos documentados.
+El backend C++17 requiere Clang. C-Forge no debe utilizarse aún para software
 financiero, crítico o de producción.

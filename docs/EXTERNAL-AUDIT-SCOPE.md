@@ -2,6 +2,8 @@
 
 La auditoría debe ser realizada por una persona u organización independiente. Este
 documento prepara el trabajo y evita declarar una certificación inexistente.
+Todavía no ha sido contratada ni realizada; el equipo de C-Forge no puede
+autoemitir un resultado independiente.
 
 ## Componentes prioritarios
 

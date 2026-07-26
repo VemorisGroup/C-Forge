@@ -4,10 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cforgev"
-version = "1.5.0"
+version = "1.6.0"
 description = "Lenguaje de programación experimental C-Forge"
 readme = "README.md"
 requires-python = ">=3.9"
+dependencies = ["cryptography>=42"]
 license = { file = "LICENSE" }
 authors = [{ name = "Vemoris Group" }]
 keywords = ["language", "compiler", "interpreter", "cforgev"]
@@ -28,4 +29,4 @@ cforge = "cforgev:main"
 cforgev = "cforgev:main"
 
 [tool.setuptools]
-py-modules = ["cforgev", "compilador_nativo", "compilador_wasm", "cforge_diagnostics", "cforge_lsp", "cforge_packages", "cforge_vm"]
+py-modules = ["cforgev", "compilador_nativo", "compilador_wasm", "compilador_llvm", "cforge_diagnostics", "cforge_lsp", "cforge_dap", "cforge_packages", "cforge_vm", "cforge_memory", "cforge_parity"]

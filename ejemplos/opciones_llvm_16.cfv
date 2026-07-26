@@ -1,0 +1,21 @@
+sea version: opcion = algunos(2)
+sea lenguaje: opcion = algunos("C-Forge")
+sea disponible: opcion = algunos(verdadero)
+sea ausente: opcion<numero> = ninguno()
+
+mostrar(version)
+mostrar(lenguaje)
+mostrar(disponible)
+mostrar(ausente)
+mostrar(desenvolver(version))
+
+intentar {
+    mostrar(desenvolver(ausente))
+} capturar (error) {
+    mostrar("Option comprobada: " + error)
+}
+
+destruir(version)
+destruir(lenguaje)
+destruir(disponible)
+destruir(ausente)

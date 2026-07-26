@@ -1,0 +1,19 @@
+sea nombre: texto = "C-Forge"
+region {
+    sea vista = prestar(nombre)
+    mostrar(vista)
+}
+
+sea propietario = mover(nombre)
+mostrar(propietario)
+
+sea resultado: opcion = algunos(42)
+si (es_algunos(resultado)) {
+    mostrar(desenvolver(resultado))
+}
+
+sea vacio: opcion = ninguno()
+mostrar(vacio)
+
+sea temporal = "destrucción determinista"
+destruir(temporal)

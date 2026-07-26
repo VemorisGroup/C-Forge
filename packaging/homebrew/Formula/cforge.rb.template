@@ -6,10 +6,12 @@ class Cforge < Formula
   license :cannot_represent
 
   depends_on "python@3.13"
+  depends_on "cryptography"
 
   def install
-    libexec.install "cforgev.py", "compilador_nativo.py", "compilador_wasm.py",
-      "cforge_diagnostics.py", "cforge_lsp.py", "cforge_packages.py", "cforge_vm.py",
+    libexec.install "cforgev.py", "compilador_nativo.py", "compilador_wasm.py", "compilador_llvm.py",
+      "cforge_diagnostics.py", "cforge_lsp.py", "cforge_dap.py", "cforge_packages.py", "cforge_vm.py",
+      "cforge_memory.py",
       "include", "ejemplos", "registry"
     (bin/"cforge").write <<~SH
       #!/bin/sh
@@ -19,6 +21,6 @@ class Cforge < Formula
   end
 
   test do
-    assert_match "C-Forge VERSION-definitive", shell_output("#{bin}/cforge --version")
+    assert_match "C-Forge #{version}", shell_output("#{bin}/cforge --version")
   end
 end

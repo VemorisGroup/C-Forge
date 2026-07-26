@@ -13,6 +13,7 @@ import json
 import math
 import os
 import platform
+import queue
 import re
 import shutil
 import socket
@@ -25,7 +26,7 @@ import urllib.request
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
-VERSION = "1.5.0-developer-preview"
+VERSION = "1.6.0-developer-preview"
 
 CONNECTOR_CATALOG = {
     "ia_": "python",
@@ -56,6 +57,9 @@ class Function:
     name: str
     parameters: list[str]
     body: list[Token]
+    parameter_types: list[str] = dc_field(default_factory=list)
+    return_type: str = "cualquiera"
+    is_async: bool = False
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,24 @@ class StructureValue(dict[str, object]):
     def __init__(self, structure_name: str, values: dict[str, object]) -> None:
         super().__init__(values)
         self.structure_name = structure_name
+
+@dataclass(frozen=True)
+class ForgeOption:
+    has_value: bool
+    value: object = None
+
+@dataclass
+class ForgeTask:
+    future: concurrent.futures.Future[object]
+
+@dataclass
+class ForgeChannel:
+    values: queue.Queue[object]
+    closed: bool = False
+
+_FORGE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=max(2, min(32, os.cpu_count() or 2)), thread_name_prefix="cforge"
+)
 
 
 @dataclass(frozen=True)
@@ -288,6 +310,14 @@ class Interpreter:
             self.statement()
 
     def statement(self) -> None:
+        if self.match_ident("region") or self.match_ident("unsafe"):
+            body = self.block()
+            Interpreter(
+                body, self.variables, self.functions, self.variable_types,
+                self.base_dir, self.imported_modules, self.structures,
+                self.program_arguments, self.jit_counts, self.cluster_symbols,
+            ).run()
+            return
         if self.match_ident("cluster"):
             previous = self.cluster_mode
             self.cluster_mode = True
@@ -310,6 +340,9 @@ class Interpreter:
         if self.match_ident("test"):
             self.test_statement()
             return
+        if self.match_ident("interfaz"):
+            self.interface_declaration()
+            return
         if self.match_ident("clase"):
             self.class_declaration()
             return
@@ -328,8 +361,14 @@ class Interpreter:
         if self.match_ident("intentar"):
             self.try_statement()
             return
+        if self.match_ident("async"):
+            keyword = self.consume("IDENT", "Se esperaba 'funcion' después de async")
+            if keyword.value != "funcion":
+                raise CForgevError(f"Línea {keyword.line}: se esperaba 'funcion' después de async")
+            self.function_declaration(True)
+            return
         if self.match_ident("funcion"):
-            self.function_declaration()
+            self.function_declaration(False)
             return
         if self.match_ident("retornar"):
             value = self.expression()
@@ -345,8 +384,9 @@ class Interpreter:
             name = self.consume("IDENT", "Se esperaba el nombre de la variable")
             declared_type: str | None = None
             if self.match_value(":"):
-                declared_type = self.consume("IDENT", "Se esperaba un tipo").value
-                if declared_type not in {"numero", "texto", "booleano", "lista", "mapa", "nulo", "cualquiera"} and declared_type not in self.structures:
+                declared_type = self.consume_type()
+                declared_base = declared_type.split("<", 1)[0]
+                if declared_base not in {"numero", "texto", "booleano", "lista", "mapa", "tupla", "conjunto", "opcion", "nulo", "cualquiera"} and declared_base not in self.structures:
                     raise CForgevError(f"Línea {name.line}: tipo desconocido '{declared_type}'")
             self.consume_value("=", "Se esperaba '='")
             value = self.expression()
@@ -444,7 +484,7 @@ class Interpreter:
             self.consume_value(":", "Se esperaba ':'")
             field_type = self.consume("IDENT", "Se esperaba el tipo del campo")
             if field_type.value not in {
-                "numero", "texto", "booleano", "lista", "mapa", "nulo", "cualquiera"
+                "numero", "texto", "booleano", "lista", "mapa", "tupla", "conjunto", "nulo", "cualquiera"
             } and field_type.value not in self.structures:
                 raise CForgevError(f"Línea {field_type.line}: tipo desconocido '{field_type.value}'")
             if any(existing == field.value for existing, _ in fields):
@@ -456,6 +496,11 @@ class Interpreter:
 
     def class_declaration(self) -> None:
         name = self.consume("IDENT", "Se esperaba el nombre de la clase")
+        if self.match_ident("implementa"):
+            while True:
+                self.consume("IDENT", "Se esperaba una interfaz")
+                if not self.match_value(","):
+                    break
         self.consume_value("{", "Se esperaba '{'")
         fields: list[tuple[str, str]] = []
         methods: dict[str, Function] = {}
@@ -474,14 +519,40 @@ class Interpreter:
                 if self.peek().value != ")":
                     while True:
                         parameters.append(self.consume("IDENT", "Se esperaba un parámetro").value)
+                        if self.match_value(":"):
+                            self.consume_type()
                         if not self.match_value(","):
                             break
                 self.consume_value(")", "Se esperaba ')'")
+                if self.match_value(":"):
+                    self.consume_type()
                 methods[method_name.value] = Function(method_name.value, parameters, self.block())
                 continue
             raise CForgevError(f"Línea {self.peek().line}: se esperaba 'campo' o 'metodo'")
         self.consume_value("}", "Falta '}' para cerrar la clase")
         self.structures[name.value] = Structure(name.value, fields, methods)
+
+    def interface_declaration(self) -> None:
+        self.consume("IDENT", "Se esperaba el nombre de la interfaz")
+        self.consume_value("{", "Se esperaba '{'")
+        while self.peek().value != "}" and not self.check("EOF"):
+            keyword = self.consume("IDENT", "Se esperaba 'metodo'")
+            if keyword.value != "metodo":
+                raise CForgevError(f"Línea {keyword.line}: se esperaba 'metodo'")
+            self.consume("IDENT", "Se esperaba el nombre del método")
+            self.consume_value("(", "Se esperaba '('")
+            if self.peek().value != ")":
+                while True:
+                    self.consume("IDENT", "Se esperaba un parámetro")
+                    if self.match_value(":"):
+                        self.consume_type()
+                    if not self.match_value(","):
+                        break
+            self.consume_value(")", "Se esperaba ')'")
+            if self.match_value(":"):
+                self.consume_type()
+            self.optional_semicolon()
+        self.consume_value("}", "Falta '}' para cerrar la interfaz")
 
     def import_statement(self) -> None:
         path_token = self.consume("STRING", "Se esperaba la ruta del módulo")
@@ -669,10 +740,17 @@ class Interpreter:
                 self.base_dir, self.imported_modules, self.structures, self.program_arguments
             ).run()
 
-    def function_declaration(self) -> None:
+    def function_declaration(self, is_async: bool = False) -> None:
         name = self.consume("IDENT", "Se esperaba el nombre de la función")
+        if self.match_value("<"):
+            while True:
+                self.consume("IDENT", "Se esperaba un parámetro de tipo")
+                if not self.match_value(","):
+                    break
+            self.consume_value(">", "Se esperaba '>'")
         self.consume_value("(", "Se esperaba '(' después del nombre de la función")
         parameters: list[str] = []
+        parameter_types: list[str] = []
         if self.peek().value != ")":
             while True:
                 parameter = self.consume("IDENT", "Se esperaba el nombre de un parámetro")
@@ -681,13 +759,34 @@ class Interpreter:
                         f"Línea {parameter.line}: parámetro repetido '{parameter.value}'"
                     )
                 parameters.append(parameter.value)
+                parameter_type = "cualquiera"
+                if self.match_value(":"):
+                    parameter_type = self.consume_type()
+                parameter_types.append(parameter_type)
                 if not self.match_value(","):
                     break
         self.consume_value(")", "Se esperaba ')' después de los parámetros")
+        return_type = "cualquiera"
+        if self.match_value(":"):
+            return_type = self.consume_type()
         body = self.block()
-        self.functions[name.value] = Function(name.value, parameters, body)
+        self.functions[name.value] = Function(
+            name.value, parameters, body, parameter_types, return_type, is_async
+        )
         if self.cluster_mode:
             self.cluster_symbols[name.value] = "funcion"
+
+    def consume_type(self) -> str:
+        name = self.consume("IDENT", "Se esperaba un tipo").value
+        if not self.match_value("<"):
+            return name
+        arguments: list[str] = []
+        while True:
+            arguments.append(self.consume_type())
+            if not self.match_value(","):
+                break
+        self.consume_value(">", "Se esperaba '>' para cerrar el tipo genérico")
+        return f"{name}<{','.join(arguments)}>"
 
     def while_statement(self) -> None:
         condition_tokens = self.parenthesized("después de 'mientras'")
@@ -841,6 +940,14 @@ class Interpreter:
         return value
 
     def unary(self) -> object:
+        if self.match_ident("await"):
+            token = self.previous()
+            task = self.unary()
+            if not isinstance(task, ForgeTask):
+                raise CForgevError(f"Línea {token.line}: await requiere una tarea")
+            try: return task.future.result()
+            except concurrent.futures.CancelledError as error:
+                raise CForgevError(f"Línea {token.line}: tarea cancelada") from error
         if self.match_ident("no"):
             token = self.previous()
             return not require_bool(self.unary(), token.line)
@@ -857,9 +964,9 @@ class Interpreter:
             key = self.expression()
             bracket = self.consume_value("]", "Se esperaba ']' después del índice")
             try:
-                if isinstance(value, list):
+                if isinstance(value, (list, tuple)):
                     if not isinstance(key, int) or isinstance(key, bool):
-                        raise CForgevError(f"Línea {bracket.line}: el índice de lista debe ser entero")
+                        raise CForgevError(f"Línea {bracket.line}: el índice de colección debe ser entero")
                     value = value[key]
                 elif isinstance(value, dict):
                     if not isinstance(key, str):
@@ -874,7 +981,7 @@ class Interpreter:
             if self.match_value("("):
                 value = self.call_method(value, field)
                 continue
-            if field.value == "length" and isinstance(value, (str, list, dict)):
+            if field.value == "length" and isinstance(value, (str, list, dict, tuple, set)):
                 value = len(value)
                 continue
             if not isinstance(value, dict) or field.value not in value:
@@ -1025,9 +1132,19 @@ class Interpreter:
                 raise CForgevError(f"Línea {token.line}: variable desconocida '{token.value}'")
             return self.variables[token.value]
         if self.match_value("("):
-            value = self.expression()
-            self.consume_value(")", "Se esperaba ')'")
-            return value
+            if self.match_value(")"):
+                return ()
+            first = self.expression()
+            if not self.match_value(","):
+                self.consume_value(")", "Se esperaba ')'")
+                return first
+            values = [first]
+            while self.peek().value != ")":
+                values.append(self.expression())
+                if not self.match_value(","):
+                    break
+            self.consume_value(")", "Se esperaba ')' para cerrar la tupla")
+            return tuple(values)
         token = self.peek()
         raise CForgevError(f"Línea {token.line}: expresión inválida cerca de {token.value!r}")
 
@@ -1039,6 +1156,81 @@ class Interpreter:
                 if not self.match_value(","):
                     break
         self.consume_value(")", "Se esperaba ')' después de los argumentos")
+        if name.value in {"mover", "prestar", "prestar_mut", "soltar_prestamo", "destruir"}:
+            if len(arguments) != 1:
+                raise CForgevError(f"Línea {name.line}: {name.value} requiere 1 argumento")
+            return arguments[0] if name.value not in {"soltar_prestamo", "destruir"} else None
+        if name.value == "conjunto":
+            try:
+                return set(arguments)
+            except TypeError as error:
+                raise CForgevError(
+                    f"Línea {name.line}: los elementos del conjunto deben ser inmutables"
+                ) from error
+        if name.value == "algunos":
+            if len(arguments) != 1:
+                raise CForgevError(f"Línea {name.line}: algunos requiere 1 argumento")
+            return ForgeOption(True, arguments[0])
+        if name.value == "ninguno":
+            if arguments:
+                raise CForgevError(f"Línea {name.line}: ninguno no recibe argumentos")
+            return ForgeOption(False)
+        if name.value == "es_algunos":
+            if len(arguments) != 1 or not isinstance(arguments[0], ForgeOption):
+                raise CForgevError(f"Línea {name.line}: es_algunos requiere una opcion")
+            return arguments[0].has_value
+        if name.value == "desenvolver":
+            if len(arguments) != 1 or not isinstance(arguments[0], ForgeOption):
+                raise CForgevError(f"Línea {name.line}: desenvolver requiere una opcion")
+            if not arguments[0].has_value:
+                raise CForgevError(f"Línea {name.line}: no se puede desenvolver ninguno")
+            return arguments[0].value
+        if name.value == "tarea":
+            if len(arguments) not in {1, 2} or not isinstance(arguments[0], str):
+                raise CForgevError(f"Línea {name.line}: tarea requiere nombre y lista de argumentos opcional")
+            provided = arguments[1] if len(arguments) == 2 else []
+            if not isinstance(provided, list):
+                raise CForgevError(f"Línea {name.line}: los argumentos de tarea deben ser una lista")
+            function = self.functions.get(arguments[0])
+            if function is None: raise CForgevError(f"Línea {name.line}: función de tarea desconocida")
+            return ForgeTask(_FORGE_EXECUTOR.submit(self.invoke_user_function, function, list(provided), name.line))
+        if name.value == "esperar":
+            if len(arguments) not in {1, 2} or not isinstance(arguments[0], ForgeTask):
+                raise CForgevError(f"Línea {name.line}: esperar requiere una tarea")
+            timeout = None if len(arguments) == 1 else float(arguments[1]) / 1000.0
+            try: return arguments[0].future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError as error:
+                raise CForgevError(f"Línea {name.line}: tiempo de espera agotado") from error
+            except concurrent.futures.CancelledError as error:
+                raise CForgevError(f"Línea {name.line}: tarea cancelada") from error
+        if name.value == "cancelar":
+            if len(arguments) != 1 or not isinstance(arguments[0], ForgeTask):
+                raise CForgevError(f"Línea {name.line}: cancelar requiere una tarea")
+            return arguments[0].future.cancel()
+        if name.value == "canal":
+            if len(arguments) > 1: raise CForgevError(f"Línea {name.line}: canal acepta capacidad opcional")
+            capacity = int(arguments[0]) if arguments else 0
+            if capacity < 0: raise CForgevError(f"Línea {name.line}: capacidad inválida")
+            return ForgeChannel(queue.Queue(maxsize=capacity))
+        if name.value == "enviar":
+            if len(arguments) not in {2, 3} or not isinstance(arguments[0], ForgeChannel):
+                raise CForgevError(f"Línea {name.line}: enviar requiere canal y valor")
+            if arguments[0].closed: raise CForgevError(f"Línea {name.line}: canal cerrado")
+            timeout = None if len(arguments) == 2 else float(arguments[2]) / 1000.0
+            try: arguments[0].values.put(arguments[1], timeout=timeout)
+            except queue.Full as error: raise CForgevError(f"Línea {name.line}: canal lleno") from error
+            return None
+        if name.value == "recibir":
+            if len(arguments) not in {1, 2} or not isinstance(arguments[0], ForgeChannel):
+                raise CForgevError(f"Línea {name.line}: recibir requiere un canal")
+            timeout = None if len(arguments) == 1 else float(arguments[1]) / 1000.0
+            try: return arguments[0].values.get(timeout=timeout)
+            except queue.Empty as error: raise CForgevError(f"Línea {name.line}: canal vacío") from error
+        if name.value == "cerrar_canal":
+            if len(arguments) != 1 or not isinstance(arguments[0], ForgeChannel):
+                raise CForgevError(f"Línea {name.line}: cerrar_canal requiere un canal")
+            arguments[0].closed = True
+            return None
         if name.value == "forge_catalogo":
             if arguments:
                 raise CForgevError(f"Línea {name.line}: forge_catalogo no recibe argumentos")
@@ -1049,7 +1241,7 @@ class Interpreter:
                     f"Línea {name.line}: forge_hash requiere un ForgeValue serializable"
                 )
             canonical = json.dumps(
-                arguments[0], ensure_ascii=False, sort_keys=True,
+                universal_json_value(arguments[0]), ensure_ascii=False, sort_keys=True,
                 separators=(",", ":"),
             ).encode("utf-8")
             return hashlib.sha256(canonical).hexdigest()
@@ -1134,8 +1326,8 @@ class Interpreter:
                 raise CForgevError(f"Línea {name.line}: 'a_texto' requiere 1 argumento")
             return format_value(arguments[0])
         if name.value == "longitud":
-            if len(arguments) != 1 or not isinstance(arguments[0], (str, list, dict)):
-                raise CForgevError(f"Línea {name.line}: 'longitud' requiere texto, lista o mapa")
+            if len(arguments) != 1 or not isinstance(arguments[0], (str, list, dict, tuple, set)):
+                raise CForgevError(f"Línea {name.line}: 'longitud' requiere texto o colección")
             return len(arguments[0])
         if name.value == "agregar":
             if len(arguments) != 2 or not isinstance(arguments[0], list):
@@ -1368,6 +1560,10 @@ class Interpreter:
                     f"configura su adaptador mediante {setting}"
                 )
             raise CForgevError(f"Línea {name.line}: función desconocida '{name.value}'")
+        if function.is_async:
+            return ForgeTask(
+                _FORGE_EXECUTOR.submit(self.invoke_user_function, function, arguments, name.line)
+            )
         return self.invoke_user_function(function, arguments, name.line)
 
     def invoke_user_function(self, function: Function, arguments: list[object], line: int) -> object:
@@ -1376,6 +1572,9 @@ class Interpreter:
                 f"Línea {line}: '{function.name}' requiere {len(function.parameters)} "
                 f"argumentos, pero recibió {len(arguments)}"
             )
+        expected_parameters = function.parameter_types or ["cualquiera"] * len(function.parameters)
+        for parameter, expected, argument in zip(function.parameters, expected_parameters, arguments):
+            ensure_type(parameter, expected, argument, line)
         self.jit_counts[function.name] = self.jit_counts.get(function.name, 0) + 1
         local_variables = dict(self.variables)
         local_variables.update(zip(function.parameters, arguments))
@@ -1392,7 +1591,12 @@ class Interpreter:
         try:
             interpreter.run()
         except ReturnSignal as signal:
+            ensure_type(function.name, function.return_type, signal.value, line)
             return signal.value
+        if function.return_type not in {"cualquiera", "nulo"}:
+            raise CForgevError(
+                f"Línea {line}: '{function.name}' debe retornar {function.return_type}"
+            )
         return None
 
     def invoke_dynamic_library(
@@ -1416,7 +1620,7 @@ class Interpreter:
             if value is None:
                 command.append("n:")
             elif isinstance(value, bool):
-                command.append(f"i:{int(value)}")
+                command.append("b:true" if value else "b:false")
             elif isinstance(value, int) or (isinstance(value, float) and value.is_integer()):
                 command.append(f"i:{int(value)}")
             elif isinstance(value, float):
@@ -1438,6 +1642,10 @@ class Interpreter:
             return float(payload)
         if result_type == 3:
             return payload
+        if result_type == 4:
+            if payload not in {"verdadero", "falso"}:
+                raise CForgevError(f"Línea {line}: booleano ABI inválido")
+            return payload == "verdadero"
         raise CForgevError(f"Línea {line}: tipo ABI de retorno desconocido")
 
     def invoke_javascript(
@@ -1447,11 +1655,11 @@ class Interpreter:
             module = str((self.base_dir / module).resolve())
         marker = "__CFORGEV_JS_RESULT__"
         script = f'''(async () => {{
-globalThis.ForgeSymbols = {json.dumps({key: value for key, value in self.variables.items() if is_universal_data(value)}, ensure_ascii=False)};
+globalThis.ForgeSymbols = {json.dumps({key: universal_json_value(value) for key, value in self.variables.items() if is_universal_data(value)}, ensure_ascii=False)};
 const target = require({json.dumps(module)});
 const callable = target[{json.dumps(function)}] ?? target.default?.[{json.dumps(function)}];
 if (typeof callable !== "function") throw new Error("función JavaScript inexistente");
-const result = await callable(...{json.dumps(arguments, ensure_ascii=False)});
+const result = await callable(...{json.dumps(universal_json_value(arguments), ensure_ascii=False)});
 process.stdout.write("\\n{marker}" + JSON.stringify(result === undefined ? null : result));
 }})().catch(error => {{ console.error(error?.stack ?? String(error)); process.exit(1); }});
 '''
@@ -1600,6 +1808,8 @@ def calculate(left: object, op: Token, right: object) -> object:
 
 
 def format_value(value: object) -> str:
+    if isinstance(value, ForgeOption):
+        return f"algunos({format_value(value.value)})" if value.has_value else "ninguno"
     if isinstance(value, bool):
         return "verdadero" if value else "falso"
     if isinstance(value, float) and value.is_integer():
@@ -1608,12 +1818,19 @@ def format_value(value: object) -> str:
         return "nulo"
     if isinstance(value, list):
         return "[" + ", ".join(format_value(item) for item in value) + "]"
+    if isinstance(value, tuple):
+        suffix = "," if len(value) == 1 else ""
+        return "(" + ", ".join(format_value(item) for item in value) + suffix + ")"
+    if isinstance(value, set):
+        return "conjunto(" + ", ".join(sorted(format_value(item) for item in value)) + ")"
     if isinstance(value, dict):
         return "{" + ", ".join(f'"{key}": {format_value(item)}' for key, item in value.items()) + "}"
     return str(value)
 
 
 def value_type(value: object) -> str:
+    if isinstance(value, ForgeOption):
+        return "opcion"
     if isinstance(value, bool):
         return "booleano"
     if isinstance(value, (int, float)):
@@ -1622,6 +1839,10 @@ def value_type(value: object) -> str:
         return "texto"
     if isinstance(value, list):
         return "lista"
+    if isinstance(value, tuple):
+        return "tupla"
+    if isinstance(value, set):
+        return "conjunto"
     if isinstance(value, dict):
         return value.structure_name if isinstance(value, StructureValue) else "mapa"
     if value is None:
@@ -1632,16 +1853,32 @@ def value_type(value: object) -> str:
 def is_universal_data(value: object) -> bool:
     if value is None or isinstance(value, (bool, int, float, str)):
         return True
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple, set)):
         return all(is_universal_data(item) for item in value)
     if isinstance(value, dict):
         return all(isinstance(key, str) and is_universal_data(item) for key, item in value.items())
     return False
 
 
+def universal_json_value(value: object) -> object:
+    """Convierte colecciones C-Forge a una forma JSON estable para puentes externos."""
+    if isinstance(value, tuple):
+        return [universal_json_value(item) for item in value]
+    if isinstance(value, set):
+        return [universal_json_value(item) for item in sorted(value, key=format_value)]
+    if isinstance(value, list):
+        return [universal_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: universal_json_value(item) for key, item in value.items()}
+    return value
+
+
 def ensure_type(name: str, expected: str, value: object, line: int) -> None:
     actual = value_type(value)
-    if expected != "cualquiera" and expected != actual:
+    expected_base = expected.split("<", 1)[0]
+    if expected not in {"cualquiera", actual} and expected_base != actual and (
+        len(expected) != 1 or not expected.isupper()
+    ):
         raise CForgevError(
             f"Línea {line}: '{name}' es {expected} y no puede recibir {actual}"
         )
@@ -1659,6 +1896,11 @@ def execute(path: Path, program_arguments: list[str] | None = None) -> None:
     except OSError as error:
         raise CForgevError(f"No se pudo abrir {path}: {error}") from error
     try:
+        from compilador_nativo import Parser, StaticTypeAnalyzer
+        from cforge_memory import MemorySafetyAnalyzer
+        checked = Parser(tokenize(source)).program()
+        StaticTypeAnalyzer().analyze(checked)
+        MemorySafetyAnalyzer().analyze(checked)
         Interpreter(
             tokenize(source), base_dir=path.resolve().parent,
             program_arguments=program_arguments
@@ -1940,14 +2182,40 @@ def main() -> int:
                 print(f"{sys.argv[2]}:{item.line}:{item.column}: {item.severity} {item.code}: {item.message}")
             if not diagnostics: print(f"[OK] {sys.argv[2]}: sin errores")
         return 1 if any(item.severity == "error" for item in diagnostics) else 0
+    if len(sys.argv) >= 2 and sys.argv[1] == "parity":
+        from cforge_parity import compare_file, format_report, reports_json
+        arguments = sys.argv[2:]
+        json_output = "--json" in arguments
+        arguments = [argument for argument in arguments if argument != "--json"]
+        if not arguments:
+            print("Uso: cforge parity archivo.cfv [...] [--json]", file=sys.stderr)
+            return 2
+        try:
+            reports = [compare_file(Path(argument)) for argument in arguments]
+        except CForgevError as error:
+            print(f"[C-Forge Parity] {error}", file=sys.stderr)
+            return 1
+        if json_output:
+            print(reports_json(reports))
+        else:
+            print("\n\n".join(format_report(report) for report in reports))
+        return 0 if all(report.equal for report in reports) else 1
     if len(sys.argv) >= 2 and sys.argv[1] in {"vm", "bytecode", "debug"}:
-        from cforge_vm import VirtualMachine, compile_source, disassemble, execute_file
+        from cforge_vm import VirtualMachine, compile_file, compile_source, disassemble, execute_file, save_bytecode
         if len(sys.argv) < 3:
             print(f"Uso: cforge {sys.argv[1]} archivo.cfv [--break offset]", file=sys.stderr); return 2
         try:
             path = Path(sys.argv[2])
             if sys.argv[1] == "vm": execute_file(path)
-            elif sys.argv[1] == "bytecode": print(disassemble(compile_source(path.read_text(encoding="utf-8"))))
+            elif sys.argv[1] == "bytecode":
+                program = compile_file(path)
+                if len(sys.argv) == 5 and sys.argv[3] == "-o":
+                    destination = save_bytecode(program, Path(sys.argv[4]))
+                    print(f"Bytecode C-Forge creado: {destination}")
+                elif len(sys.argv) == 3:
+                    print(disassemble(program))
+                else:
+                    raise CForgevError("Uso: cforge bytecode archivo.cfv [-o programa.cfb]")
             else:
                 breakpoints: set[int] = set()
                 cursor = 3
@@ -1971,8 +2239,15 @@ def main() -> int:
             print("Uso: cforge lsp", file=sys.stderr); return 2
         from cforge_lsp import run
         return run()
+    if len(sys.argv) >= 2 and sys.argv[1] == "dap":
+        if len(sys.argv) != 2:
+            print("Uso: cforge dap", file=sys.stderr); return 2
+        from cforge_dap import run
+        return run()
     if len(sys.argv) >= 2 and sys.argv[1] == "pkg":
-        from cforge_packages import add, build_package, init, install_registry, list_packages, remove, search_registry
+        from cforge_packages import (add, build_package, generate_keypair, init,
+                                     install_registry, list_packages, remove,
+                                     search_registry, sign_package)
         action = sys.argv[2] if len(sys.argv) > 2 else ""
         try:
             if action == "init" and len(sys.argv) in {3, 4}:
@@ -1994,9 +2269,20 @@ def main() -> int:
             elif action == "build" and len(sys.argv) in {3, 4}:
                 archive, digest = build_package(Path.cwd(), Path(sys.argv[3]) if len(sys.argv) == 4 else Path("dist"))
                 print(f"Paquete creado: {archive}\nSHA-256: {digest}")
+            elif action == "keygen" and len(sys.argv) in {3, 4}:
+                directory = Path(sys.argv[3]) if len(sys.argv) == 4 else Path.home() / ".cforge" / "keys"
+                key_id = generate_keypair(directory / "publisher.pem", directory / "publisher.pub.pem")
+                print(f"Identidad Ed25519 creada: {directory}\nKey ID: {key_id}")
+            elif action == "sign" and len(sys.argv) in {7, 8}:
+                signature = sign_package(Path(sys.argv[3]), Path(sys.argv[4]), sys.argv[5], sys.argv[6],
+                                         Path(sys.argv[7]) if len(sys.argv) == 8 else None)
+                print(f"Firma de paquete creada: {signature}")
             else:
-                print("Uso: cforge pkg init [nombre] | add nombre ruta | remove nombre | list | search texto | install nombre [versión] | build [salida]", file=sys.stderr); return 2
-        except (CForgevError, OSError, ValueError) as error:
+                print("Uso: cforge pkg init [nombre] | add nombre ruta | remove nombre | list | search texto | install nombre [versión] | build [salida] | keygen [directorio] | sign archivo clave nombre versión [salida]", file=sys.stderr); return 2
+        # Los módulos opcionales pueden estar importados bajo el nombre de paquete
+        # mientras este archivo se ejecuta como __main__; captura sus errores de
+        # dominio sin exponer un traceback interno al usuario.
+        except Exception as error:
             print(f"[C-Forge Package Manager] {error}", file=sys.stderr); return 1
         return 0
     parser = argparse.ArgumentParser(prog="cforge", description="Intérprete de C-Forge")
@@ -2012,9 +2298,11 @@ def main() -> int:
     parser.add_argument("--vigilar", action="store_true", help="recargar el archivo conservando estado")
     parser.add_argument("--intervalo", type=float, default=0.5, help="segundos entre revisiones")
     parser.add_argument("--wasm", action="store_true", help="exportar un módulo WebAssembly .wat")
+    parser.add_argument("--llvm", action="store_true", help="exportar LLVM IR textual real (.ll)")
+    parser.add_argument("--compilar-llvm", action="store_true", help="compilar el núcleo numérico mediante LLVM IR y Clang")
     args, program_arguments = parser.parse_known_args()
     if args.archivo is None:
-        if args.compilar or args.salida or args.vincular or args.reparar or args.vigilar or args.wasm:
+        if args.compilar or args.salida or args.vincular or args.reparar or args.vigilar or args.wasm or args.llvm or args.compilar_llvm:
             parser.error("esta operación requiere un archivo .cfv")
         run_repl()
         return 0
@@ -2035,7 +2323,20 @@ def main() -> int:
                 args.archivo.write_text(repaired, encoding="utf-8")
                 print("[C-Forge Self-Healing] " + "; ".join(changes))
                 print(f"Respaldo creado: {backup}")
-        if args.wasm:
+        selected_backends = sum(bool(value) for value in (args.wasm, args.llvm, args.compilar_llvm, args.compilar))
+        if selected_backends > 1:
+            raise CForgevError("selecciona solo un backend: --compilar, --llvm, --compilar-llvm o --wasm")
+        if args.llvm:
+            from compilador_llvm import emit_file
+            output = args.salida or args.archivo.with_suffix(".ll")
+            emit_file(args.archivo, output)
+            print(f"LLVM IR C-Forge creado: {output}")
+        elif args.compilar_llvm:
+            from compilador_llvm import compile_native as compile_llvm_native
+            output = args.salida or args.archivo.with_suffix("")
+            compile_llvm_native(args.archivo, output, linked_sources=args.vincular)
+            print(f"Ejecutable LLVM C-Forge creado: {output}")
+        elif args.wasm:
             from compilador_wasm import compile_wasm
             output = args.salida or args.archivo.with_suffix(".wat")
             compile_wasm(args.archivo, output)
@@ -2065,10 +2366,15 @@ def main() -> int:
 
 def setup_environment() -> int:
     """Diagnostica dependencias sin modificar el equipo silenciosamente."""
-    print("C-Forge Setup 1.5.0 Developer Preview")
+    print("C-Forge Setup 1.6.0 Developer Preview")
     clang = shutil.which("clang++") is not None
     python = bool(getattr(sys, "frozen", False)) or shutil.which("python3") is not None
     node = shutil.which("node") is not None
+    try:
+        import cryptography  # noqa: F401
+        package_signatures = True
+    except ImportError:
+        package_signatures = False
     if sys.platform == "darwin":
         java = subprocess.run(
             ["/usr/libexec/java_home"], capture_output=True, text=True
@@ -2084,6 +2390,8 @@ def setup_environment() -> int:
     else:
         print("[FALTA] C++: instala clang++ o g++")
     print("[OK] Python 3 disponible" if python else "[FALTA] Python 3")
+    print("[OK] Paquetes: firmas Ed25519 disponibles" if package_signatures else
+          "[FALTA] Paquetes firmados: instala el componente cryptography")
     print("[OK] JavaScript/TypeScript: Node.js disponible" if node else "[OPCIONAL] Node.js no instalado")
     if java:
         print("[OK] Java: JDK y JVM disponibles")

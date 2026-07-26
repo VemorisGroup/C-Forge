@@ -27,6 +27,7 @@ int main(int argc, char** argv) {
     for (int i = 3; i < argc; ++i) {
         std::string value = argv[i];
         if (value == "n:") values.push_back({CFV_NULL, 0, 0, nullptr});
+        else if (value == "b:true" || value == "b:false") values.push_back({CFV_BOOLEAN, value == "b:true" ? 1 : 0, 0, nullptr});
         else if (value.rfind("i:", 0) == 0) values.push_back({CFV_INTEGER, std::stoll(value.substr(2)), 0, nullptr});
         else if (value.rfind("d:", 0) == 0) values.push_back({CFV_DECIMAL, 0, std::stod(value.substr(2)), nullptr});
         else if (value.rfind("s:", 0) == 0) { texts.push_back(value.substr(2)); values.push_back({CFV_TEXT, 0, 0, texts.back().c_str()}); }
@@ -40,6 +41,7 @@ int main(int argc, char** argv) {
     if (result.type == CFV_INTEGER) std::cout << result.integer;
     else if (result.type == CFV_DECIMAL) std::cout << result.decimal;
     else if (result.type == CFV_TEXT && result.text) std::cout << result.text;
+    else if (result.type == CFV_BOOLEAN) std::cout << (result.integer ? "verdadero" : "falso");
     std::cout.flush();
     if (result.release) result.release(result.owner);
     return 0;

@@ -1,0 +1,7 @@
+// Núcleo actualmente soportado por el backend LLVM real.
+funcion cuadrado(valor) {
+    retornar valor * valor
+}
+
+sea numero: numero = 7
+mostrar(cuadrado(numero))

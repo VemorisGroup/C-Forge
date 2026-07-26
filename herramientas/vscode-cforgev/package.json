@@ -2,7 +2,7 @@
   "name": "cforgev-language",
   "displayName": "C-Forge Language Support",
   "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "publisher": "vemoris-group",
   "author": {
     "name": "Vemoris Group"
@@ -11,7 +11,7 @@
   "icon": "images/icon.png",
   "preview": true,
   "main": "./extension.js",
-  "activationEvents": ["onLanguage:cforgev", "onCommand:cforge.runFile", "onCommand:cforge.checkFile", "onCommand:cforge.debugBreakpoint"],
+  "activationEvents": ["onLanguage:cforgev", "onDebug:cforge", "onCommand:cforge.runFile", "onCommand:cforge.checkFile", "onCommand:cforge.debugBreakpoint"],
   "pricing": "Free",
   "engines": {
     "vscode": "^1.80.0"
@@ -51,7 +51,7 @@
     "commands": [
       {"command": "cforge.runFile", "title": "C-Forge: Ejecutar archivo"},
       {"command": "cforge.checkFile", "title": "C-Forge: Comprobar archivo"},
-      {"command": "cforge.debugBreakpoint", "title": "C-Forge: Depurar con breakpoint de bytecode"}
+      {"command": "cforge.debugBreakpoint", "title": "C-Forge: Iniciar depuración visual"}
     ],
     "languages": [
       {
@@ -75,6 +75,25 @@
         "language": "cforgev",
         "scopeName": "source.cforgev",
         "path": "./syntaxes/cforgev.tmLanguage.json"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "cforge",
+        "label": "C-Forge VM",
+        "languages": ["cforgev"],
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {"type": "string", "description": "Archivo .cfv", "default": "${file}"},
+              "cwd": {"type": "string", "default": "${workspaceFolder}"}
+            }
+          }
+        },
+        "initialConfigurations": [
+          {"type": "cforge", "request": "launch", "name": "Depurar C-Forge", "program": "${file}"}
+        ]
       }
     ]
   }

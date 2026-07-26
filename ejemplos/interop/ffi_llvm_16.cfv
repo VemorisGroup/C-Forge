@@ -1,0 +1,33 @@
+estructura Persona {
+    nombre: texto
+    edad: numero
+    activa: booleano
+}
+
+extern_c funcion native_add(a: numero, b: numero): numero
+extern_c funcion native_echo(value: texto): texto
+extern_c funcion native_not(value: booleano): booleano
+extern_c funcion native_sum(values: lista<numero>): numero
+extern_c funcion native_map_total(values: mapa<numero>): numero
+extern_c funcion native_person_score(persona: Persona): numero
+extern_c segura funcion native_divide(a: numero, b: numero): numero
+extern_c segura funcion native_range(count: numero): lista<numero>
+
+mostrar(native_add(20, 22))
+mostrar(native_echo("C-Forge LLVM FFI"))
+mostrar(native_not(falso))
+mostrar(native_sum([1, 2, 3, 4, 5]))
+mostrar(native_map_total({"uno": 1, "dos": 2, "tres": 3}))
+sea persona = Persona("Javier", 41, verdadero)
+mostrar(native_person_score(persona))
+destruir(persona)
+sea rango: lista<numero> = native_range(5)
+mostrar(rango)
+destruir(rango)
+mostrar(native_divide(84, 2))
+
+intentar {
+    mostrar(native_divide(10, 0))
+} capturar (error) {
+    mostrar("Error C ABI capturado: " + error)
+}

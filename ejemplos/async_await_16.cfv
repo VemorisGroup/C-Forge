@@ -1,0 +1,7 @@
+async funcion calcular(valor: numero): numero {
+    retornar valor * valor
+}
+
+sea trabajo = calcular(12)
+mostrar(await trabajo)
+mostrar(await calcular(5))

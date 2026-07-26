@@ -1,0 +1,12 @@
+sea edades: mapa = {"Javier": 20, "Vemoris": 5}
+sea lenguajes: mapa = {"principal": "C-Forge", "extension": ".cfv"}
+sea capacidades: mapa = {"llvm": verdadero, "vm": verdadero}
+
+mostrar(edades["Javier"])
+mostrar(lenguajes["principal"])
+mostrar(capacidades["llvm"])
+mostrar(longitud(edades))
+
+destruir(edades)
+destruir(lenguajes)
+destruir(capacidades)

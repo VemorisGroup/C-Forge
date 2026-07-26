@@ -14,6 +14,10 @@ experimental de Vemoris Group.
 - Forge Shared Arena y conectores declarativos `ia_`, `ui_` y `web_`.
 - Comentarios de línea mediante `//`.
 - Cierre automático de llaves, corchetes, paréntesis y comillas.
+- Cliente LSP integrado sin dependencias externas: diagnósticos, hover tipado,
+  autocompletado, definición/referencias entre archivos, renombrado y formato.
+- Depuración DAP con breakpoints normales, condicionales, por cantidad de
+  impactos y logpoints; inspección segura de objetos y colecciones.
 
 ## Ejemplo
 
@@ -46,7 +50,7 @@ cforge programa.cfv
 
 ## Estado
 
-Versión `1.4.0`, publicada como Preview. C-Forge y esta extensión continúan en
+Versión `1.6.0`, publicada como Preview. C-Forge y esta extensión continúan en
 desarrollo experimental.
 
 Copyright © 2026 Vemoris Group y Javier. Todos los derechos reservados.

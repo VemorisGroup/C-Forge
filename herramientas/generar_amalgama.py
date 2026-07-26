@@ -13,10 +13,14 @@ RESOURCES = {
     "cforgev.py": ROOT / "cforgev.py",
     "compilador_nativo.py": ROOT / "compilador_nativo.py",
     "compilador_wasm.py": ROOT / "compilador_wasm.py",
+    "compilador_llvm.py": ROOT / "compilador_llvm.py",
     "cforge_diagnostics.py": ROOT / "cforge_diagnostics.py",
     "cforge_lsp.py": ROOT / "cforge_lsp.py",
+    "cforge_dap.py": ROOT / "cforge_dap.py",
     "cforge_packages.py": ROOT / "cforge_packages.py",
     "cforge_vm.py": ROOT / "cforge_vm.py",
+    "cforge_memory.py": ROOT / "cforge_memory.py",
+    "cforge_parity.py": ROOT / "cforge_parity.py",
     "registry/index.json": ROOT / "registry" / "index.json",
     "registry/README.md": ROOT / "registry" / "README.md",
     "include/cforgev_ffi.h": ROOT / "include" / "cforgev_ffi.h",
@@ -46,7 +50,7 @@ def generate() -> str:
             + raw_literal(content, index * 2 + 1) + "}"
         )
     resources = ",\n".join(entries)
-    return f'''// C-Forge 1.5.0 Developer Preview — distribución monolítica generada.
+    return f'''// C-Forge 1.6.0 Developer Preview — distribución monolítica generada.
 // Fuente reproducible: herramientas/generar_amalgama.py
 
 #include <Python.h>
@@ -243,7 +247,7 @@ bool command_available(const std::string& command) {{
 }}
 
 int setup_environment() {{
-    std::cout << "C-Forge Setup 1.5.0 Developer Preview\\n";
+    std::cout << "C-Forge Setup 1.6.0 Developer Preview\\n";
     const bool clang = command_available("clang++");
     const bool python = command_available("python3");
 #ifdef __APPLE__
@@ -252,8 +256,11 @@ int setup_environment() {{
     const bool java = command_available("java") && command_available("javac");
 #endif
     const bool node = command_available("node");
+    const bool signatures = std::system("python3 -c 'import cryptography' >/dev/null 2>&1") == 0;
     std::cout << (clang ? "[OK] C++: clang++ disponible\\n" : "[FALTA] C++: instala las herramientas de desarrollo\\n");
     std::cout << (python ? "[OK] Python 3 disponible\\n" : "[FALTA] Python 3\\n");
+    std::cout << (signatures ? "[OK] Paquetes: firmas Ed25519 disponibles\\n" :
+                               "[FALTA] Paquetes firmados: instala el componente cryptography\\n");
     std::cout << (node ? "[OK] JavaScript/TypeScript: Node.js disponible\\n" : "[OPCIONAL] Node.js no instalado\\n");
     if (java) {{
         std::cout << "[OK] Java: JDK y JVM disponibles\\n";

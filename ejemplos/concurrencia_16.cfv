@@ -1,0 +1,11 @@
+funcion cuadrado(valor: numero): numero {
+    retornar valor * valor
+}
+
+sea trabajo = tarea("cuadrado", [9])
+mostrar(esperar(trabajo))
+
+sea mensajes = canal(1)
+enviar(mensajes, "hola desde un canal C-Forge")
+mostrar(recibir(mensajes))
+cerrar_canal(mensajes)

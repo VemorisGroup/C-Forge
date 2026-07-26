@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,14 @@ class InterpreterTests(unittest.TestCase):
     def test_variables_math_and_strings(self) -> None:
         source = 'sea nombre = "C-Forge"; mostrar(nombre); mostrar(2 + 3 * 4);'
         self.assertEqual(self.output(source), "C-Forge\n14\n")
+
+    def test_vm_accepts_generic_option_annotation(self) -> None:
+        source = (
+            "sea presente: opcion<numero> = algunos(42);"
+            "sea ausente: opcion<numero> = ninguno();"
+            "mostrar(desenvolver(presente)); mostrar(ausente);"
+        )
+        self.assertEqual(self.output(source), "42\nninguno\n")
 
     def test_division_by_zero_is_explained(self) -> None:
         with self.assertRaisesRegex(CForgevError, "dividir por cero"):
@@ -394,6 +403,21 @@ std::cout << value << std::endl;
         """
         self.assertEqual(self.output(source), "30\nJavier\n3\n")
 
+    def test_tuples_and_sets_have_distinct_semantics(self) -> None:
+        source = '''
+        sea version: tupla = ("C-Forge", 2, verdadero)
+        sea motores: conjunto = conjunto("LLVM", "VM", "LLVM")
+        mostrar(version)
+        mostrar(version[1])
+        mostrar(longitud(version))
+        mostrar(motores)
+        mostrar(longitud(motores))
+        '''
+        self.assertEqual(
+            self.output(source),
+            "(C-Forge, 2, verdadero)\n2\n3\nconjunto(LLVM, VM)\n2\n",
+        )
+
     def test_user_input(self) -> None:
         with patch("builtins.input", return_value="Javier"):
             self.assertEqual(self.output('sea nombre = leer("Nombre: "); mostrar(nombre);'), "Javier\n")
@@ -415,6 +439,45 @@ std::cout << value << std::endl;
             compile_native(source_path, output_path)
             result = subprocess.run([str(output_path)], capture_output=True, text=True, check=True)
             self.assertEqual(result.stdout, "30\nJavier\n")
+
+    def test_native_compiler_preserves_tuples_and_sets(self) -> None:
+        source = '''
+sea version: tupla = ("C-Forge", 2, verdadero)
+sea motores: conjunto = conjunto("LLVM", "VM", "LLVM")
+mostrar(version)
+mostrar(version[1])
+mostrar(longitud(version))
+mostrar(motores)
+mostrar(longitud(motores))
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_path, output_path = root / "colecciones.cfv", root / "colecciones"
+            source_path.write_text(source, encoding="utf-8")
+            compile_native(source_path, output_path)
+            result = subprocess.run([str(output_path)], capture_output=True, text=True, check=True)
+            self.assertEqual(
+                result.stdout,
+                "(C-Forge, 2, verdadero)\n2\n3\nconjunto(LLVM, VM)\n2\n",
+            )
+
+    def test_python_bridge_preserves_tuple_and_set_types(self) -> None:
+        source = '''
+extern("python") {
+def cfv_collection_types(tupla, conjunto):
+    return (type(tupla).__name__, type(conjunto).__name__, tupla[1], len(conjunto))
+}
+sea version: tupla = ("C-Forge", 2, verdadero)
+sea motores: conjunto = conjunto("LLVM", "VM", "LLVM")
+mostrar(use_python("__main__", "cfv_collection_types", [version, motores]))
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_path, output_path = root / "interop.cfv", root / "interop"
+            source_path.write_text(source, encoding="utf-8")
+            compile_native(source_path, output_path)
+            result = subprocess.run([str(output_path)], capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout, "(tuple, set, 2, 2)\n")
 
     def test_native_user_input(self) -> None:
         source = 'sea nombre: texto = leer(""); mostrar("Hola " + nombre);'
@@ -635,16 +698,17 @@ std::cout << value << std::endl;
                 f'mostrar(use_native("{library_name}", "native_multiply", [6, 7]));'
                 f'mostrar(use_native("{library_name}", "native_half", [5.0]));'
                 f'mostrar(use_native("{library_name}", "native_greet", ["Javier"]));'
+                f'mostrar(use_native("{library_name}", "native_toggle", [verdadero]));'
             )
             source_path, output_path = root / "native.cfv", root / "native"
             source_path.write_text(source, encoding="utf-8")
             buffer = io.StringIO()
             with contextlib.redirect_stdout(buffer):
                 execute(source_path)
-            self.assertEqual(buffer.getvalue(), "42\n2.5\nHola Javier desde C++\n")
+            self.assertEqual(buffer.getvalue(), "42\n2.5\nHola Javier desde C++\nfalso\n")
             compile_native(source_path, output_path)
             result = subprocess.run([str(output_path)], capture_output=True, text=True, check=True)
-            self.assertEqual(result.stdout, "42\n2.5\nHola Javier desde C++\n")
+            self.assertEqual(result.stdout, "42\n2.5\nHola Javier desde C++\nfalso\n")
 
     def test_linked_cpp_function_registry(self) -> None:
         source = 'mostrar(use_cpp("multiply", [8, 9]));'
@@ -728,6 +792,79 @@ std::cout << value << std::endl;
             compile_native(source_path, output_path, [Path("ejemplos/interop/native_math.cpp")])
             result = subprocess.run([str(output_path)], capture_output=True, text=True, check=True)
             self.assertEqual(result.stdout, "Texto RAII para Javier\n1\n")
+
+    def test_native_dynamic_abi_roundtrips_boolean(self) -> None:
+        source = 'mostrar(use_cpp("toggle", [verdadero])); mostrar(use_cpp("toggle", [falso]));'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_path, output_path = root / "boolean.cfv", root / "boolean"
+            source_path.write_text(source, encoding="utf-8")
+            compile_native(source_path, output_path, [Path("ejemplos/interop/native_math.cpp")])
+            result = subprocess.run([str(output_path)], capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout, "falso\nverdadero\n")
+
+    def test_native_dynamic_abi_v2_preserves_text_length_and_embedded_nul(self) -> None:
+        source = (
+            'sea echoed = use_cpp("echo_v2", ["a\\u0000b"]);'
+            'mostrar(echoed.length);'
+            'sea owned = use_cpp("owned_echo_v2", ["x\\u0000y"]);'
+            'mostrar(owned.length);'
+            'mostrar(use_cpp("release_count", []));'
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_path, output_path = root / "abi_v2.cfv", root / "abi_v2"
+            source_path.write_text(source, encoding="utf-8")
+            compile_native(source_path, output_path, [Path("ejemplos/interop/native_math.cpp")])
+            result = subprocess.run([str(output_path)], capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout, "3\n3\n1\n")
+
+    def test_native_dynamic_abi_v2_lists_maps_and_records(self) -> None:
+        source = '''
+clase Persona {
+    campo nombre: texto
+    campo edad: numero
+}
+sea persona = Persona("Javier", 20)
+mostrar(use_cpp("list_sum_v2", [[1, 2, 3, 4]]))
+mostrar(use_cpp("map_count_v2", [{"uno": 1, "dos": 2}]))
+mostrar(use_cpp("record_count_v2", [persona]))
+sea rango = use_cpp("owned_range_v2", [5])
+mostrar(rango)
+mostrar(use_cpp("release_count", []))
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_path, output_path = root / "abi_v2_collections.cfv", root / "abi_v2_collections"
+            source_path.write_text(source, encoding="utf-8")
+            compile_native(source_path, output_path, [Path("ejemplos/interop/native_math.cpp")])
+            result = subprocess.run([str(output_path)], capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout, "10\n2\n2\n[0, 1, 2, 3, 4]\n1\n")
+
+    def test_native_python_bridge_preserves_embedded_nul_with_explicit_lengths(self) -> None:
+        source = (
+            'mostrar(use_python("nul_bridge", "size", ["a\\u0000b"]));'
+            'sea echoed = use_python("nul_bridge", "identity", ["a\\u0000b"]);'
+            'mostrar(echoed.length);'
+            'mostrar(use_python("nul_bridge", "key_lengths", [{"a\\u0000b": 1}]));'
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "nul_bridge.py").write_text(
+                "def size(value): return len(value)\n"
+                "def identity(value): return value\n"
+                "def key_lengths(value): return sorted(len(key) for key in value)\n",
+                encoding="utf-8",
+            )
+            source_path, output_path = root / "python_text.cfv", root / "python_text"
+            source_path.write_text(source, encoding="utf-8")
+            compile_native(source_path, output_path)
+            environment = dict(os.environ)
+            environment["PYTHONPATH"] = str(root)
+            result = subprocess.run(
+                [str(output_path)], capture_output=True, text=True, check=True, env=environment,
+            )
+            self.assertEqual(result.stdout, "3\n3\n[3]\n")
 
 
 if __name__ == "__main__":

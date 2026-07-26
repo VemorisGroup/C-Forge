@@ -1,0 +1,18 @@
+funcion identidad<T>(valor: T): T {
+    retornar valor
+}
+
+interfaz Sumable {
+    metodo sumar(x: numero): numero
+}
+
+clase Contador implementa Sumable {
+    campo valor: numero
+
+    metodo sumar(x: numero): numero {
+        retornar este.valor + x
+    }
+}
+
+sea contador = Contador(10)
+mostrar(identidad(contador.sumar(5)))

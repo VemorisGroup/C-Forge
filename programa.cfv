@@ -1,0 +1,9 @@
+// C-Forge 1.6 — demostración del backend LLVM real.
+funcion cuadrado(valor) {
+    retornar valor * valor
+}
+
+sea numero: numero = 7
+sea resultado: numero = cuadrado(numero)
+
+mostrar(resultado)

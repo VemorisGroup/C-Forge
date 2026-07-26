@@ -1,4 +1,4 @@
-// C-Forge 1.5.0 Developer Preview — distribución monolítica generada.
+// C-Forge 1.6.0 Developer Preview — distribución monolítica generada.
 // Fuente reproducible: herramientas/generar_amalgama.py
 
 #include <Python.h>
@@ -88,6 +88,7 @@ import json
 import math
 import os
 import platform
+import queue
 import re
 import shutil
 import socket
@@ -100,7 +101,7 @@ import urllib.request
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
-VERSION = "1.5.0-developer-preview"
+VERSION = "1.6.0-developer-preview"
 
 CONNECTOR_CATALOG = {
     "ia_": "python",
@@ -131,6 +132,9 @@ class Function:
     name: str
     parameters: list[str]
     body: list[Token]
+    parameter_types: list[str] = dc_field(default_factory=list)
+    return_type: str = "cualquiera"
+    is_async: bool = False
 
 
 @dataclass(frozen=True)
@@ -144,6 +148,24 @@ class StructureValue(dict[str, object]):
     def __init__(self, structure_name: str, values: dict[str, object]) -> None:
         super().__init__(values)
         self.structure_name = structure_name
+
+@dataclass(frozen=True)
+class ForgeOption:
+    has_value: bool
+    value: object = None
+
+@dataclass
+class ForgeTask:
+    future: concurrent.futures.Future[object]
+
+@dataclass
+class ForgeChannel:
+    values: queue.Queue[object]
+    closed: bool = False
+
+_FORGE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=max(2, min(32, os.cpu_count() or 2)), thread_name_prefix="cforge"
+)
 
 
 @dataclass(frozen=True)
@@ -363,6 +385,14 @@ class Interpreter:
             self.statement()
 
     def statement(self) -> None:
+        if self.match_ident("region") or self.match_ident("unsafe"):
+            body = self.block()
+            Interpreter(
+                body, self.variables, self.functions, self.variable_types,
+                self.base_dir, self.imported_modules, self.structures,
+                self.program_arguments, self.jit_counts, self.cluster_symbols,
+            ).run()
+            return
         if self.match_ident("cluster"):
             previous = self.cluster_mode
             self.cluster_mode = True
@@ -385,6 +415,9 @@ class Interpreter:
         if self.match_ident("test"):
             self.test_statement()
             return
+        if self.match_ident("interfaz"):
+            self.interface_declaration()
+            return
         if self.match_ident("clase"):
             self.class_declaration()
             return
@@ -403,8 +436,14 @@ class Interpreter:
         if self.match_ident("intentar"):
             self.try_statement()
             return
+        if self.match_ident("async"):
+            keyword = self.consume("IDENT", "Se esperaba 'funcion' después de async")
+            if keyword.value != "funcion":
+                raise CForgevError(f"Línea {keyword.line}: se esperaba 'funcion' después de async")
+            self.function_declaration(True)
+            return
         if self.match_ident("funcion"):
-            self.function_declaration()
+            self.function_declaration(False)
             return
         if self.match_ident("retornar"):
             value = self.expression()
@@ -420,8 +459,9 @@ class Interpreter:
             name = self.consume("IDENT", "Se esperaba el nombre de la variable")
             declared_type: str | None = None
             if self.match_value(":"):
-                declared_type = self.consume("IDENT", "Se esperaba un tipo").value
-                if declared_type not in {"numero", "texto", "booleano", "lista", "mapa", "nulo", "cualquiera"} and declared_type not in self.structures:
+                declared_type = self.consume_type()
+                declared_base = declared_type.split("<", 1)[0]
+                if declared_base not in {"numero", "texto", "booleano", "lista", "mapa", "tupla", "conjunto", "opcion", "nulo", "cualquiera"} and declared_base not in self.structures:
                     raise CForgevError(f"Línea {name.line}: tipo desconocido '{declared_type}'")
             self.consume_value("=", "Se esperaba '='")
             value = self.expression()
@@ -519,7 +559,7 @@ class Interpreter:
             self.consume_value(":", "Se esperaba ':'")
             field_type = self.consume("IDENT", "Se esperaba el tipo del campo")
             if field_type.value not in {
-                "numero", "texto", "booleano", "lista", "mapa", "nulo", "cualquiera"
+                "numero", "texto", "booleano", "lista", "mapa", "tupla", "conjunto", "nulo", "cualquiera"
             } and field_type.value not in self.structures:
                 raise CForgevError(f"Línea {field_type.line}: tipo desconocido '{field_type.value}'")
             if any(existing == field.value for existing, _ in fields):
@@ -531,6 +571,11 @@ class Interpreter:
 
     def class_declaration(self) -> None:
         name = self.consume("IDENT", "Se esperaba el nombre de la clase")
+        if self.match_ident("implementa"):
+            while True:
+                self.consume("IDENT", "Se esperaba una interfaz")
+                if not self.match_value(","):
+                    break
         self.consume_value("{", "Se esperaba '{'")
         fields: list[tuple[str, str]] = []
         methods: dict[str, Function] = {}
@@ -549,14 +594,40 @@ class Interpreter:
                 if self.peek().value != ")":
                     while True:
                         parameters.append(self.consume("IDENT", "Se esperaba un parámetro").value)
+                        if self.match_value(":"):
+                            self.consume_type()
                         if not self.match_value(","):
                             break
                 self.consume_value(")", "Se esperaba ')'")
+                if self.match_value(":"):
+                    self.consume_type()
                 methods[method_name.value] = Function(method_name.value, parameters, self.block())
                 continue
             raise CForgevError(f"Línea {self.peek().line}: se esperaba 'campo' o 'metodo'")
         self.consume_value("}", "Falta '}' para cerrar la clase")
         self.structures[name.value] = Structure(name.value, fields, methods)
+
+    def interface_declaration(self) -> None:
+        self.consume("IDENT", "Se esperaba el nombre de la interfaz")
+        self.consume_value("{", "Se esperaba '{'")
+        while self.peek().value != "}" and not self.check("EOF"):
+            keyword = self.consume("IDENT", "Se esperaba 'metodo'")
+            if keyword.value != "metodo":
+                raise CForgevError(f"Línea {keyword.line}: se esperaba 'metodo'")
+            self.consume("IDENT", "Se esperaba el nombre del método")
+            self.consume_value("(", "Se esperaba '('")
+            if self.peek().value != ")":
+                while True:
+                    self.consume("IDENT", "Se esperaba un parámetro")
+                    if self.match_value(":"):
+                        self.consume_type()
+                    if not self.match_value(","):
+                        break
+            self.consume_value(")", "Se esperaba ')'")
+            if self.match_value(":"):
+                self.consume_type()
+            self.optional_semicolon()
+        self.consume_value("}", "Falta '}' para cerrar la interfaz")
 
     def import_statement(self) -> None:
         path_token = self.consume("STRING", "Se esperaba la ruta del módulo")
@@ -744,10 +815,17 @@ class Interpreter:
                 self.base_dir, self.imported_modules, self.structures, self.program_arguments
             ).run()
 
-    def function_declaration(self) -> None:
+    def function_declaration(self, is_async: bool = False) -> None:
         name = self.consume("IDENT", "Se esperaba el nombre de la función")
+        if self.match_value("<"):
+            while True:
+                self.consume("IDENT", "Se esperaba un parámetro de tipo")
+                if not self.match_value(","):
+                    break
+            self.consume_value(">", "Se esperaba '>'")
         self.consume_value("(", "Se esperaba '(' después del nombre de la función")
         parameters: list[str] = []
+        parameter_types: list[str] = []
         if self.peek().value != ")":
             while True:
                 parameter = self.consume("IDENT", "Se esperaba el nombre de un parámetro")
@@ -756,13 +834,34 @@ class Interpreter:
                         f"Línea {parameter.line}: parámetro repetido '{parameter.value}'"
                     )
                 parameters.append(parameter.value)
+                parameter_type = "cualquiera"
+                if self.match_value(":"):
+                    parameter_type = self.consume_type()
+                parameter_types.append(parameter_type)
                 if not self.match_value(","):
                     break
         self.consume_value(")", "Se esperaba ')' después de los parámetros")
+        return_type = "cualquiera"
+        if self.match_value(":"):
+            return_type = self.consume_type()
         body = self.block()
-        self.functions[name.value] = Function(name.value, parameters, body)
+        self.functions[name.value] = Function(
+            name.value, parameters, body, parameter_types, return_type, is_async
+        )
         if self.cluster_mode:
             self.cluster_symbols[name.value] = "funcion"
+
+    def consume_type(self) -> str:
+        name = self.consume("IDENT", "Se esperaba un tipo").value
+        if not self.match_value("<"):
+            return name
+        arguments: list[str] = []
+        while True:
+            arguments.append(self.consume_type())
+            if not self.match_value(","):
+                break
+        self.consume_value(">", "Se esperaba '>' para cerrar el tipo genérico")
+        return f"{name}<{','.join(arguments)}>"
 
     def while_statement(self) -> None:
         condition_tokens = self.parenthesized("después de 'mientras'")
@@ -916,6 +1015,14 @@ class Interpreter:
         return value
 
     def unary(self) -> object:
+        if self.match_ident("await"):
+            token = self.previous()
+            task = self.unary()
+            if not isinstance(task, ForgeTask):
+                raise CForgevError(f"Línea {token.line}: await requiere una tarea")
+            try: return task.future.result()
+            except concurrent.futures.CancelledError as error:
+                raise CForgevError(f"Línea {token.line}: tarea cancelada") from error
         if self.match_ident("no"):
             token = self.previous()
             return not require_bool(self.unary(), token.line)
@@ -932,9 +1039,9 @@ class Interpreter:
             key = self.expression()
             bracket = self.consume_value("]", "Se esperaba ']' después del índice")
             try:
-                if isinstance(value, list):
+                if isinstance(value, (list, tuple)):
                     if not isinstance(key, int) or isinstance(key, bool):
-                        raise CForgevError(f"Línea {bracket.line}: el índice de lista debe ser entero")
+                        raise CForgevError(f"Línea {bracket.line}: el índice de colección debe ser entero")
                     value = value[key]
                 elif isinstance(value, dict):
                     if not isinstance(key, str):
@@ -949,7 +1056,7 @@ class Interpreter:
             if self.match_value("("):
                 value = self.call_method(value, field)
                 continue
-            if field.value == "length" and isinstance(value, (str, list, dict)):
+            if field.value == "length" and isinstance(value, (str, list, dict, tuple, set)):
                 value = len(value)
                 continue
             if not isinstance(value, dict) or field.value not in value:
@@ -1100,9 +1207,19 @@ class Interpreter:
                 raise CForgevError(f"Línea {token.line}: variable desconocida '{token.value}'")
             return self.variables[token.value]
         if self.match_value("("):
-            value = self.expression()
-            self.consume_value(")", "Se esperaba ')'")
-            return value
+            if self.match_value(")"):
+                return ()
+            first = self.expression()
+            if not self.match_value(","):
+                self.consume_value(")", "Se esperaba ')'")
+                return first
+            values = [first]
+            while self.peek().value != ")":
+                values.append(self.expression())
+                if not self.match_value(","):
+                    break
+            self.consume_value(")", "Se esperaba ')' para cerrar la tupla")
+            return tuple(values)
         token = self.peek()
         raise CForgevError(f"Línea {token.line}: expresión inválida cerca de {token.value!r}")
 
@@ -1114,6 +1231,81 @@ class Interpreter:
                 if not self.match_value(","):
                     break
         self.consume_value(")", "Se esperaba ')' después de los argumentos")
+        if name.value in {"mover", "prestar", "prestar_mut", "soltar_prestamo", "destruir"}:
+            if len(arguments) != 1:
+                raise CForgevError(f"Línea {name.line}: {name.value} requiere 1 argumento")
+            return arguments[0] if name.value not in {"soltar_prestamo", "destruir"} else None
+        if name.value == "conjunto":
+            try:
+                return set(arguments)
+            except TypeError as error:
+                raise CForgevError(
+                    f"Línea {name.line}: los elementos del conjunto deben ser inmutables"
+                ) from error
+        if name.value == "algunos":
+            if len(arguments) != 1:
+                raise CForgevError(f"Línea {name.line}: algunos requiere 1 argumento")
+            return ForgeOption(True, arguments[0])
+        if name.value == "ninguno":
+            if arguments:
+                raise CForgevError(f"Línea {name.line}: ninguno no recibe argumentos")
+            return ForgeOption(False)
+        if name.value == "es_algunos":
+            if len(arguments) != 1 or not isinstance(arguments[0], ForgeOption):
+                raise CForgevError(f"Línea {name.line}: es_algunos requiere una opcion")
+            return arguments[0].has_value
+        if name.value == "desenvolver":
+            if len(arguments) != 1 or not isinstance(arguments[0], ForgeOption):
+                raise CForgevError(f"Línea {name.line}: desenvolver requiere una opcion")
+            if not arguments[0].has_value:
+                raise CForgevError(f"Línea {name.line}: no se puede desenvolver ninguno")
+            return arguments[0].value
+        if name.value == "tarea":
+            if len(arguments) not in {1, 2} or not isinstance(arguments[0], str):
+                raise CForgevError(f"Línea {name.line}: tarea requiere nombre y lista de argumentos opcional")
+            provided = arguments[1] if len(arguments) == 2 else []
+            if not isinstance(provided, list):
+                raise CForgevError(f"Línea {name.line}: los argumentos de tarea deben ser una lista")
+            function = self.functions.get(arguments[0])
+            if function is None: raise CForgevError(f"Línea {name.line}: función de tarea desconocida")
+            return ForgeTask(_FORGE_EXECUTOR.submit(self.invoke_user_function, function, list(provided), name.line))
+        if name.value == "esperar":
+            if len(arguments) not in {1, 2} or not isinstance(arguments[0], ForgeTask):
+                raise CForgevError(f"Línea {name.line}: esperar requiere una tarea")
+            timeout = None if len(arguments) == 1 else float(arguments[1]) / 1000.0
+            try: return arguments[0].future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError as error:
+                raise CForgevError(f"Línea {name.line}: tiempo de espera agotado") from error
+            except concurrent.futures.CancelledError as error:
+                raise CForgevError(f"Línea {name.line}: tarea cancelada") from error
+        if name.value == "cancelar":
+            if len(arguments) != 1 or not isinstance(arguments[0], ForgeTask):
+                raise CForgevError(f"Línea {name.line}: cancelar requiere una tarea")
+            return arguments[0].future.cancel()
+        if name.value == "canal":
+            if len(arguments) > 1: raise CForgevError(f"Línea {name.line}: canal acepta capacidad opcional")
+            capacity = int(arguments[0]) if arguments else 0
+            if capacity < 0: raise CForgevError(f"Línea {name.line}: capacidad inválida")
+            return ForgeChannel(queue.Queue(maxsize=capacity))
+        if name.value == "enviar":
+            if len(arguments) not in {2, 3} or not isinstance(arguments[0], ForgeChannel):
+                raise CForgevError(f"Línea {name.line}: enviar requiere canal y valor")
+            if arguments[0].closed: raise CForgevError(f"Línea {name.line}: canal cerrado")
+            timeout = None if len(arguments) == 2 else float(arguments[2]) / 1000.0
+            try: arguments[0].values.put(arguments[1], timeout=timeout)
+            except queue.Full as error: raise CForgevError(f"Línea {name.line}: canal lleno") from error
+            return None
+        if name.value == "recibir":
+            if len(arguments) not in {1, 2} or not isinstance(arguments[0], ForgeChannel):
+                raise CForgevError(f"Línea {name.line}: recibir requiere un canal")
+            timeout = None if len(arguments) == 1 else float(arguments[1]) / 1000.0
+            try: return arguments[0].values.get(timeout=timeout)
+            except queue.Empty as error: raise CForgevError(f"Línea {name.line}: canal vacío") from error
+        if name.value == "cerrar_canal":
+            if len(arguments) != 1 or not isinstance(arguments[0], ForgeChannel):
+                raise CForgevError(f"Línea {name.line}: cerrar_canal requiere un canal")
+            arguments[0].closed = True
+            return None
         if name.value == "forge_catalogo":
             if arguments:
                 raise CForgevError(f"Línea {name.line}: forge_catalogo no recibe argumentos")
@@ -1124,7 +1316,7 @@ class Interpreter:
                     f"Línea {name.line}: forge_hash requiere un ForgeValue serializable"
                 )
             canonical = json.dumps(
-                arguments[0], ensure_ascii=False, sort_keys=True,
+                universal_json_value(arguments[0]), ensure_ascii=False, sort_keys=True,
                 separators=(",", ":"),
             ).encode("utf-8")
             return hashlib.sha256(canonical).hexdigest()
@@ -1209,8 +1401,8 @@ class Interpreter:
                 raise CForgevError(f"Línea {name.line}: 'a_texto' requiere 1 argumento")
             return format_value(arguments[0])
         if name.value == "longitud":
-            if len(arguments) != 1 or not isinstance(arguments[0], (str, list, dict)):
-                raise CForgevError(f"Línea {name.line}: 'longitud' requiere texto, lista o mapa")
+            if len(arguments) != 1 or not isinstance(arguments[0], (str, list, dict, tuple, set)):
+                raise CForgevError(f"Línea {name.line}: 'longitud' requiere texto o colección")
             return len(arguments[0])
         if name.value == "agregar":
             if len(arguments) != 2 or not isinstance(arguments[0], list):
@@ -1443,6 +1635,10 @@ class Interpreter:
                     f"configura su adaptador mediante {setting}"
                 )
             raise CForgevError(f"Línea {name.line}: función desconocida '{name.value}'")
+        if function.is_async:
+            return ForgeTask(
+                _FORGE_EXECUTOR.submit(self.invoke_user_function, function, arguments, name.line)
+            )
         return self.invoke_user_function(function, arguments, name.line)
 
     def invoke_user_function(self, function: Function, arguments: list[object], line: int) -> object:
@@ -1451,6 +1647,9 @@ class Interpreter:
                 f"Línea {line}: '{function.name}' requiere {len(function.parameters)} "
                 f"argumentos, pero recibió {len(arguments)}"
             )
+        expected_parameters = function.parameter_types or ["cualquiera"] * len(function.parameters)
+        for parameter, expected, argument in zip(function.parameters, expected_parameters, arguments):
+            ensure_type(parameter, expected, argument, line)
         self.jit_counts[function.name] = self.jit_counts.get(function.name, 0) + 1
         local_variables = dict(self.variables)
         local_variables.update(zip(function.parameters, arguments))
@@ -1467,7 +1666,12 @@ class Interpreter:
         try:
             interpreter.run()
         except ReturnSignal as signal:
+            ensure_type(function.name, function.return_type, signal.value, line)
             return signal.value
+        if function.return_type not in {"cualquiera", "nulo"}:
+            raise CForgevError(
+                f"Línea {line}: '{function.name}' debe retornar {function.return_type}"
+            )
         return None
 
     def invoke_dynamic_library(
@@ -1491,7 +1695,7 @@ class Interpreter:
             if value is None:
                 command.append("n:")
             elif isinstance(value, bool):
-                command.append(f"i:{int(value)}")
+                command.append("b:true" if value else "b:false")
             elif isinstance(value, int) or (isinstance(value, float) and value.is_integer()):
                 command.append(f"i:{int(value)}")
             elif isinstance(value, float):
@@ -1513,6 +1717,10 @@ class Interpreter:
             return float(payload)
         if result_type == 3:
             return payload
+        if result_type == 4:
+            if payload not in {"verdadero", "falso"}:
+                raise CForgevError(f"Línea {line}: booleano ABI inválido")
+            return payload == "verdadero"
         raise CForgevError(f"Línea {line}: tipo ABI de retorno desconocido")
 
     def invoke_javascript(
@@ -1522,11 +1730,11 @@ class Interpreter:
             module = str((self.base_dir / module).resolve())
         marker = "__CFORGEV_JS_RESULT__"
         script = f'''(async () => {{
-globalThis.ForgeSymbols = {json.dumps({key: value for key, value in self.variables.items() if is_universal_data(value)}, ensure_ascii=False)};
+globalThis.ForgeSymbols = {json.dumps({key: universal_json_value(value) for key, value in self.variables.items() if is_universal_data(value)}, ensure_ascii=False)};
 const target = require({json.dumps(module)});
 const callable = target[{json.dumps(function)}] ?? target.default?.[{json.dumps(function)}];
 if (typeof callable !== "function") throw new Error("función JavaScript inexistente");
-const result = await callable(...{json.dumps(arguments, ensure_ascii=False)});
+const result = await callable(...{json.dumps(universal_json_value(arguments), ensure_ascii=False)});
 process.stdout.write("\\n{marker}" + JSON.stringify(result === undefined ? null : result));
 }})().catch(error => {{ console.error(error?.stack ?? String(error)); process.exit(1); }});
 '''
@@ -1675,6 +1883,8 @@ def calculate(left: object, op: Token, right: object) -> object:
 
 
 def format_value(value: object) -> str:
+    if isinstance(value, ForgeOption):
+        return f"algunos({format_value(value.value)})" if value.has_value else "ninguno"
     if isinstance(value, bool):
         return "verdadero" if value else "falso"
     if isinstance(value, float) and value.is_integer():
@@ -1683,12 +1893,19 @@ def format_value(value: object) -> str:
         return "nulo"
     if isinstance(value, list):
         return "[" + ", ".join(format_value(item) for item in value) + "]"
+    if isinstance(value, tuple):
+        suffix = "," if len(value) == 1 else ""
+        return "(" + ", ".join(format_value(item) for item in value) + suffix + ")"
+    if isinstance(value, set):
+        return "conjunto(" + ", ".join(sorted(format_value(item) for item in value)) + ")"
     if isinstance(value, dict):
         return "{" + ", ".join(f'"{key}": {format_value(item)}' for key, item in value.items()) + "}"
     return str(value)
 
 
 def value_type(value: object) -> str:
+    if isinstance(value, ForgeOption):
+        return "opcion"
     if isinstance(value, bool):
         return "booleano"
     if isinstance(value, (int, float)):
@@ -1697,6 +1914,10 @@ def value_type(value: object) -> str:
         return "texto"
     if isinstance(value, list):
         return "lista"
+    if isinstance(value, tuple):
+        return "tupla"
+    if isinstance(value, set):
+        return "conjunto"
     if isinstance(value, dict):
         return value.structure_name if isinstance(value, StructureValue) else "mapa"
     if value is None:
@@ -1707,16 +1928,32 @@ def value_type(value: object) -> str:
 def is_universal_data(value: object) -> bool:
     if value is None or isinstance(value, (bool, int, float, str)):
         return True
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple, set)):
         return all(is_universal_data(item) for item in value)
     if isinstance(value, dict):
         return all(isinstance(key, str) and is_universal_data(item) for key, item in value.items())
     return False
 
 
+def universal_json_value(value: object) -> object:
+    """Convierte colecciones C-Forge a una forma JSON estable para puentes externos."""
+    if isinstance(value, tuple):
+        return [universal_json_value(item) for item in value]
+    if isinstance(value, set):
+        return [universal_json_value(item) for item in sorted(value, key=format_value)]
+    if isinstance(value, list):
+        return [universal_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: universal_json_value(item) for key, item in value.items()}
+    return value
+
+
 def ensure_type(name: str, expected: str, value: object, line: int) -> None:
     actual = value_type(value)
-    if expected != "cualquiera" and expected != actual:
+    expected_base = expected.split("<", 1)[0]
+    if expected not in {"cualquiera", actual} and expected_base != actual and (
+        len(expected) != 1 or not expected.isupper()
+    ):
         raise CForgevError(
             f"Línea {line}: '{name}' es {expected} y no puede recibir {actual}"
         )
@@ -1734,6 +1971,11 @@ def execute(path: Path, program_arguments: list[str] | None = None) -> None:
     except OSError as error:
         raise CForgevError(f"No se pudo abrir {path}: {error}") from error
     try:
+        from compilador_nativo import Parser, StaticTypeAnalyzer
+        from cforge_memory import MemorySafetyAnalyzer
+        checked = Parser(tokenize(source)).program()
+        StaticTypeAnalyzer().analyze(checked)
+        MemorySafetyAnalyzer().analyze(checked)
         Interpreter(
             tokenize(source), base_dir=path.resolve().parent,
             program_arguments=program_arguments
@@ -2015,14 +2257,40 @@ def main() -> int:
                 print(f"{sys.argv[2]}:{item.line}:{item.column}: {item.severity} {item.code}: {item.message}")
             if not diagnostics: print(f"[OK] {sys.argv[2]}: sin errores")
         return 1 if any(item.severity == "error" for item in diagnostics) else 0
+    if len(sys.argv) >= 2 and sys.argv[1] == "parity":
+        from cforge_parity import compare_file, format_report, reports_json
+        arguments = sys.argv[2:]
+        json_output = "--json" in arguments
+        arguments = [argument for argument in arguments if argument != "--json"]
+        if not arguments:
+            print("Uso: cforge parity archivo.cfv [...] [--json]", file=sys.stderr)
+            return 2
+        try:
+            reports = [compare_file(Path(argument)) for argument in arguments]
+        except CForgevError as error:
+            print(f"[C-Forge Parity] {error}", file=sys.stderr)
+            return 1
+        if json_output:
+            print(reports_json(reports))
+        else:
+            print("\n\n".join(format_report(report) for report in reports))
+        return 0 if all(report.equal for report in reports) else 1
     if len(sys.argv) >= 2 and sys.argv[1] in {"vm", "bytecode", "debug"}:
-        from cforge_vm import VirtualMachine, compile_source, disassemble, execute_file
+        from cforge_vm import VirtualMachine, compile_file, compile_source, disassemble, execute_file, save_bytecode
         if len(sys.argv) < 3:
             print(f"Uso: cforge {sys.argv[1]} archivo.cfv [--break offset]", file=sys.stderr); return 2
         try:
             path = Path(sys.argv[2])
             if sys.argv[1] == "vm": execute_file(path)
-            elif sys.argv[1] == "bytecode": print(disassemble(compile_source(path.read_text(encoding="utf-8"))))
+            elif sys.argv[1] == "bytecode":
+                program = compile_file(path)
+                if len(sys.argv) == 5 and sys.argv[3] == "-o":
+                    destination = save_bytecode(program, Path(sys.argv[4]))
+                    print(f"Bytecode C-Forge creado: {destination}")
+                elif len(sys.argv) == 3:
+                    print(disassemble(program))
+                else:
+                    raise CForgevError("Uso: cforge bytecode archivo.cfv [-o programa.cfb]")
             else:
                 breakpoints: set[int] = set()
                 cursor = 3
@@ -2046,8 +2314,15 @@ def main() -> int:
             print("Uso: cforge lsp", file=sys.stderr); return 2
         from cforge_lsp import run
         return run()
+    if len(sys.argv) >= 2 and sys.argv[1] == "dap":
+        if len(sys.argv) != 2:
+            print("Uso: cforge dap", file=sys.stderr); return 2
+        from cforge_dap import run
+        return run()
     if len(sys.argv) >= 2 and sys.argv[1] == "pkg":
-        from cforge_packages import add, build_package, init, install_registry, list_packages, remove, search_registry
+        from cforge_packages import (add, build_package, generate_keypair, init,
+                                     install_registry, list_packages, remove,
+                                     search_registry, sign_package)
         action = sys.argv[2] if len(sys.argv) > 2 else ""
         try:
             if action == "init" and len(sys.argv) in {3, 4}:
@@ -2069,9 +2344,20 @@ def main() -> int:
             elif action == "build" and len(sys.argv) in {3, 4}:
                 archive, digest = build_package(Path.cwd(), Path(sys.argv[3]) if len(sys.argv) == 4 else Path("dist"))
                 print(f"Paquete creado: {archive}\nSHA-256: {digest}")
+            elif action == "keygen" and len(sys.argv) in {3, 4}:
+                directory = Path(sys.argv[3]) if len(sys.argv) == 4 else Path.home() / ".cforge" / "keys"
+                key_id = generate_keypair(directory / "publisher.pem", directory / "publisher.pub.pem")
+                print(f"Identidad Ed25519 creada: {directory}\nKey ID: {key_id}")
+            elif action == "sign" and len(sys.argv) in {7, 8}:
+                signature = sign_package(Path(sys.argv[3]), Path(sys.argv[4]), sys.argv[5], sys.argv[6],
+                                         Path(sys.argv[7]) if len(sys.argv) == 8 else None)
+                print(f"Firma de paquete creada: {signature}")
             else:
-                print("Uso: cforge pkg init [nombre] | add nombre ruta | remove nombre | list | search texto | install nombre [versión] | build [salida]", file=sys.stderr); return 2
-        except (CForgevError, OSError, ValueError) as error:
+                print("Uso: cforge pkg init [nombre] | add nombre ruta | remove nombre | list | search texto | install nombre [versión] | build [salida] | keygen [directorio] | sign archivo clave nombre versión [salida]", file=sys.stderr); return 2
+        # Los módulos opcionales pueden estar importados bajo el nombre de paquete
+        # mientras este archivo se ejecuta como __main__; captura sus errores de
+        # dominio sin exponer un traceback interno al usuario.
+        except Exception as error:
             print(f"[C-Forge Package Manager] {error}", file=sys.stderr); return 1
         return 0
     parser = argparse.ArgumentParser(prog="cforge", description="Intérprete de C-Forge")
@@ -2087,9 +2373,11 @@ def main() -> int:
     parser.add_argument("--vigilar", action="store_true", help="recargar el archivo conservando estado")
     parser.add_argument("--intervalo", type=float, default=0.5, help="segundos entre revisiones")
     parser.add_argument("--wasm", action="store_true", help="exportar un módulo WebAssembly .wat")
+    parser.add_argument("--llvm", action="store_true", help="exportar LLVM IR textual real (.ll)")
+    parser.add_argument("--compilar-llvm", action="store_true", help="compilar el núcleo numérico mediante LLVM IR y Clang")
     args, program_arguments = parser.parse_known_args()
     if args.archivo is None:
-        if args.compilar or args.salida or args.vincular or args.reparar or args.vigilar or args.wasm:
+        if args.compilar or args.salida or args.vincular or args.reparar or args.vigilar or args.wasm or args.llvm or args.compilar_llvm:
             parser.error("esta operación requiere un archivo .cfv")
         run_repl()
         return 0
@@ -2110,7 +2398,20 @@ def main() -> int:
                 args.archivo.write_text(repaired, encoding="utf-8")
                 print("[C-Forge Self-Healing] " + "; ".join(changes))
                 print(f"Respaldo creado: {backup}")
-        if args.wasm:
+        selected_backends = sum(bool(value) for value in (args.wasm, args.llvm, args.compilar_llvm, args.compilar))
+        if selected_backends > 1:
+            raise CForgevError("selecciona solo un backend: --compilar, --llvm, --compilar-llvm o --wasm")
+        if args.llvm:
+            from compilador_llvm import emit_file
+            output = args.salida or args.archivo.with_suffix(".ll")
+            emit_file(args.archivo, output)
+            print(f"LLVM IR C-Forge creado: {output}")
+        elif args.compilar_llvm:
+            from compilador_llvm import compile_native as compile_llvm_native
+            output = args.salida or args.archivo.with_suffix("")
+            compile_llvm_native(args.archivo, output, linked_sources=args.vincular)
+            print(f"Ejecutable LLVM C-Forge creado: {output}")
+        elif args.wasm:
             from compilador_wasm import compile_wasm
             output = args.salida or args.archivo.with_suffix(".wat")
             compile_wasm(args.archivo, output)
@@ -2140,10 +2441,15 @@ def main() -> int:
 
 def setup_environment() -> int:
     """Diagnostica dependencias sin modificar el equipo silenciosamente."""
-    print("C-Forge Setup 1.5.0 Developer Preview")
+    print("C-Forge Setup 1.6.0 Developer Preview")
     clang = shutil.which("clang++") is not None
     python = bool(getattr(sys, "frozen", False)) or shutil.which("python3") is not None
     node = shutil.which("node") is not None
+    try:
+        import cryptography  # noqa: F401
+        package_signatures = True
+    except ImportError:
+        package_signatures = False
     if sys.platform == "darwin":
         java = subprocess.run(
             ["/usr/libexec/java_home"], capture_output=True, text=True
@@ -2159,6 +2465,8 @@ def setup_environment() -> int:
     else:
         print("[FALTA] C++: instala clang++ o g++")
     print("[OK] Python 3 disponible" if python else "[FALTA] Python 3")
+    print("[OK] Paquetes: firmas Ed25519 disponibles" if package_signatures else
+          "[FALTA] Paquetes firmados: instala el componente cryptography")
     print("[OK] JavaScript/TypeScript: Node.js disponible" if node else "[OPCIONAL] Node.js no instalado")
     if java:
         print("[OK] Java: JDK y JVM disponibles")
@@ -2226,6 +2534,11 @@ Stmt = tuple
 class Program:
     functions: list[Stmt]
     statements: list[Stmt]
+    locations: dict[int, int] = None
+
+    def __post_init__(self) -> None:
+        if self.locations is None:
+            self.locations = {}
 
 
 class Parser:
@@ -2235,6 +2548,7 @@ class Parser:
         self.structures: set[str] = set()
         self.declared: set[str] = set()
         self.universal_imports: dict[str, tuple[str, str]] = {}
+        self.locations: dict[int, int] = {}
 
     def program(self) -> Program:
         functions: list[Stmt] = []
@@ -2242,15 +2556,48 @@ class Parser:
         while self.peek().kind != "EOF":
             statement = self.statement()
             (functions if statement[0] == "function" else statements).append(statement)
-        return Program(functions, statements)
+        return Program(functions, statements, self.locations)
 
     def statement(self) -> Stmt:
+        line = self.peek().line
+        statement = self._statement()
+        self.locations[id(statement)] = line
+        return statement
+
+    def _statement(self) -> Stmt:
+        if self.word("extern_c"):
+            checked = self.word("segura")
+            if not self.word("funcion"):
+                raise CForgevError("'extern_c' debe declarar una función (opcionalmente segura)")
+            name = self.ident("Se esperaba el símbolo C")
+            self.value("(", "Se esperaba '('")
+            parameters: list[str] = []
+            parameter_types: list[str] = []
+            if self.peek().value != ")":
+                while True:
+                    parameters.append(self.ident("Se esperaba un parámetro FFI"))
+                    self.value(":", "Los parámetros extern_c requieren tipo")
+                    parameter_types.append(self.parse_type())
+                    if not self.take(","):
+                        break
+            self.value(")", "Se esperaba ')'")
+            self.value(":", "extern_c requiere un tipo de retorno")
+            return_type = self.parse_type()
+            self.take(";")
+            self.declared.add(name)
+            return ("ffi_function", name, parameters, parameter_types, return_type, checked)
+        if self.word("region"):
+            return ("region", self.block())
+        if self.word("unsafe"):
+            return ("unsafe", self.block())
         if self.word("cluster"):
             declaration = self.statement()
             if declaration[0] == "let":
                 return declaration + (True,)
             if declaration[0] == "function":
-                return declaration + (True,)
+                while len(declaration) < 7:
+                    declaration += (False,)
+                return declaration[:7] + (True,)
             raise CForgevError("'cluster' solo puede modificar variables o funciones")
         if self.word("extern"):
             self.value("(", "Se esperaba '(' después de extern")
@@ -2275,8 +2622,37 @@ class Parser:
             else:
                 raise CForgevError("test requiere un nombre")
             return ("test", name, self.block())
+        if self.word("interfaz"):
+            name = self.ident("Se esperaba el nombre de la interfaz")
+            self.value("{", "Se esperaba '{'")
+            methods: list[Stmt] = []
+            while self.peek().value != "}" and self.peek().kind != "EOF":
+                if not self.word("metodo"):
+                    raise CForgevError(f"Línea {self.peek().line}: se esperaba 'metodo'")
+                method = self.ident("Se esperaba el nombre del método")
+                self.value("(", "Se esperaba '('")
+                parameter_types: list[str] = []
+                if self.peek().value != ")":
+                    while True:
+                        self.ident("Se esperaba un parámetro")
+                        parameter_types.append(self.parse_type() if self.take(":") else "cualquiera")
+                        if not self.take(","):
+                            break
+                self.value(")", "Se esperaba ')'")
+                return_type = self.parse_type() if self.take(":") else "cualquiera"
+                self.take(";")
+                methods.append(("interface_method", method, parameter_types, return_type))
+            self.value("}", "Falta '}' para cerrar la interfaz")
+            self.structures.add(name)
+            return ("interface", name, methods)
         if self.word("clase"):
             name = self.ident("Se esperaba el nombre de la clase")
+            interfaces: list[str] = []
+            if self.word("implementa"):
+                while True:
+                    interfaces.append(self.ident("Se esperaba una interfaz"))
+                    if not self.take(","):
+                        break
             self.value("{", "Se esperaba '{'")
             fields: list[tuple[str, str]] = []
             methods: list[Stmt] = []
@@ -2284,25 +2660,28 @@ class Parser:
                 if self.word("campo"):
                     field = self.ident("Se esperaba el nombre del campo")
                     self.value(":", "Se esperaba ':'")
-                    fields.append((field, self.ident("Se esperaba el tipo del campo")))
+                    fields.append((field, self.parse_type()))
                     self.take(";")
                     continue
                 if self.word("metodo"):
                     method = self.ident("Se esperaba el nombre del método")
                     self.value("(", "Se esperaba '('")
                     parameters: list[str] = []
+                    parameter_types: list[str] = []
                     if self.peek().value != ")":
                         while True:
                             parameters.append(self.ident("Se esperaba un parámetro"))
+                            parameter_types.append(self.parse_type() if self.take(":") else "cualquiera")
                             if not self.take(","):
                                 break
                     self.value(")", "Se esperaba ')'")
-                    methods.append(("method", name, method, parameters, self.block()))
+                    return_type = self.parse_type() if self.take(":") else "cualquiera"
+                    methods.append(("method", name, method, parameters, self.block(), parameter_types, return_type))
                     continue
                 raise CForgevError(f"Línea {self.peek().line}: se esperaba 'campo' o 'metodo'")
             self.value("}", "Falta '}' para cerrar la clase")
             self.structures.add(name)
-            return ("class", name, fields, methods)
+            return ("class", name, fields, methods, interfaces)
         if self.word("estructura"):
             name = self.ident("Se esperaba el nombre de la estructura")
             self.value("{", "Se esperaba '{'")
@@ -2310,7 +2689,7 @@ class Parser:
             while self.peek().value != "}" and self.peek().kind != "EOF":
                 field = self.ident("Se esperaba el nombre del campo")
                 self.value(":", "Se esperaba ':'")
-                field_type = self.ident("Se esperaba el tipo del campo")
+                field_type = self.parse_type()
                 fields.append((field, field_type))
                 self.take(";")
             self.value("}", "Falta '}' para cerrar la estructura")
@@ -2342,26 +2721,47 @@ class Parser:
             error_name = self.ident("Se esperaba el nombre para el error")
             self.value(")", "Se esperaba ')'")
             return ("try", protected, error_name, self.block())
-        if self.word("funcion"):
+        async_function = False
+        if self.word("async"):
+            if not self.word("funcion"):
+                raise CForgevError("'async' debe preceder una función")
+            async_function = True
+        elif self.word("funcion"):
+            async_function = False
+        else:
+            async_function = None
+        if async_function is not None:
             name = self.ident("Se esperaba el nombre de la función")
+            type_parameters: list[str] = []
+            if self.take("<"):
+                while True:
+                    type_parameters.append(self.ident("Se esperaba un parámetro de tipo"))
+                    if not self.take(","):
+                        break
+                self.value(">", "Se esperaba '>'")
             self.value("(", "Se esperaba '('")
             parameters: list[str] = []
+            parameter_types: list[str] = []
             if self.peek().value != ")":
                 while True:
                     parameters.append(self.ident("Se esperaba un parámetro"))
+                    parameter_types.append(self.parse_type() if self.take(":") else "cualquiera")
                     if not self.take(","):
                         break
             self.value(")", "Se esperaba ')'")
-            return ("function", name, parameters, self.block())
+            return_type = self.parse_type() if self.take(":") else "cualquiera"
+            return ("function", name, parameters, self.block(), parameter_types, return_type, async_function, False, type_parameters)
         if self.word("sea"):
             name = self.ident("Se esperaba el nombre de la variable")
             self.declared.add(name)
             declared_type = None
             if self.take(":"):
-                declared_type = self.ident("Se esperaba un tipo")
-                if declared_type not in {
-                    "numero", "texto", "booleano", "lista", "mapa", "nulo", "cualquiera"
-                } and declared_type not in self.structures:
+                declared_type = self.parse_type()
+                base_type = declared_type.split("<", 1)[0]
+                if base_type not in {
+                    "numero", "texto", "booleano", "lista", "mapa", "tupla", "conjunto",
+                    "opcion", "nulo", "cualquiera"
+                } and base_type not in self.structures:
                     raise CForgevError(f"Tipo desconocido '{declared_type}'")
             self.value("=", "Se esperaba '='")
             expression = self.expression()
@@ -2515,6 +2915,8 @@ class Parser:
         return expression
 
     def unary(self) -> Expr:
+        if self.word("await"):
+            return ("await", self.unary())
         if self.word("no"):
             return ("unary", "no", self.unary())
         if self.take("-"):
@@ -2561,12 +2963,24 @@ class Parser:
                         if not self.take(","):
                             break
                 self.value(")", "Se esperaba ')' después de los argumentos")
+                if token.value == "conjunto":
+                    return ("set", arguments)
                 return ("call", token.value, arguments)
             return ("variable", token.value)
         if token.value == "(":
-            expression = self.expression()
-            self.value(")", "Se esperaba ')'")
-            return expression
+            if self.take(")"):
+                return ("tuple", [])
+            first = self.expression()
+            if not self.take(","):
+                self.value(")", "Se esperaba ')'")
+                return first
+            values = [first]
+            while self.peek().value != ")":
+                values.append(self.expression())
+                if not self.take(","):
+                    break
+            self.value(")", "Se esperaba ')' para cerrar la tupla")
+            return ("tuple", values)
         if token.value == "[":
             values: list[Expr] = []
             if self.peek().value != "]":
@@ -2600,6 +3014,19 @@ class Parser:
             raise CForgevError(f"Línea {self.peek().line}: {message}")
         return self.advance().value
 
+    def parse_type(self) -> str:
+        """Lee tipos nominales y aplicaciones genéricas en una forma canónica."""
+        name = self.ident("Se esperaba un tipo")
+        if not self.take("<"):
+            return name
+        arguments: list[str] = []
+        while True:
+            arguments.append(self.parse_type())
+            if not self.take(","):
+                break
+        self.value(">", "Se esperaba '>' para cerrar el tipo genérico")
+        return f"{name}<{','.join(arguments)}>"
+
     def value(self, value: str, message: str) -> None:
         if not self.take(value):
             raise CForgevError(f"Línea {self.peek().line}: {message}")
@@ -2626,13 +3053,89 @@ class Parser:
 class StaticTypeAnalyzer:
     """Infiere tipos evidentes y rechaza contradicciones antes de invocar Clang."""
 
+    def __init__(self) -> None:
+        self.signatures: dict[str, tuple[list[str], str, bool, list[str]]] = {}
+        self.expected_return = "cualquiera"
+        self.interfaces: dict[str, dict[str, tuple[list[str], str]]] = {}
+
     def analyze(self, program: Program) -> None:
+        self.signatures = {
+            function[1]: (
+                list(function[4]) if len(function) > 4 else ["cualquiera"] * len(function[2]),
+                function[5] if len(function) > 5 else "cualquiera",
+                bool(function[6]) if len(function) > 6 else False,
+                list(function[8]) if len(function) > 8 else [],
+            ) for function in program.functions
+        }
+        for declaration in program.statements:
+            if declaration[0] == "ffi_function":
+                self.signatures[declaration[1]] = (
+                    list(declaration[3]), declaration[4], False, []
+                )
+        self.interfaces = {
+            statement[1]: {
+                method[1]: (list(method[2]), method[3]) for method in statement[2]
+            }
+            for statement in program.statements if statement[0] == "interface"
+        }
+        self._validate_interfaces(program.statements)
         global_types: dict[str, str] = {}
         self.statements(program.statements, global_types)
         for function in program.functions:
             function_types = dict(global_types)
-            function_types.update({parameter: "cualquiera" for parameter in function[2]})
+            parameter_types, return_type, _, _ = self.signatures[function[1]]
+            function_types.update(dict(zip(function[2], parameter_types)))
+            previous = self.expected_return
+            self.expected_return = return_type
             self.statements(function[3], function_types)
+            self.expected_return = previous
+
+    @staticmethod
+    def _same_contract(wanted: str, actual: str) -> bool:
+        return wanted == "cualquiera" or actual == "cualquiera" or wanted == actual
+
+    @staticmethod
+    def _compatible(wanted: str, actual: str) -> bool:
+        if wanted == "cualquiera" or actual == "cualquiera" or wanted == actual:
+            return True
+        wanted_base, actual_base = wanted.split("<", 1)[0], actual.split("<", 1)[0]
+        if wanted_base != actual_base:
+            return False
+        if "<" not in wanted or "<" not in actual:
+            return True
+        # Un constructor vacío como ninguno() conserva el contenedor, pero deja
+        # que la anotación del destino determine el parámetro concreto.
+        return actual == f"{actual_base}<cualquiera>"
+
+    def _validate_interfaces(self, statements: list[Stmt]) -> None:
+        for statement in statements:
+            if statement[0] != "class":
+                continue
+            implemented = statement[4] if len(statement) > 4 else []
+            methods = {method[2]: method for method in statement[3]}
+            for interface_name in implemented:
+                contract = self.interfaces.get(interface_name)
+                if contract is None:
+                    raise CForgevError(
+                        f"Inferencia estática: interfaz desconocida '{interface_name}'"
+                    )
+                for method_name, (wanted_parameters, wanted_return) in contract.items():
+                    method = methods.get(method_name)
+                    if method is None:
+                        raise CForgevError(
+                            f"Inferencia estática: clase '{statement[1]}' no implementa "
+                            f"'{interface_name}.{method_name}'"
+                        )
+                    actual_parameters = list(method[5]) if len(method) > 5 else ["cualquiera"] * len(method[3])
+                    actual_return = method[6] if len(method) > 6 else "cualquiera"
+                    if len(actual_parameters) != len(wanted_parameters) or any(
+                        not self._same_contract(wanted, actual)
+                        for wanted, actual in zip(wanted_parameters, actual_parameters)
+                    ) or not self._same_contract(wanted_return, actual_return):
+                        raise CForgevError(
+                            f"Inferencia estática: '{statement[1]}.{method_name}' no cumple "
+                            f"el contrato de '{interface_name}'"
+                        )
 
     def statements(self, statements: list[Stmt], types: dict[str, str]) -> None:
         for statement in statements:
@@ -2640,15 +3143,17 @@ class StaticTypeAnalyzer:
             if kind == "let":
                 inferred = self.expression(statement[3], types)
                 declared = statement[2] or inferred
-                if statement[2] and inferred != "cualquiera" and statement[2] != inferred:
+                if statement[2] and not self._compatible(statement[2], inferred):
                     raise CForgevError(
                         f"Inferencia estática: '{statement[1]}' fue declarada {statement[2]} pero recibe {inferred}"
                     )
+                if statement[2] and "<" not in statement[2] and inferred.startswith(statement[2] + "<"):
+                    declared = inferred
                 types[statement[1]] = declared
             elif kind == "assign":
                 inferred = self.expression(statement[2], types)
                 expected = types.get(statement[1], "cualquiera")
-                if expected != "cualquiera" and inferred != "cualquiera" and expected != inferred:
+                if not self._compatible(expected, inferred):
                     raise CForgevError(
                         f"Inferencia estática: '{statement[1]}' es {expected} y no puede recibir {inferred}"
                     )
@@ -2666,14 +3171,22 @@ class StaticTypeAnalyzer:
                 self.statements(statement[3], handler_types)
             elif kind == "gpu":
                 self.statements(statement[1], types)
+            elif kind in {"region", "unsafe"}:
+                self.statements(statement[1], types)
             elif kind == "extern":
                 validate_foreign_memory(statement[1], statement[2])
             elif kind == "test":
                 self.statements(statement[2], dict(types))
             elif kind in {"print", "return", "expression"}:
-                self.expression(statement[1], types)
+                inferred = self.expression(statement[1], types)
+                if kind == "return" and self.expected_return not in {"cualquiera", inferred} and inferred != "cualquiera":
+                    raise CForgevError(
+                        f"Inferencia estática: retorno {inferred}, se esperaba {self.expected_return}"
+                    )
             elif kind == "universal_import":
                 types[statement[2]] = "cualquiera"
+            elif kind == "ffi_function":
+                continue
 
     def expression(self, expression: Expr, types: dict[str, str]) -> str:
         kind = expression[0]
@@ -2682,18 +3195,46 @@ class StaticTypeAnalyzer:
         if kind == "bool": return "booleano"
         if kind == "null": return "nulo"
         if kind == "list":
-            for value in expression[1]: self.expression(value, types)
-            return "lista"
+            elements = [self.expression(value, types) for value in expression[1]]
+            concrete = {value for value in elements if value != "cualquiera"}
+            if len(concrete) > 1:
+                return "lista<cualquiera>"
+            return f"lista<{next(iter(concrete), 'cualquiera')}>"
+        if kind == "tuple":
+            elements = [self.expression(value, types) for value in expression[1]]
+            return f"tupla<{','.join(elements)}>"
+        if kind == "set":
+            elements = [self.expression(value, types) for value in expression[1]]
+            concrete = {value for value in elements if value != "cualquiera"}
+            if len(concrete) > 1:
+                raise CForgevError("Inferencia estática: un conjunto requiere elementos homogéneos")
+            return f"conjunto<{next(iter(concrete), 'cualquiera')}>"
         if kind == "map":
+            values: list[str] = []
             for key, value in expression[1]:
-                self.expression(key, types); self.expression(value, types)
-            return "mapa"
+                key_type = self.expression(key, types)
+                if key_type not in {"texto", "cualquiera"}:
+                    raise CForgevError("Inferencia estática: la clave de un mapa debe ser texto")
+                values.append(self.expression(value, types))
+            concrete = {value for value in values if value != "cualquiera"}
+            return f"mapa<{next(iter(concrete))}>" if len(concrete) == 1 else "mapa"
         if kind == "variable": return types.get(expression[1], "cualquiera")
         if kind == "unary":
             value_type = self.expression(expression[2], types)
             if expression[1] == "-" and value_type not in {"numero", "cualquiera"}:
                 raise CForgevError("Inferencia estática: '-' requiere un número")
             return "booleano" if expression[1] == "no" else "numero"
+        if kind == "await":
+            inner = expression[1]
+            if inner[0] == "call" and inner[1] in self.signatures:
+                expected, returned, asynchronous, type_parameters = self.signatures[inner[1]]
+                if not asynchronous:
+                    raise CForgevError(f"Inferencia estática: await requiere una función async")
+                # Reutiliza la validación de argumentos de la llamada.
+                self.expression(inner, types)
+                return returned
+            self.expression(inner, types)
+            return "cualquiera"
         if kind == "binary":
             left, right = self.expression(expression[2], types), self.expression(expression[3], types)
             if expression[1] in {"==", "!=", ">", ">=", "<", "<=", "y", "o"}:
@@ -2710,7 +3251,44 @@ class StaticTypeAnalyzer:
                 )
             return left if left == right else "cualquiera"
         if kind == "call":
-            for argument in expression[2]: self.expression(argument, types)
+            argument_types = [self.expression(argument, types) for argument in expression[2]]
+            if expression[1] == "algunos":
+                if len(argument_types) != 1:
+                    raise CForgevError("Inferencia estática: algunos requiere un argumento")
+                return f"opcion<{argument_types[0]}>"
+            if expression[1] == "ninguno":
+                if argument_types:
+                    raise CForgevError("Inferencia estática: ninguno no recibe argumentos")
+                return "opcion<cualquiera>"
+            if expression[1] == "es_algunos":
+                if len(argument_types) != 1 or not argument_types[0].startswith("opcion"):
+                    raise CForgevError("Inferencia estática: es_algunos requiere una opcion")
+                return "booleano"
+            if expression[1] == "desenvolver":
+                if len(argument_types) != 1 or not argument_types[0].startswith("opcion"):
+                    raise CForgevError("Inferencia estática: desenvolver requiere una opcion")
+                option_type = argument_types[0]
+                return option_type[7:-1] if option_type.startswith("opcion<") else "cualquiera"
+            if expression[1] in self.signatures:
+                expected, returned, asynchronous, type_parameters = self.signatures[expression[1]]
+                if len(expected) != len(argument_types):
+                    raise CForgevError(
+                        f"Inferencia estática: '{expression[1]}' requiere {len(expected)} argumentos"
+                    )
+                substitutions: dict[str, str] = {}
+                for index, (wanted, actual) in enumerate(zip(expected, argument_types), 1):
+                    if wanted in type_parameters:
+                        previous = substitutions.setdefault(wanted, actual)
+                        if previous != "cualquiera" and actual != "cualquiera" and previous != actual:
+                            raise CForgevError(
+                                f"Inferencia estática: el genérico '{wanted}' recibió {previous} y {actual}"
+                            )
+                    elif not self._compatible(wanted, actual):
+                        raise CForgevError(
+                            f"Inferencia estática: argumento {index} de '{expression[1]}' requiere {wanted}, recibió {actual}"
+                        )
+                resolved_return = substitutions.get(returned, returned)
+                return "tarea" if asynchronous else resolved_return
             return "cualquiera"
         if kind == "method_call":
             self.expression(expression[1], types)
@@ -2719,15 +3297,28 @@ class StaticTypeAnalyzer:
         if kind == "field":
             self.expression(expression[1], types); return "cualquiera"
         if kind == "index":
-            self.expression(expression[1], types); self.expression(expression[2], types)
+            owner = self.expression(expression[1], types)
+            index = self.expression(expression[2], types)
+            if owner.startswith("mapa<") and owner.endswith(">"):
+                return owner[5:-1]
+            if owner.startswith("tupla<") and owner.endswith(">"):
+                if expression[2][0] != "number" or "." in expression[2][1]:
+                    raise CForgevError("Inferencia estática: el índice de tupla debe ser constante entero")
+                elements = owner[6:-1].split(",") if owner[6:-1] else []
+                position = int(expression[2][1])
+                if position < 0 or position >= len(elements):
+                    raise CForgevError("Inferencia estática: índice de tupla fuera de rango")
+                return elements[position]
             return "cualquiera"
         return "cualquiera"
 
 
 RUNTIME = r'''#include <algorithm>
+#include <atomic>
 #include "cforge_shared_arena.h"
 #include <cmath>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -2745,6 +3336,7 @@ RUNTIME = r'''#include <algorithm>
 #include <vector>
 #include <cstring>
 #include <cstdint>
+#include <deque>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -2766,27 +3358,39 @@ RUNTIME = r'''#include <algorithm>
 #ifdef CFV_WITH_JNI
 #include <jni.h>
 #endif
-struct ForgeValue;struct CfvDenseMatrix;
-using Value=ForgeValue;using Lista=std::shared_ptr<std::vector<ForgeValue>>;using Mapa=std::shared_ptr<std::map<std::string,ForgeValue>>;using FastArray=std::shared_ptr<std::vector<double>>;using DenseMatrix=std::shared_ptr<CfvDenseMatrix>;
+struct ForgeValue;struct CfvDenseMatrix;struct CfvTuple;struct CfvSet;
+using Value=ForgeValue;using Lista=std::shared_ptr<std::vector<ForgeValue>>;using Mapa=std::shared_ptr<std::map<std::string,ForgeValue>>;using FastArray=std::shared_ptr<std::vector<double>>;using DenseMatrix=std::shared_ptr<CfvDenseMatrix>;using Tupla=std::shared_ptr<CfvTuple>;using Conjunto=std::shared_ptr<CfvSet>;
 struct CfvDenseMatrix{size_t rows=0,columns=0;std::vector<double>values;};
-struct ForgeValue{std::variant<std::monostate,double,std::string,bool,Lista,Mapa,FastArray,DenseMatrix>data;std::string origin="cforgev";ForgeValue()=default;ForgeValue(double v):data(v){}ForgeValue(std::string v):data(std::move(v)){}ForgeValue(const char*v):data(std::string(v)){}ForgeValue(bool v):data(v){}ForgeValue(Lista v):data(std::move(v)){}ForgeValue(Mapa v):data(std::move(v)){}ForgeValue(FastArray v):data(std::move(v)){}ForgeValue(DenseMatrix v):data(std::move(v)){}size_t index()const{return data.index();}};
+struct ForgeValue{std::variant<std::monostate,double,std::string,bool,Lista,Mapa,FastArray,DenseMatrix,Tupla,Conjunto>data;std::string origin="cforgev";ForgeValue()=default;ForgeValue(double v):data(v){}ForgeValue(std::string v):data(std::move(v)){}ForgeValue(const char*v):data(std::string(v)){}ForgeValue(bool v):data(v){}ForgeValue(Lista v):data(std::move(v)){}ForgeValue(Mapa v):data(std::move(v)){}ForgeValue(FastArray v):data(std::move(v)){}ForgeValue(DenseMatrix v):data(std::move(v)){}ForgeValue(Tupla v):data(std::move(v)){}ForgeValue(Conjunto v):data(std::move(v)){}size_t index()const{return data.index();}};
+struct CfvTuple{std::vector<ForgeValue>values;};struct CfvSet{std::vector<ForgeValue>values;};
 static ForgeValue cfv_origin(ForgeValue value,std::string origin){value.origin=std::move(origin);return value;}
-enum CfvType{CFV_NULL=0,CFV_INTEGER=1,CFV_DECIMAL=2,CFV_TEXT=3};
+enum CfvType{CFV_NULL=0,CFV_INTEGER=1,CFV_DECIMAL=2,CFV_TEXT=3,CFV_BOOLEAN=4,CFV_LIST=5,CFV_MAP=6,CFV_RECORD=7};
 using CfvReleaseFunction=void(*)(void*);
 struct CfvValue{int32_t type;int64_t integer;double decimal;const char* text;void*owner;CfvReleaseFunction release;};
 using CfvForeignFunction=int(*)(const CfvValue*,size_t,CfvValue*,char*,size_t);
+static constexpr uint32_t CFV_ABI_V2=0x00020000u;
+static constexpr uint64_t CFV_V2_BORROWED=0x00000001ull,CFV_V2_OWNED=0x00000002ull;
+static constexpr uint32_t CFV_V2_MAX_DEPTH=64u;
+struct CfvValueV2{uint32_t struct_size;uint32_t type;uint64_t flags;uint64_t length;int64_t integer;double decimal;const void*data;void*owner;CfvReleaseFunction release;};
+struct CfvMapEntryV2{CfvValueV2 key;CfvValueV2 value;};
+struct CfvRecordFieldV2{const char*name;uint64_t name_length;CfvValueV2 value;};
+struct CfvRecordV2{const char*type_name;uint64_t type_name_length;const CfvRecordFieldV2*fields;uint64_t field_count;};
+using CfvForeignFunctionV2=int(*)(uint32_t,const CfvValueV2*,size_t,CfvValueV2*,char*,size_t);
 #ifdef CFV_WITH_JNI
 class CfvJvmRuntime{JavaVM*vm_=nullptr;JNIEnv*env_=nullptr;public:CfvJvmRuntime(){JavaVMInitArgs args{};JavaVMOption options[1];options[0].optionString=(char*)"-Djava.class.path=.";args.version=JNI_VERSION_1_8;args.nOptions=1;args.options=options;args.ignoreUnrecognized=JNI_FALSE;if(JNI_CreateJavaVM(&vm_,(void**)&env_,&args)!=JNI_OK)throw std::runtime_error("no se pudo crear JVM");}~CfvJvmRuntime(){if(vm_)vm_->DestroyJavaVM();}JNIEnv*env()const{return env_;}CfvJvmRuntime(const CfvJvmRuntime&)=delete;CfvJvmRuntime&operator=(const CfvJvmRuntime&)=delete;};
 #endif
 static std::map<std::string,CfvForeignFunction>&cfv_registry(){static std::map<std::string,CfvForeignFunction>value;return value;}
+static std::map<std::string,CfvForeignFunctionV2>&cfv_registry_v2(){static std::map<std::string,CfvForeignFunctionV2>value;return value;}
 static std::mutex cfv_symbol_mutex;static std::map<std::string,ForgeValue*>cfv_symbols;
 static void cfv_share_symbol(const std::string&name,ForgeValue*value){std::lock_guard<std::mutex>lock(cfv_symbol_mutex);cfv_symbols[name]=value;}
 static ForgeValue cfv_symbol(const std::string&name){std::lock_guard<std::mutex>lock(cfv_symbol_mutex);auto found=cfv_symbols.find(name);if(found==cfv_symbols.end()||!found->second)throw std::runtime_error("símbolo global desconocido: "+name);return *found->second;}
 static ForgeValue cfv_symbol_snapshot(){std::lock_guard<std::mutex>lock(cfv_symbol_mutex);auto map=std::make_shared<std::map<std::string,ForgeValue>>();for(const auto&[name,value]:cfv_symbols)if(value)(*map)[name]=*value;return map;}
 #ifdef _WIN32
 extern "C" __declspec(dllexport) int cfv_register_function(const char*name,CfvForeignFunction fn){if(!name||!fn)return 1;cfv_registry()[name]=fn;return 0;}
+extern "C" __declspec(dllexport) int cfv_register_function_v2(const char*name,CfvForeignFunctionV2 fn){if(!name||!fn)return 1;cfv_registry_v2()[name]=fn;return 0;}
 #else
 extern "C" __attribute__((visibility("default"))) int cfv_register_function(const char*name,CfvForeignFunction fn){if(!name||!fn)return 1;cfv_registry()[name]=fn;return 0;}
+extern "C" __attribute__((visibility("default"))) int cfv_register_function_v2(const char*name,CfvForeignFunctionV2 fn){if(!name||!fn)return 1;cfv_registry_v2()[name]=fn;return 0;}
 #endif
 static double numero(const Value& v) { if (auto p=std::get_if<double>(&v.data)) return *p; throw std::runtime_error("se esperaba un número"); }
 static bool verdad(const Value& v) { if (auto p=std::get_if<bool>(&v.data)) return *p; throw std::runtime_error("se esperaba verdadero o falso"); }
@@ -2795,9 +3399,9 @@ static Value resta(const Value&a,const Value&b){return numero(a)-numero(b);} sta
 static Value divide(const Value&a,const Value&b){double d=numero(b);if(d==0)throw std::runtime_error("no se puede dividir por cero");return numero(a)/d;}
 static Value compara(const Value&a,const Value&b,const std::string&o){if(o=="==")return a.data==b.data;if(o=="!=")return a.data!=b.data;if(a.index()==1&&b.index()==1){double x=numero(a),y=numero(b);if(o==">")return x>y;if(o==">=")return x>=y;if(o=="<")return x<y;return x<=y;}if(a.index()==2&&b.index()==2){auto x=std::get<std::string>(a.data),y=std::get<std::string>(b.data);if(o==">")return x>y;if(o==">=")return x>=y;if(o=="<")return x<y;return x<=y;}throw std::runtime_error("comparación entre tipos incompatibles");}
 static std::string cfv_number_text(double value){std::ostringstream stream;if(std::floor(value)==value)stream<<(long long)value;else stream<<value;return stream.str();}
-static std::string texto(const Value&v){if(v.index()==0)return "nulo";if(auto p=std::get_if<double>(&v.data))return cfv_number_text(*p);if(auto p=std::get_if<std::string>(&v.data))return *p;if(auto p=std::get_if<bool>(&v.data))return *p?"verdadero":"falso";if(auto p=std::get_if<Lista>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=", ";s+=texto((*p)->at(i));}return s+"]";}if(auto p=std::get_if<Mapa>(&v.data)){std::string s="{";bool first=true;for(auto&[k,x]:**p){if(!first)s+=", ";first=false;s+="\""+k+"\": "+texto(x);}return s+"}";}if(auto p=std::get_if<FastArray>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=", ";s+=cfv_number_text((*p)->at(i));}return s+"]";}if(auto p=std::get_if<DenseMatrix>(&v.data)){std::string s="[";for(size_t row=0;row<(*p)->rows;++row){if(row)s+=", ";s+="[";for(size_t column=0;column<(*p)->columns;++column){if(column)s+=", ";s+=cfv_number_text((*p)->values[row*(*p)->columns+column]);}s+="]";}return s+"]";}throw std::runtime_error("ForgeValue desconocido");}
+static std::string texto(const Value&v){if(v.index()==0)return "nulo";if(auto p=std::get_if<double>(&v.data))return cfv_number_text(*p);if(auto p=std::get_if<std::string>(&v.data))return *p;if(auto p=std::get_if<bool>(&v.data))return *p?"verdadero":"falso";if(auto p=std::get_if<Lista>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=", ";s+=texto((*p)->at(i));}return s+"]";}if(auto p=std::get_if<Mapa>(&v.data)){auto marker=(*p)->find("__opcion");if(marker!=(*p)->end()){auto has=(*p)->find("tiene");if(has==(*p)->end()||!verdad(has->second))return "ninguno";return "algunos("+texto((*p)->at("valor"))+")";}std::string s="{";bool first=true;for(auto&[k,x]:**p){if(!first)s+=", ";first=false;s+="\""+k+"\": "+texto(x);}return s+"}";}if(auto p=std::get_if<FastArray>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=", ";s+=cfv_number_text((*p)->at(i));}return s+"]";}if(auto p=std::get_if<DenseMatrix>(&v.data)){std::string s="[";for(size_t row=0;row<(*p)->rows;++row){if(row)s+=", ";s+="[";for(size_t column=0;column<(*p)->columns;++column){if(column)s+=", ";s+=cfv_number_text((*p)->values[row*(*p)->columns+column]);}s+="]";}return s+"]";}if(auto p=std::get_if<Tupla>(&v.data)){std::string s="(";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=", ";s+=texto((*p)->values[i]);}if((*p)->values.size()==1)s+=",";return s+")";}if(auto p=std::get_if<Conjunto>(&v.data)){std::string s="conjunto(";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=", ";s+=texto((*p)->values[i]);}return s+")";}throw std::runtime_error("ForgeValue desconocido");}
 static std::string cfv_json_escape(const std::string&input){std::string out="\"";for(unsigned char c:input){switch(c){case '\"':out+="\\\"";break;case '\\':out+="\\\\";break;case '\n':out+="\\n";break;case '\r':out+="\\r";break;case '\t':out+="\\t";break;default:if(c<32){char b[7];std::snprintf(b,sizeof(b),"\\u%04x",c);out+=b;}else out+=(char)c;}}return out+"\"";}
-static std::string cfv_canonical_json(const Value&v){if(v.index()==0)return "null";if(auto p=std::get_if<double>(&v.data))return cfv_number_text(*p);if(auto p=std::get_if<std::string>(&v.data))return cfv_json_escape(*p);if(auto p=std::get_if<bool>(&v.data))return *p?"true":"false";if(auto p=std::get_if<Lista>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=",";s+=cfv_canonical_json((*p)->at(i));}return s+"]";}if(auto p=std::get_if<Mapa>(&v.data)){std::string s="{";bool first=true;for(const auto&[k,x]:**p){if(!first)s+=",";first=false;s+=cfv_json_escape(k)+":"+cfv_canonical_json(x);}return s+"}";}return cfv_json_escape(texto(v));}
+static std::string cfv_canonical_json(const Value&v){if(v.index()==0)return "null";if(auto p=std::get_if<double>(&v.data))return cfv_number_text(*p);if(auto p=std::get_if<std::string>(&v.data))return cfv_json_escape(*p);if(auto p=std::get_if<bool>(&v.data))return *p?"true":"false";if(auto p=std::get_if<Lista>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=",";s+=cfv_canonical_json((*p)->at(i));}return s+"]";}if(auto p=std::get_if<Mapa>(&v.data)){std::string s="{";bool first=true;for(const auto&[k,x]:**p){if(!first)s+=",";first=false;s+=cfv_json_escape(k)+":"+cfv_canonical_json(x);}return s+"}";}if(auto p=std::get_if<Tupla>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=",";s+=cfv_canonical_json((*p)->values[i]);}return s+"]";}if(auto p=std::get_if<Conjunto>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=",";s+=cfv_canonical_json((*p)->values[i]);}return s+"]";}return cfv_json_escape(texto(v));}
 struct CfvArenaRuntime{std::filesystem::path path;std::unique_ptr<cforge::arena::ForgeSharedArena>arena;std::mutex mutex;std::map<std::string,cforge::arena::Offset>latest;CfvArenaRuntime(){auto id=
 #ifdef _WIN32
 (unsigned long long)GetCurrentProcessId();
@@ -2811,12 +3415,12 @@ static Value cfv_arena_estado(){auto&runtime=cfv_arena_runtime();auto out=std::m
 static Value cfv_catalogo(){auto out=std::make_shared<std::map<std::string,Value>>();(*out)["ia_"]=std::string("python");(*out)["ui_"]=std::string("java");(*out)["web_"]=std::string("javascript");return out;}
 static Value cfv_catalog_dispatch(const std::string&,const std::string&,const Value&);
 static Value cfv_compat_append(Value collection,Value item){auto list=std::get_if<Lista>(&collection.data);if(!list)throw std::runtime_error("append/push requiere una lista");(*list)->push_back(std::move(item));cfv_arena_stage(collection,"compat_collection");return Value{};}
-static Value cfv_compat_length(Value collection){cfv_arena_stage(collection,"compat_length");if(auto p=std::get_if<std::string>(&collection.data))return (double)p->size();if(auto p=std::get_if<Lista>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<Mapa>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<FastArray>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<DenseMatrix>(&collection.data))return (double)(*p)->rows;throw std::runtime_error("length/len requiere texto o colección");}
+static Value cfv_compat_length(Value collection){cfv_arena_stage(collection,"compat_length");if(auto p=std::get_if<std::string>(&collection.data))return (double)p->size();if(auto p=std::get_if<Lista>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<Mapa>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<FastArray>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<DenseMatrix>(&collection.data))return (double)(*p)->rows;if(auto p=std::get_if<Tupla>(&collection.data))return (double)(*p)->values.size();if(auto p=std::get_if<Conjunto>(&collection.data))return (double)(*p)->values.size();throw std::runtime_error("length/len requiere texto o colección");}
 static void mostrar(const Value&v){std::cout<<texto(v)<<'\n';}
 static Value cfv_leer(Value mensaje=Value{std::string("")}){if(mensaje.index()!=2)throw std::runtime_error("el mensaje de leer debe ser texto");std::cout<<std::get<std::string>(mensaje.data);std::string s;std::getline(std::cin,s);return s;}
 static Value cfv_a_numero(const Value&v){try{if(auto p=std::get_if<double>(&v.data))return *p;if(auto p=std::get_if<std::string>(&v.data))return std::stod(*p);}catch(...){ }throw std::runtime_error("no se puede convertir a número");}
 static Value cfv_a_texto(const Value&v){return texto(v);}
-static Value cfv_longitud(const Value&v){if(auto p=std::get_if<std::string>(&v.data))return (double)p->size();if(auto p=std::get_if<Lista>(&v.data))return (double)(*p)->size();if(auto p=std::get_if<Mapa>(&v.data))return (double)(*p)->size();if(auto p=std::get_if<FastArray>(&v.data))return (double)(*p)->size();if(auto p=std::get_if<DenseMatrix>(&v.data))return (double)(*p)->rows;throw std::runtime_error("longitud requiere una colección");}
+static Value cfv_longitud(const Value&v){if(auto p=std::get_if<std::string>(&v.data))return (double)p->size();if(auto p=std::get_if<Lista>(&v.data))return (double)(*p)->size();if(auto p=std::get_if<Mapa>(&v.data))return (double)(*p)->size();if(auto p=std::get_if<FastArray>(&v.data))return (double)(*p)->size();if(auto p=std::get_if<DenseMatrix>(&v.data))return (double)(*p)->rows;if(auto p=std::get_if<Tupla>(&v.data))return (double)(*p)->values.size();if(auto p=std::get_if<Conjunto>(&v.data))return (double)(*p)->values.size();throw std::runtime_error("longitud requiere una colección");}
 static Value cfv_agregar(Value lista,Value valor){if(auto p=std::get_if<Lista>(&lista.data)){(*p)->push_back(std::move(valor));return Value{};}throw std::runtime_error("agregar requiere una lista");}
 static Value cfv_sys_run(const Value&command){if(command.index()!=2)throw std::runtime_error("sys_run requiere un comando de texto");std::string shell=std::get<std::string>(command.data)+" 2>&1";
 #ifdef _WIN32
@@ -2887,11 +3491,53 @@ static Value cfv_cluster_estado(){std::lock_guard<std::mutex>lock(cfv_cluster_mu
 static Value cfv_afirmar(const Value&condition,const Value&message=Value{std::string("la condición es falsa")}){if(condition.index()!=3)throw std::runtime_error("afirmar requiere booleano");if(!verdad(condition))throw std::runtime_error("afirmación fallida: "+texto(message));return Value{};}
 static Value cfv_parallel_unary(const std::function<Value(Value)>&fn,const Value&jobs){auto list=std::get_if<Lista>(&jobs.data);if(!list)throw std::runtime_error("paralelo requiere una lista");std::vector<std::future<Value>>running;running.reserve((*list)->size());for(const auto&job:**list)running.push_back(std::async(std::launch::async,[fn,job]{return fn(job);}));auto results=std::make_shared<std::vector<Value>>();results->reserve(running.size());for(auto&future:running)results->push_back(future.get());return results;}
 static Value cfv_nuget_path(const std::string&package){std::vector<std::filesystem::path>paths={cfv_base_archivos/(package+".dylib"),cfv_base_archivos/"build"/(package+".dylib"),cfv_base_archivos.parent_path()/"build"/package/(package+".dylib"),cfv_base_archivos.parent_path()/"build"/"csharp-native"/(package+".dylib")};for(const auto&path:paths)if(std::filesystem::exists(path))return path.string();return paths.front().string();}
-static std::vector<CfvValue> cfv_to_abi(const Value&args,std::vector<std::string>&storage){auto p=std::get_if<Lista>(&args.data);if(!p)throw std::runtime_error("los argumentos extranjeros deben ser una lista");std::vector<CfvValue>out;storage.reserve((*p)->size());for(const auto&v:**p){if(v.index()==0)out.push_back({CFV_NULL,0,0,nullptr,nullptr,nullptr});else if(auto n=std::get_if<double>(&v.data)){if(std::floor(*n)==*n)out.push_back({CFV_INTEGER,(int64_t)*n,0,nullptr,nullptr,nullptr});else out.push_back({CFV_DECIMAL,0,*n,nullptr,nullptr,nullptr});}else if(auto s=std::get_if<std::string>(&v.data)){storage.push_back(*s);out.push_back({CFV_TEXT,0,0,storage.back().c_str(),nullptr,nullptr});}else throw std::runtime_error("ABI extranjero solo acepta números, textos y nulo");}return out;}
+static std::vector<CfvValue> cfv_to_abi(const Value&args,std::vector<std::string>&storage){auto p=std::get_if<Lista>(&args.data);if(!p)throw std::runtime_error("los argumentos extranjeros deben ser una lista");std::vector<CfvValue>out;storage.reserve((*p)->size());for(const auto&v:**p){if(v.index()==0)out.push_back({CFV_NULL,0,0,nullptr,nullptr,nullptr});else if(auto n=std::get_if<double>(&v.data)){if(std::floor(*n)==*n)out.push_back({CFV_INTEGER,(int64_t)*n,0,nullptr,nullptr,nullptr});else out.push_back({CFV_DECIMAL,0,*n,nullptr,nullptr,nullptr});}else if(auto s=std::get_if<std::string>(&v.data)){storage.push_back(*s);out.push_back({CFV_TEXT,0,0,storage.back().c_str(),nullptr,nullptr});}else if(auto b=std::get_if<bool>(&v.data))out.push_back({CFV_BOOLEAN,*b?1:0,0,nullptr,nullptr,nullptr});else throw std::runtime_error("ABI extranjero solo acepta números, textos, booleanos y nulo");}return out;}
 struct CfvResultGuard{CfvValue*value;~CfvResultGuard(){if(value&&value->release){auto release=value->release;auto owner=value->owner;value->release=nullptr;release(owner);}}};
-static Value cfv_from_abi(const CfvValue&v){if(v.type==CFV_NULL)return Value{};if(v.type==CFV_INTEGER)return (double)v.integer;if(v.type==CFV_DECIMAL)return v.decimal;if(v.type==CFV_TEXT)return std::string(v.text?v.text:"");throw std::runtime_error("tipo ABI de retorno desconocido");}
+static Value cfv_from_abi(const CfvValue&v){if(v.type==CFV_NULL)return Value{};if(v.type==CFV_INTEGER)return (double)v.integer;if(v.type==CFV_DECIMAL)return v.decimal;if(v.type==CFV_TEXT)return std::string(v.text?v.text:"");if(v.type==CFV_BOOLEAN)return Value{v.integer!=0};throw std::runtime_error("tipo ABI de retorno desconocido");}
 static Value cfv_invoke_foreign(CfvForeignFunction fn,const Value&args){std::vector<std::string>storage;auto abi=cfv_to_abi(args,storage);CfvValue result{CFV_NULL,0,0,nullptr,nullptr,nullptr};CfvResultGuard guard{&result};char error[1024]={0};int status=0;try{status=fn(abi.data(),abi.size(),&result,error,sizeof(error));}catch(const std::exception&e){throw std::runtime_error(std::string("excepción C++: ")+e.what());}catch(...){throw std::runtime_error("excepción nativa desconocida");}if(status!=0)throw std::runtime_error(error[0]?error:"la función extranjera falló");return cfv_from_abi(result);}
-static Value cfv_use_cpp(const Value&name,const Value&args){if(name.index()!=2)throw std::runtime_error("el nombre C++ debe ser texto");auto key=std::get<std::string>(name.data);auto&registry=cfv_registry();auto it=registry.find(key);if(it==registry.end())throw std::runtime_error("función C++ no registrada: "+key);return cfv_invoke_foreign(it->second,args);}
+struct CfvAbiStorageV2{
+std::deque<std::string>texts;
+std::deque<std::vector<CfvValueV2>>lists;
+std::deque<std::vector<CfvMapEntryV2>>maps;
+std::deque<std::vector<CfvRecordFieldV2>>record_fields;
+std::deque<CfvRecordV2>records;
+};
+static CfvValueV2 cfv_to_abi_v2_value(const Value&v,CfvAbiStorageV2&storage,uint32_t depth=0){
+if(depth>CFV_V2_MAX_DEPTH)throw std::runtime_error("ABI V2 excede la profundidad máxima");
+CfvValueV2 item{sizeof(CfvValueV2),CFV_NULL,0,0,0,0,nullptr,nullptr,nullptr};
+if(auto n=std::get_if<double>(&v.data)){if(std::floor(*n)==*n){item.type=CFV_INTEGER;item.integer=(int64_t)*n;}else{item.type=CFV_DECIMAL;item.decimal=*n;}}
+else if(auto s=std::get_if<std::string>(&v.data)){storage.texts.push_back(*s);item.type=CFV_TEXT;item.flags=CFV_V2_BORROWED;item.length=storage.texts.back().size();item.data=storage.texts.back().data();}
+else if(auto b=std::get_if<bool>(&v.data)){item.type=CFV_BOOLEAN;item.integer=*b?1:0;}
+else if(auto list=std::get_if<Lista>(&v.data)){std::vector<CfvValueV2>values;values.reserve((*list)->size());for(const auto&value:**list)values.push_back(cfv_to_abi_v2_value(value,storage,depth+1));storage.lists.push_back(std::move(values));item.type=CFV_LIST;item.flags=CFV_V2_BORROWED;item.length=storage.lists.back().size();item.data=storage.lists.back().data();}
+else if(auto map=std::get_if<Mapa>(&v.data)){
+auto class_marker=(*map)->find("__clase");
+if(class_marker!=(*map)->end()&&class_marker->second.index()==2){
+std::vector<CfvRecordFieldV2>fields;fields.reserve((*map)->size()-1);
+for(const auto&[key,value]:**map){if(key=="__clase")continue;storage.texts.push_back(key);auto&name=storage.texts.back();fields.push_back({name.data(),name.size(),cfv_to_abi_v2_value(value,storage,depth+1)});}
+storage.record_fields.push_back(std::move(fields));storage.texts.push_back(std::get<std::string>(class_marker->second.data));auto&type=storage.texts.back();storage.records.push_back({type.data(),type.size(),storage.record_fields.back().data(),storage.record_fields.back().size()});item.type=CFV_RECORD;item.flags=CFV_V2_BORROWED;item.length=storage.records.back().field_count;item.data=&storage.records.back();
+}else{
+std::vector<CfvMapEntryV2>entries;entries.reserve((*map)->size());
+for(const auto&[key,value]:**map){storage.texts.push_back(key);CfvValueV2 encoded_key{sizeof(CfvValueV2),CFV_TEXT,CFV_V2_BORROWED,storage.texts.back().size(),0,0,storage.texts.back().data(),nullptr,nullptr};entries.push_back({encoded_key,cfv_to_abi_v2_value(value,storage,depth+1)});}
+storage.maps.push_back(std::move(entries));item.type=CFV_MAP;item.flags=CFV_V2_BORROWED;item.length=storage.maps.back().size();item.data=storage.maps.back().data();
+}}
+else throw std::runtime_error("tipo no compatible con ABI V2");
+return item;
+}
+static std::vector<CfvValueV2>cfv_to_abi_v2(const Value&args,CfvAbiStorageV2&storage){auto p=std::get_if<Lista>(&args.data);if(!p)throw std::runtime_error("los argumentos ABI V2 deben ser una lista");std::vector<CfvValueV2>out;out.reserve((*p)->size());for(const auto&v:**p)out.push_back(cfv_to_abi_v2_value(v,storage));return out;}
+struct CfvResultGuardV2{CfvValueV2*value;~CfvResultGuardV2(){if(value&&value->release){auto release=value->release;auto owner=value->owner;value->release=nullptr;release(owner);}}};
+static Value cfv_from_abi_v2(const CfvValueV2&v,uint32_t depth=0){
+if(depth>CFV_V2_MAX_DEPTH)throw std::runtime_error("resultado ABI V2 excede la profundidad máxima");
+if(v.struct_size<sizeof(CfvValueV2))throw std::runtime_error("resultado ABI V2 usa una estructura incompleta");
+if(v.type==CFV_NULL)return Value{};if(v.type==CFV_INTEGER)return (double)v.integer;if(v.type==CFV_DECIMAL)return v.decimal;if(v.type==CFV_BOOLEAN)return Value{v.integer!=0};
+if(v.type==CFV_TEXT){if(!v.data&&v.length)throw std::runtime_error("texto ABI V2 tiene puntero nulo");return std::string(v.data?static_cast<const char*>(v.data):"",(size_t)v.length);}
+if(v.length>10000000ull)throw std::runtime_error("colección ABI V2 excede el límite de elementos");
+if(v.type==CFV_LIST){if(!v.data&&v.length)throw std::runtime_error("lista ABI V2 tiene puntero nulo");auto values=std::make_shared<std::vector<Value>>();values->reserve(v.length);auto raw=static_cast<const CfvValueV2*>(v.data);for(uint64_t i=0;i<v.length;++i){if(raw[i].release)throw std::runtime_error("elemento ABI V2 anidado no puede tener liberador");values->push_back(cfv_from_abi_v2(raw[i],depth+1));}return values;}
+if(v.type==CFV_MAP){if(!v.data&&v.length)throw std::runtime_error("mapa ABI V2 tiene puntero nulo");auto values=std::make_shared<std::map<std::string,Value>>();auto raw=static_cast<const CfvMapEntryV2*>(v.data);for(uint64_t i=0;i<v.length;++i){if(raw[i].key.type!=CFV_TEXT)throw std::runtime_error("clave ABI V2 debe ser texto");if(raw[i].key.release||raw[i].value.release)throw std::runtime_error("entrada ABI V2 anidada no puede tener liberador");auto key=cfv_from_abi_v2(raw[i].key,depth+1);(*values)[std::get<std::string>(key.data)]=cfv_from_abi_v2(raw[i].value,depth+1);}return values;}
+if(v.type==CFV_RECORD){if(!v.data)throw std::runtime_error("registro ABI V2 tiene puntero nulo");auto record=static_cast<const CfvRecordV2*>(v.data);if(record->field_count>1000000ull||(!record->fields&&record->field_count))throw std::runtime_error("registro ABI V2 inválido");auto values=std::make_shared<std::map<std::string,Value>>();(*values)["__clase"]=std::string(record->type_name?record->type_name:"",record->type_name_length);for(uint64_t i=0;i<record->field_count;++i){const auto&field=record->fields[i];if(field.value.release)throw std::runtime_error("campo ABI V2 anidado no puede tener liberador");(*values)[std::string(field.name?field.name:"",field.name_length)]=cfv_from_abi_v2(field.value,depth+1);}return values;}
+throw std::runtime_error("tipo ABI V2 de retorno desconocido");
+}
+static Value cfv_invoke_foreign_v2(CfvForeignFunctionV2 fn,const Value&args){CfvAbiStorageV2 storage;auto abi=cfv_to_abi_v2(args,storage);CfvValueV2 result{sizeof(CfvValueV2),CFV_NULL,0,0,0,0,nullptr,nullptr,nullptr};CfvResultGuardV2 guard{&result};char error[1024]={0};int status=0;try{status=fn(CFV_ABI_V2,abi.data(),abi.size(),&result,error,sizeof(error));}catch(const std::exception&e){throw std::runtime_error(std::string("excepción C++ ABI V2: ")+e.what());}catch(...){throw std::runtime_error("excepción nativa ABI V2 desconocida");}if(status!=0)throw std::runtime_error(error[0]?error:"la función extranjera ABI V2 falló");return cfv_from_abi_v2(result);}
+static Value cfv_use_cpp(const Value&name,const Value&args){if(name.index()!=2)throw std::runtime_error("el nombre C++ debe ser texto");auto key=std::get<std::string>(name.data);auto&registry2=cfv_registry_v2();auto modern=registry2.find(key);if(modern!=registry2.end())return cfv_invoke_foreign_v2(modern->second,args);auto&registry=cfv_registry();auto it=registry.find(key);if(it==registry.end())throw std::runtime_error("función C++ no registrada: "+key);return cfv_invoke_foreign(it->second,args);}
 static std::map<std::string,void*>cfv_libraries;
 static Value cfv_use_native(const Value&path,const Value&symbol,const Value&args){if(path.index()!=2||symbol.index()!=2)throw std::runtime_error("ruta y símbolo deben ser texto");auto raw=std::filesystem::path(std::get<std::string>(path.data));auto file=(raw.is_absolute()?raw:cfv_base_archivos/raw).string();auto sym=std::get<std::string>(symbol.data);void*handle=nullptr;auto found=cfv_libraries.find(file);if(found!=cfv_libraries.end())handle=found->second;else{
 #ifdef _WIN32
@@ -2909,8 +3555,8 @@ if(!fn)throw std::runtime_error("símbolo extranjero no encontrado: "+sym);retur
 #ifdef CFV_WITH_PYTHON
 class PyRef{PyObject*object_=nullptr;public:explicit PyRef(PyObject*object=nullptr):object_(object){}~PyRef(){Py_XDECREF(object_);}PyRef(const PyRef&)=delete;PyRef&operator=(const PyRef&)=delete;PyRef(PyRef&&other)noexcept:object_(other.object_){other.object_=nullptr;}PyObject*get()const{return object_;}PyObject*release(){auto*out=object_;object_=nullptr;return out;}explicit operator bool()const{return object_!=nullptr;}};
 static std::string cfv_python_error(const std::string&context){if(!PyErr_Occurred())return context;PyObject*type=nullptr;PyObject*value=nullptr;PyObject*traceback=nullptr;PyErr_Fetch(&type,&value,&traceback);PyErr_NormalizeException(&type,&value,&traceback);PyRef type_ref(type),value_ref(value),traceback_ref(traceback);PyRef text(PyObject_Str(value?value:Py_None));const char*message=text?PyUnicode_AsUTF8(text.get()):nullptr;return context+(message?std::string(": ")+message:"");}
-static PyRef cfv_to_python(const Value&v){if(v.index()==0){Py_INCREF(Py_None);return PyRef(Py_None);}if(auto n=std::get_if<double>(&v.data)){if(std::floor(*n)==*n)return PyRef(PyLong_FromLongLong((long long)*n));return PyRef(PyFloat_FromDouble(*n));}if(auto s=std::get_if<std::string>(&v.data))return PyRef(PyUnicode_FromString(s->c_str()));if(auto b=std::get_if<bool>(&v.data))return PyRef(PyBool_FromLong(*b));if(auto list=std::get_if<Lista>(&v.data)){PyRef out(PyList_New((*list)->size()));for(size_t i=0;i<(*list)->size();++i){auto item=cfv_to_python((*list)->at(i));PyList_SET_ITEM(out.get(),i,item.release());}return out;}if(auto map=std::get_if<Mapa>(&v.data)){PyRef out(PyDict_New());for(const auto&[key,value]:**map){auto item=cfv_to_python(value);if(PyDict_SetItemString(out.get(),key.c_str(),item.get())!=0)throw std::runtime_error(cfv_python_error("mapa Python inválido"));}return out;}if(auto array=std::get_if<FastArray>(&v.data)){PyRef out(PyList_New((*array)->size()));for(size_t i=0;i<(*array)->size();++i)PyList_SET_ITEM(out.get(),i,PyFloat_FromDouble((*array)->at(i)));return out;}if(auto matrix=std::get_if<DenseMatrix>(&v.data)){PyRef out(PyList_New((*matrix)->rows));for(size_t row=0;row<(*matrix)->rows;++row){PyObject*values=PyList_New((*matrix)->columns);for(size_t column=0;column<(*matrix)->columns;++column)PyList_SET_ITEM(values,column,PyFloat_FromDouble((*matrix)->values[row*(*matrix)->columns+column]));PyList_SET_ITEM(out.get(),row,values);}return out;}throw std::runtime_error("tipo no compatible con Python");}
-static Value cfv_from_python(PyObject*o){if(o==Py_None)return Value{};if(PyBool_Check(o))return Value{o==Py_True};if(PyLong_Check(o)){auto value=PyLong_AsLongLong(o);if(PyErr_Occurred())throw std::runtime_error(cfv_python_error("entero Python inválido"));return (double)value;}if(PyFloat_Check(o)){auto value=PyFloat_AsDouble(o);if(PyErr_Occurred())throw std::runtime_error(cfv_python_error("decimal Python inválido"));return value;}if(PyUnicode_Check(o)){auto text=PyUnicode_AsUTF8(o);if(!text)throw std::runtime_error(cfv_python_error("texto Python inválido"));return std::string(text);}if(PyList_Check(o)||PyTuple_Check(o)){auto out=std::make_shared<std::vector<Value>>();Py_ssize_t size=PySequence_Size(o);for(Py_ssize_t i=0;i<size;++i){PyRef item(PySequence_GetItem(o,i));out->push_back(cfv_from_python(item.get()));}return out;}if(PyDict_Check(o)){auto out=std::make_shared<std::map<std::string,Value>>();PyObject*key;PyObject*value;Py_ssize_t pos=0;while(PyDict_Next(o,&pos,&key,&value)){if(!PyUnicode_Check(key))throw std::runtime_error("claves extranjeras deben ser texto");(*out)[PyUnicode_AsUTF8(key)]=cfv_from_python(value);}return out;}throw std::runtime_error("Python devolvió un tipo no compatible");}
+static PyRef cfv_to_python(const Value&v){if(v.index()==0){Py_INCREF(Py_None);return PyRef(Py_None);}if(auto n=std::get_if<double>(&v.data)){if(std::floor(*n)==*n)return PyRef(PyLong_FromLongLong((long long)*n));return PyRef(PyFloat_FromDouble(*n));}if(auto s=std::get_if<std::string>(&v.data))return PyRef(PyUnicode_DecodeUTF8(s->data(),(Py_ssize_t)s->size(),"strict"));if(auto b=std::get_if<bool>(&v.data))return PyRef(PyBool_FromLong(*b));if(auto list=std::get_if<Lista>(&v.data)){PyRef out(PyList_New((*list)->size()));for(size_t i=0;i<(*list)->size();++i){auto item=cfv_to_python((*list)->at(i));PyList_SET_ITEM(out.get(),i,item.release());}return out;}if(auto tuple=std::get_if<Tupla>(&v.data)){PyRef out(PyTuple_New((*tuple)->values.size()));for(size_t i=0;i<(*tuple)->values.size();++i){auto item=cfv_to_python((*tuple)->values[i]);PyTuple_SET_ITEM(out.get(),i,item.release());}return out;}if(auto set=std::get_if<Conjunto>(&v.data)){PyRef out(PySet_New(nullptr));for(const auto&value:(*set)->values){auto item=cfv_to_python(value);if(PySet_Add(out.get(),item.get())!=0)throw std::runtime_error(cfv_python_error("conjunto Python inválido"));}return out;}if(auto map=std::get_if<Mapa>(&v.data)){PyRef out(PyDict_New());for(const auto&[key,value]:**map){PyRef py_key(PyUnicode_DecodeUTF8(key.data(),(Py_ssize_t)key.size(),"strict"));auto item=cfv_to_python(value);if(!py_key||PyDict_SetItem(out.get(),py_key.get(),item.get())!=0)throw std::runtime_error(cfv_python_error("mapa Python inválido"));}return out;}if(auto array=std::get_if<FastArray>(&v.data)){PyRef out(PyList_New((*array)->size()));for(size_t i=0;i<(*array)->size();++i)PyList_SET_ITEM(out.get(),i,PyFloat_FromDouble((*array)->at(i)));return out;}if(auto matrix=std::get_if<DenseMatrix>(&v.data)){PyRef out(PyList_New((*matrix)->rows));for(size_t row=0;row<(*matrix)->rows;++row){PyObject*values=PyList_New((*matrix)->columns);for(size_t column=0;column<(*matrix)->columns;++column)PyList_SET_ITEM(values,column,PyFloat_FromDouble((*matrix)->values[row*(*matrix)->columns+column]));PyList_SET_ITEM(out.get(),row,values);}return out;}throw std::runtime_error("tipo no compatible con Python");}
+static Value cfv_from_python(PyObject*o){if(o==Py_None)return Value{};if(PyBool_Check(o))return Value{o==Py_True};if(PyLong_Check(o)){auto value=PyLong_AsLongLong(o);if(PyErr_Occurred())throw std::runtime_error(cfv_python_error("entero Python inválido"));return (double)value;}if(PyFloat_Check(o)){auto value=PyFloat_AsDouble(o);if(PyErr_Occurred())throw std::runtime_error(cfv_python_error("decimal Python inválido"));return value;}if(PyUnicode_Check(o)){Py_ssize_t size=0;auto text=PyUnicode_AsUTF8AndSize(o,&size);if(!text)throw std::runtime_error(cfv_python_error("texto Python inválido"));return std::string(text,(size_t)size);}if(PyList_Check(o)){auto out=std::make_shared<std::vector<Value>>();Py_ssize_t size=PyList_Size(o);for(Py_ssize_t i=0;i<size;++i)out->push_back(cfv_from_python(PyList_GetItem(o,i)));return out;}if(PyTuple_Check(o)){auto out=std::make_shared<CfvTuple>();Py_ssize_t size=PyTuple_Size(o);for(Py_ssize_t i=0;i<size;++i)out->values.push_back(cfv_from_python(PyTuple_GetItem(o,i)));return out;}if(PySet_Check(o)){auto out=std::make_shared<CfvSet>();PyRef iterator(PyObject_GetIter(o));while(true){PyRef item(PyIter_Next(iterator.get()));if(!item)break;out->values.push_back(cfv_from_python(item.get()));}if(PyErr_Occurred())throw std::runtime_error(cfv_python_error("conjunto Python inválido"));std::sort(out->values.begin(),out->values.end(),[](const Value&a,const Value&b){return cfv_canonical_json(a)<cfv_canonical_json(b);});return out;}if(PyDict_Check(o)){auto out=std::make_shared<std::map<std::string,Value>>();PyObject*key;PyObject*value;Py_ssize_t pos=0;while(PyDict_Next(o,&pos,&key,&value)){if(!PyUnicode_Check(key))throw std::runtime_error("claves extranjeras deben ser texto");Py_ssize_t size=0;const char*text=PyUnicode_AsUTF8AndSize(key,&size);if(!text)throw std::runtime_error(cfv_python_error("clave Python inválida"));(*out)[std::string(text,(size_t)size)]=cfv_from_python(value);}return out;}throw std::runtime_error("Python devolvió un tipo no compatible");}
 static Value cfv_use_python(const Value&module,const Value&function,const Value&args){if(module.index()!=2||function.index()!=2)throw std::runtime_error("módulo y función Python deben ser texto");if(!Py_IsInitialized())Py_Initialize();auto context=cfv_to_python(cfv_symbol_snapshot());if(!context||PyDict_SetItemString(PyEval_GetBuiltins(),"ForgeSymbols",context.get())!=0)throw std::runtime_error(cfv_python_error("no se pudo publicar ForgeSymbols"));if(PyRun_SimpleString("import sys,types,builtins\nif 'cforgev_runtime' not in sys.modules:\n m=types.ModuleType('cforgev_runtime');m.get=lambda name: builtins.ForgeSymbols[name];m.snapshot=lambda: dict(builtins.ForgeSymbols);sys.modules['cforgev_runtime']=m")!=0)throw std::runtime_error(cfv_python_error("no se pudo publicar cforgev_runtime"));PyRef m(PyImport_ImportModule(std::get<std::string>(module.data).c_str()));if(!m)throw std::runtime_error(cfv_python_error("no se pudo importar el módulo Python"));PyRef f(PyObject_GetAttrString(m.get(),std::get<std::string>(function.data).c_str()));if(!f)throw std::runtime_error(cfv_python_error("función Python inexistente"));if(!PyCallable_Check(f.get()))throw std::runtime_error("el atributo Python no es invocable");auto list=std::get_if<Lista>(&args.data);if(!list)throw std::runtime_error("argumentos Python deben ser lista");PyRef tuple(PyTuple_New((*list)->size()));if(!tuple)throw std::runtime_error(cfv_python_error("no se pudo crear argumentos Python"));for(size_t i=0;i<(*list)->size();++i){auto argument=cfv_to_python((*list)->at(i));if(!argument)throw std::runtime_error(cfv_python_error("no se pudo convertir argumento Python"));PyTuple_SET_ITEM(tuple.get(),i,argument.release());}PyRef result(PyObject_CallObject(f.get(),tuple.get()));if(!result)throw std::runtime_error(cfv_python_error("la llamada Python falló"));return cfv_origin(cfv_from_python(result.get()),"python");}
 static void cfv_exec_python_code(const std::string&code){std::cout.flush();if(!Py_IsInitialized())Py_Initialize();if(PyRun_SimpleString(code.c_str())!=0)throw std::runtime_error(cfv_python_error("extern Python falló"));PyRun_SimpleString("import sys; sys.stdout.flush(); sys.stderr.flush()");}
 static void cfv_prepare_polyglot(){static bool ready=false;if(ready)return;if(!Py_IsInitialized())Py_Initialize();const char*code=R"CFVPY(
@@ -2967,8 +3613,19 @@ static void cfv_exec_java_code(const std::string&){throw std::runtime_error("Jav
 #endif
 static Value cfv_catalog_dispatch(const std::string&engine,const std::string&name,const Value&arguments){Value staged=cfv_arena_stage(arguments,name);const char*setting=std::getenv(engine=="python"?"CFORGE_IA_MODULE":engine=="javascript"?"CFORGE_WEB_MODULE":"CFORGE_UI_ADAPTER");if(!setting||!*setting)throw std::runtime_error("conector "+name+" enrutado a "+engine+", pero su adaptador no está configurado");if(engine=="python")return cfv_use_python(Value{std::string(setting)},Value{name},staged);if(engine=="javascript")return cfv_use_javascript(Value{std::string(setting)},Value{name},staged);throw std::runtime_error("conector "+name+" requiere el adaptador Java declarado en CFORGE_UI_ADAPTER");}
 static Value cfv_forge_bench(const std::function<Value()>&function,const Value&count){long long iterations=(long long)numero(count);if(iterations<1||iterations>10000000)throw std::runtime_error("forge_bench requiere 1..10.000.000 iteraciones");Value result;auto started=std::chrono::steady_clock::now();for(long long i=0;i<iterations;++i)result=function();double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();auto report=std::make_shared<std::map<std::string,Value>>();(*report)["resultado"]=result;(*report)["iteraciones"]=(double)iterations;(*report)["segundos"]=seconds;(*report)["por_segundo"]=seconds>0?iterations/seconds:0;return report;}
-static Value crear_lista(std::initializer_list<Value>v){return std::make_shared<std::vector<Value>>(v);}static Value crear_mapa(std::initializer_list<std::pair<const std::string,Value>>v){return std::make_shared<std::map<std::string,Value>>(v);}
-static Value indice(const Value&v,const Value&k){double n=0;if(auto p=std::get_if<Lista>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de lista inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<Mapa>(&v.data)){if(k.index()!=2)throw std::runtime_error("la clave debe ser texto");auto it=(*p)->find(std::get<std::string>(k.data));if(it==(*p)->end())throw std::runtime_error("clave inexistente");return it->second;}if(auto p=std::get_if<FastArray>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de array_fast inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<DenseMatrix>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->rows)throw std::runtime_error("fila de matrix inválida");auto row=std::make_shared<std::vector<double>>((*p)->values.begin()+(size_t)n*(*p)->columns,(*p)->values.begin()+((size_t)n+1)*(*p)->columns);return row;}throw std::runtime_error("el valor no admite índices");}
+static Value crear_lista(std::initializer_list<Value>v){return std::make_shared<std::vector<Value>>(v);}static Value crear_mapa(std::initializer_list<std::pair<const std::string,Value>>v){return std::make_shared<std::map<std::string,Value>>(v);}static Value crear_tupla(std::initializer_list<Value>v){auto out=std::make_shared<CfvTuple>();out->values.assign(v);return out;}static Value crear_conjunto(std::initializer_list<Value>v){auto out=std::make_shared<CfvSet>();for(const auto&item:v){auto key=cfv_canonical_json(item);bool exists=false;for(const auto&current:out->values)if(cfv_canonical_json(current)==key){exists=true;break;}if(!exists)out->values.push_back(item);}std::sort(out->values.begin(),out->values.end(),[](const Value&a,const Value&b){return cfv_canonical_json(a)<cfv_canonical_json(b);});return out;}
+static Value cfv_mover(Value value){return value;}static Value cfv_prestar(Value value){return value;}static Value cfv_prestar_mut(Value value){return value;}static Value cfv_soltar_prestamo(const Value&){return Value{};}static Value cfv_destruir(const Value&){return Value{};}
+static Value cfv_algunos(Value value){return crear_mapa({{"__opcion",Value{true}},{"tiene",Value{true}},{"valor",std::move(value)}});}static Value cfv_ninguno(){return crear_mapa({{"__opcion",Value{true}},{"tiene",Value{false}},{"valor",Value{}}});}
+static Mapa cfv_opcion_mapa(const Value&value){auto map=std::get_if<Mapa>(&value.data);if(!map||(*map)->find("__opcion")==(*map)->end())throw std::runtime_error("se esperaba una opcion");return *map;}static Value cfv_es_algunos(const Value&value){auto map=cfv_opcion_mapa(value);return verdad(map->at("tiene"));}static Value cfv_desenvolver(const Value&value){auto map=cfv_opcion_mapa(value);if(!verdad(map->at("tiene")))throw std::runtime_error("no se puede desenvolver ninguno");return map->at("valor");}
+static std::atomic<long long>cfv_next_task{1};static std::mutex cfv_task_mutex;static std::map<long long,std::shared_future<Value>>cfv_tasks;
+static Value cfv_tarea(std::function<Value()>job){auto id=cfv_next_task.fetch_add(1);auto future=std::async(std::launch::async,std::move(job)).share();{std::lock_guard<std::mutex>lock(cfv_task_mutex);cfv_tasks.emplace(id,std::move(future));}return (double)id;}
+static std::shared_future<Value>cfv_task_future(const Value&handle){auto id=(long long)numero(handle);std::lock_guard<std::mutex>lock(cfv_task_mutex);auto found=cfv_tasks.find(id);if(found==cfv_tasks.end())throw std::runtime_error("tarea desconocida");return found->second;}
+static Value cfv_esperar(const Value&handle){return cfv_task_future(handle).get();}static Value cfv_esperar(const Value&handle,const Value&timeout){auto future=cfv_task_future(handle);if(future.wait_for(std::chrono::milliseconds((long long)numero(timeout)))!=std::future_status::ready)throw std::runtime_error("tiempo de espera agotado");return future.get();}static Value cfv_cancelar(const Value&handle){(void)cfv_task_future(handle);return false;}
+struct CfvChannel{size_t capacity=0;bool closed=false;std::deque<Value>values;std::mutex mutex;std::condition_variable readable,writable;};static std::atomic<long long>cfv_next_channel{1};static std::mutex cfv_channel_mutex;static std::map<long long,std::shared_ptr<CfvChannel>>cfv_channels;
+static std::shared_ptr<CfvChannel>cfv_channel(const Value&handle){auto id=(long long)numero(handle);std::lock_guard<std::mutex>lock(cfv_channel_mutex);auto found=cfv_channels.find(id);if(found==cfv_channels.end())throw std::runtime_error("canal desconocido");return found->second;}
+static Value cfv_canal(const Value&size){auto capacity=(long long)numero(size);if(capacity<0)throw std::runtime_error("capacidad de canal inválida");auto id=cfv_next_channel.fetch_add(1);auto channel=std::make_shared<CfvChannel>();channel->capacity=(size_t)capacity;{std::lock_guard<std::mutex>lock(cfv_channel_mutex);cfv_channels[id]=channel;}return (double)id;}static Value cfv_canal(){return cfv_canal(Value{0.0});}
+static Value cfv_enviar(const Value&handle,Value value){auto channel=cfv_channel(handle);std::unique_lock<std::mutex>lock(channel->mutex);channel->writable.wait(lock,[&]{return channel->closed||channel->capacity==0||channel->values.size()<channel->capacity;});if(channel->closed)throw std::runtime_error("canal cerrado");channel->values.push_back(std::move(value));lock.unlock();channel->readable.notify_one();return Value{};}static Value cfv_recibir(const Value&handle){auto channel=cfv_channel(handle);std::unique_lock<std::mutex>lock(channel->mutex);channel->readable.wait(lock,[&]{return channel->closed||!channel->values.empty();});if(channel->values.empty())throw std::runtime_error("canal cerrado y vacío");Value result=std::move(channel->values.front());channel->values.pop_front();lock.unlock();channel->writable.notify_one();return result;}static Value cfv_cerrar_canal(const Value&handle){auto channel=cfv_channel(handle);{std::lock_guard<std::mutex>lock(channel->mutex);channel->closed=true;}channel->readable.notify_all();channel->writable.notify_all();return Value{};}
+static Value indice(const Value&v,const Value&k){double n=0;if(auto p=std::get_if<Lista>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de lista inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<Mapa>(&v.data)){if(k.index()!=2)throw std::runtime_error("la clave debe ser texto");auto it=(*p)->find(std::get<std::string>(k.data));if(it==(*p)->end())throw std::runtime_error("clave inexistente");return it->second;}if(auto p=std::get_if<Tupla>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->values.size())throw std::runtime_error("índice de tupla inválido");return (*p)->values.at((size_t)n);}if(auto p=std::get_if<FastArray>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de array_fast inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<DenseMatrix>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->rows)throw std::runtime_error("fila de matrix inválida");auto row=std::make_shared<std::vector<double>>((*p)->values.begin()+(size_t)n*(*p)->columns,(*p)->values.begin()+((size_t)n+1)*(*p)->columns);return row;}throw std::runtime_error("el valor no admite índices");}
 static void asignar_campo(Value&obj,const std::string&campo,Value valor,size_t tipo){auto p=std::get_if<Mapa>(&obj.data);if(!p||(*p)->find(campo)==(*p)->end())throw std::runtime_error("campo desconocido '"+campo+"'");if(tipo!=99&&valor.index()!=tipo)throw std::runtime_error("tipo incompatible para campo '"+campo+"'");(**p)[campo]=std::move(valor);}
 static void asignar(Value&destino,size_t tipo,Value valor,const std::string&nombre){if(tipo!=99&&valor.index()!=tipo)throw std::runtime_error("tipo incompatible al asignar '"+nombre+"'");destino=std::move(valor);}
 '''
@@ -3016,7 +3673,7 @@ class Generator:
         main = "".join(main_parts)
         cluster_functions = "".join(
             f'    cfv_cluster_register("{function[1]}", "funcion");\n'
-            for function in self.program.functions if len(function) > 4 and function[4] is True
+            for function in self.program.functions if len(function) > 7 and function[7] is True
         )
         base = json.dumps(str(self.base_dir), ensure_ascii=False)
         return RUNTIME + "\n" + "\n".join(prototypes) + "\n" + "\n".join(functions) + f'''\nint main(int argc, char** argv){{
@@ -3039,7 +3696,7 @@ class Generator:
         return f"Value {safe(name)}(" + ", ".join(f"Value {safe(field)}" for field, _ in fields) + ")"
 
     def structure_function(self, name: str, fields: list[tuple[str, str]]) -> str:
-        indexes = {"nulo": 0, "numero": 1, "texto": 2, "booleano": 3, "lista": 4, "mapa": 5, "cualquiera": 99}
+        indexes = {"nulo": 0, "numero": 1, "texto": 2, "booleano": 3, "lista": 4, "mapa": 5, "tupla": 8, "conjunto": 9, "cualquiera": 99}
         checks = ""
         pairs = []
         for field, field_type in fields:
@@ -3054,7 +3711,7 @@ class Generator:
         return base.replace("return crear_mapa({", f'return crear_mapa({{{{"__clase", Value{{std::string("{name}")}}}}, ', 1)
 
     def method_prototype(self, method: Stmt) -> str:
-        _, class_name, name, parameters, _ = method
+        class_name, name, parameters = method[1], method[2], method[3]
         params = ["Value cfv_este", *(f"Value {safe(p)}" for p in parameters)]
         return f"Value {safe(class_name + '_' + name)}(" + ", ".join(params) + ")"
 
@@ -3094,7 +3751,7 @@ class Generator:
         register_global = self.register_next_global
         self.register_next_global = False
         if kind == "let":
-            type_indexes = {"nulo": 0, "numero": 1, "texto": 2, "booleano": 3, "lista": 4, "mapa": 5, "cualquiera": 99}
+            type_indexes = {"nulo": 0, "numero": 1, "texto": 2, "booleano": 3, "lista": 4, "mapa": 5, "tupla": 8, "conjunto": 9, "cualquiera": 99}
             name, declared, expression = statement[1], statement[2], self.expr(statement[3])
             type_value = str(type_indexes.get(declared, 5)) if declared else f"{safe(name)}.index()"
             validation = ""
@@ -3110,7 +3767,7 @@ class Generator:
             if statement[1] == "este" and self.active_class:
                 for field, field_type in self.classes[self.active_class][0]:
                     if field == statement[2]:
-                        expected = {"nulo":0,"numero":1,"texto":2,"booleano":3,"lista":4,"mapa":5,"cualquiera":99}.get(field_type, 5)
+                        expected = {"nulo":0,"numero":1,"texto":2,"booleano":3,"lista":4,"mapa":5,"tupla":8,"conjunto":9,"cualquiera":99}.get(field_type, 5)
             return f'{pad}asignar_campo({safe(statement[1])}, "{statement[2]}", {self.expr(statement[3])}, {expected});\n'
         if kind == "print":
             return f"{pad}mostrar({self.expr(statement[1])});\n"
@@ -3135,6 +3792,9 @@ class Generator:
                 f"{pad}  auto cfv_gpu_task = std::async(std::launch::async, [&]() {{\n"
                 f"{body}{pad}  }});\n{pad}  cfv_gpu_task.get();\n{pad}}}\n"
             )
+        if kind in {"region", "unsafe"}:
+            label = "región léxica" if kind == "region" else "frontera unsafe explícita"
+            return f"{pad}{{ // {label}\n{self.statements(statement[1], indent + 2)}{pad}}}\n"
         if kind == "extern":
             if statement[1] == "python":
                 code = textwrap.dedent(statement[2]).strip("\n") + "\n"
@@ -3159,7 +3819,7 @@ class Generator:
                 f"{pad}  Value {name} = std::string(cfv_error_nativo.what());\n"
                 f"{pad}  size_t {name}_tipo = {name}.index();\n{handler}{pad}}}\n"
             )
-        if kind in {"structure", "class", "universal_import"}:
+        if kind in {"structure", "class", "interface", "universal_import"}:
             return ""
         if kind == "import":
             raise CForgevError("La importación no fue resuelta antes de generar código")
@@ -3168,16 +3828,18 @@ class Generator:
     def expr(self, expression: Expr) -> str:
         kind = expression[0]
         if kind == "number": return f"Value{{{expression[1]}.0}}" if "." not in expression[1] else f"Value{{{expression[1]}}}"
-        if kind == "string": return f"Value{{std::string({expression[1]})}}"
+        if kind == "string": return f"Value{{{self.cpp_string(expression[1])}}}"
         if kind == "bool": return "Value{true}" if expression[1] else "Value{false}"
         if kind == "null": return "Value{}"
         if kind == "variable": return safe(expression[1])
         if kind == "list": return "crear_lista({" + ", ".join(self.expr(item) for item in expression[1]) + "})"
+        if kind == "tuple": return "crear_tupla({" + ", ".join(self.expr(item) for item in expression[1]) + "})"
+        if kind == "set": return "crear_conjunto({" + ", ".join(self.expr(item) for item in expression[1]) + "})"
         if kind == "map":
             pairs = []
             for key, value in expression[1]:
                 if key[0] != "string": raise CForgevError("Las claves de mapa deben ser textos")
-                pairs.append("{" + key[1] + ", " + self.expr(value) + "}")
+                pairs.append("{" + self.cpp_string(key[1]) + ", " + self.expr(value) + "}")
             return "crear_mapa({" + ", ".join(pairs) + "})"
         if kind == "index": return f"indice({self.expr(expression[1])}, {self.expr(expression[2])})"
         if kind == "field":
@@ -3212,6 +3874,14 @@ class Generator:
         if kind == "call":
             aliases = {"use_csharp": "use_native", "use_typescript": "use_javascript"}
             call_name = aliases.get(expression[1], expression[1])
+            declared_function = next(
+                (item for item in self.program.functions if item[1] == call_name), None
+            )
+            if declared_function is not None and len(declared_function) > 6 and declared_function[6]:
+                invocation = f"{safe(call_name)}(" + ", ".join(
+                    self.expr(argument) for argument in expression[2]
+                ) + ")"
+                return f"cfv_tarea([=](){{return {invocation};}})"
             connector = next(
                 ((prefix, engine) for prefix, engine in (
                     ("ia_", "python"), ("ui_", "java"), ("web_", "javascript")
@@ -3243,6 +3913,19 @@ class Generator:
             if call_name == "paralelo" and len(expression[2]) == 2 and expression[2][0][0] == "string":
                 function_name = json.loads(expression[2][0][1])
                 return f'cfv_parallel_unary([](Value cfv_job){{return {safe(function_name)}(cfv_job);}}, {self.expr(expression[2][1])})'
+            if call_name == "tarea":
+                if len(expression[2]) not in {1, 2} or expression[2][0][0] != "string":
+                    raise CForgevError("tarea requiere el nombre literal de una función y argumentos opcionales")
+                function_name = json.loads(expression[2][0][1])
+                function = next((item for item in self.program.functions if item[1] == function_name), None)
+                if function is None: raise CForgevError(f"tarea no conoce la función '{function_name}'")
+                provided = expression[2][1][1] if len(expression[2]) == 2 and expression[2][1][0] == "list" else []
+                if len(expression[2]) == 2 and expression[2][1][0] != "list":
+                    raise CForgevError("tarea requiere una lista de argumentos")
+                if len(provided) != len(function[2]):
+                    raise CForgevError("tarea recibió una cantidad incorrecta de argumentos")
+                invocation = f"{safe(function_name)}(" + ", ".join(self.expr(arg) for arg in provided) + ")"
+                return f"cfv_tarea([=](){{return {invocation};}})"
             if call_name == "forge_bench":
                 if len(expression[2]) not in {2, 3} or expression[2][0][0] != "string":
                     raise CForgevError(
@@ -3265,6 +3948,8 @@ class Generator:
                     f"{self.expr(expression[2][1])})"
                 )
             return f"{safe(call_name)}(" + ", ".join(self.expr(arg) for arg in expression[2]) + ")"
+        if kind == "await":
+            return f"cfv_esperar({self.expr(expression[1])})"
         if kind == "unary":
             if expression[1] == "no": return f"Value{{!verdad({self.expr(expression[2])})}}"
             return f"Value{{-numero({self.expr(expression[2])})}}"
@@ -3275,6 +3960,12 @@ class Generator:
             if op == "o": return f"Value{{verdad({left}) || verdad({right})}}"
             return f"{functions[op]}({left}, {right})" if op in functions else f'compara({left}, {right}, "{op}")'
         raise CForgevError(f"Expresión no compilable: {kind}")
+
+    @staticmethod
+    def cpp_string(token: str) -> str:
+        value = json.loads(token)
+        literal = json.dumps(value, ensure_ascii=False)
+        return f"std::string({literal}, {len(value.encode('utf-8'))})"
 
 
 def compile_native(
@@ -3288,6 +3979,8 @@ def compile_native(
         raise CForgevError(f"No se pudo abrir {source_path}: {error}") from error
     program = resolve_imports(Parser(tokenize(source)).program(), source_path.resolve().parent, set())
     StaticTypeAnalyzer().analyze(program)
+    from cforge_memory import MemorySafetyAnalyzer
+    MemorySafetyAnalyzer().analyze(program)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     cpp_path = output_path.with_suffix(".cpp")
     generated = Generator(program, source_path.resolve().parent).generate()
@@ -3390,7 +4083,7 @@ def discover_cpp_sources(
 
     selected: list[Path] = []
     covered: set[str] = set()
-    pattern = re.compile(r'cfv_register_function\s*\(\s*"([^"]+)"')
+    pattern = re.compile(r'cfv_register_function(?:_v2)?\s*\(\s*"([^"]+)"')
     for candidate in candidates:
         try:
             registered = set(pattern.findall(candidate.read_text(encoding="utf-8")))
@@ -3445,6 +4138,7 @@ def python_embedding_flags() -> list[str]:
 def resolve_imports(program: Program, base_dir: Path, loaded: set[Path]) -> Program:
     functions = list(program.functions)
     statements: list[Stmt] = []
+    locations = dict(program.locations)
     for statement in program.statements:
         if statement[0] != "import":
             statements.append(statement)
@@ -3464,7 +4158,8 @@ def resolve_imports(program: Program, base_dir: Path, loaded: set[Path]) -> Prog
         )
         functions.extend(imported.functions)
         statements.extend(imported.statements)
-    return Program(functions, statements)
+        locations.update(imported.locations)
+    return Program(functions, statements, locations)
 )CFV3DATA"},
         {R"CFV4DATA(compilador_wasm.py)CFV4DATA", R"CFV5DATA("""Backend WebAssembly inicial de C-Forge: subconjunto numérico -> WAT válido."""
 
@@ -3543,7 +4238,1551 @@ def compile_wasm(source_path: Path, output_path: Path) -> Path:
     output_path.write_text(WasmGenerator(program).generate(), encoding="utf-8")
     return output_path
 )CFV5DATA"},
-        {R"CFV6DATA(cforge_diagnostics.py)CFV6DATA", R"CFV7DATA("""Diagnósticos estructurados de C-Forge para CLI, editores y CI."""
+        {R"CFV6DATA(compilador_llvm.py)CFV6DATA", R"CFV7DATA("""Backend LLVM IR real de C-Forge para el núcleo numérico tipado.
+
+Emite LLVM IR textual verificable por Clang. Rechaza explícitamente cualquier
+construcción no soportada para impedir que un backend parcial parezca completo.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+
+from cforgev import CForgevError, tokenize
+from compilador_nativo import Parser, Program, StaticTypeAnalyzer, resolve_imports
+
+
+@dataclass(frozen=True)
+class IRValue:
+    ref: str
+    type: str
+    semantic: str | None = None
+
+
+class LLVMGenerator:
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+        self.counter = 0
+        self.block = 0
+        self.variables: dict[str, tuple[str, str, str | None]] = {}
+        self.globals: list[str] = []
+        self.string_counter = 0
+        self.signatures: dict[str, tuple[list[str], str]] = {}
+        self.structures: dict[str, list[tuple[str, str]]] = {}
+        self.classes: dict[str, tuple[list[tuple[str, str]], list[tuple]]] = {}
+        self.generic_functions: dict[str, tuple] = {}
+        self.specializations: dict[tuple[str, tuple[str, ...]], str] = {}
+        self.pending_specializations: list[tuple[tuple, dict[str, str], str]] = []
+        self.return_type = "double"
+        self.exception_targets: list[tuple[str, str]] = []
+        self.ffi_functions: dict[str, tuple[list[str], str, bool]] = {}
+
+    def llvm_type(self, name: str) -> str:
+        if name in self.structures or name in self.classes: return "ptr"
+        if name.startswith(("lista<", "mapa:", "mapa<", "tupla<", "conjunto<", "opcion")): return "ptr"
+        return {"numero": "double", "booleano": "i1", "texto": "ptr", "lista": "ptr",
+                "tupla": "ptr", "conjunto": "ptr"}.get(name, "double")
+
+    @staticmethod
+    def map_value_semantic(semantic: str | None) -> str | None:
+        if semantic and semantic.startswith("mapa:"):
+            return semantic.split(":", 1)[1]
+        if semantic and semantic.startswith("mapa<") and semantic.endswith(">"):
+            return semantic[5:-1]
+        return None
+
+    @staticmethod
+    def is_list_semantic(semantic: str | None) -> bool:
+        return semantic == "lista" or bool(semantic and semantic.startswith("lista<"))
+
+    def fields(self, name: str) -> list[tuple[str, str]]:
+        if name in self.structures: return self.structures[name]
+        if name in self.classes: return self.classes[name][0]
+        raise CForgevError(f"LLVM: tipo nominal desconocido '{name}'")
+
+    def ffi_call_argument(self, declared: str, value: IRValue) -> str:
+        """Baja un valor interno al contrato C ABI sin transferir propiedad."""
+        if declared == "lista<numero>":
+            length = self.temporary()
+            data_pointer = self.temporary()
+            data = self.temporary()
+            view = self.temporary()
+            view_data = self.temporary()
+            view_length = self.temporary()
+            self.emit(f"{length} = call i64 @cfv_list_length(ptr {value.ref})")
+            self.emit(f"{data_pointer} = getelementptr %CfvList, ptr {value.ref}, i32 0, i32 2")
+            self.emit(f"{data} = load ptr, ptr {data_pointer}")
+            self.emit(f"{view} = alloca %CfvNumberSlice")
+            self.emit(f"{view_data} = getelementptr %CfvNumberSlice, ptr {view}, i32 0, i32 0")
+            self.emit(f"{view_length} = getelementptr %CfvNumberSlice, ptr {view}, i32 0, i32 1")
+            self.emit(f"store ptr {data}, ptr {view_data}")
+            self.emit(f"store i64 {length}, ptr {view_length}")
+            return f"ptr {view}"
+        if declared == "mapa<numero>":
+            length_slot = self.temporary(); length = self.temporary()
+            keys_slot = self.temporary(); keys = self.temporary()
+            values_slot = self.temporary(); values = self.temporary()
+            view = self.temporary(); view_keys = self.temporary()
+            view_values = self.temporary(); view_length = self.temporary()
+            self.emit(f"{length_slot} = getelementptr %CfvMap, ptr {value.ref}, i32 0, i32 0")
+            self.emit(f"{length} = load i64, ptr {length_slot}")
+            self.emit(f"{keys_slot} = getelementptr %CfvMap, ptr {value.ref}, i32 0, i32 1")
+            self.emit(f"{keys} = load ptr, ptr {keys_slot}")
+            self.emit(f"{values_slot} = getelementptr %CfvMap, ptr {value.ref}, i32 0, i32 2")
+            self.emit(f"{values} = load ptr, ptr {values_slot}")
+            self.emit(f"{view} = alloca %CfvNumberMapView")
+            self.emit(f"{view_keys} = getelementptr %CfvNumberMapView, ptr {view}, i32 0, i32 0")
+            self.emit(f"{view_values} = getelementptr %CfvNumberMapView, ptr {view}, i32 0, i32 1")
+            self.emit(f"{view_length} = getelementptr %CfvNumberMapView, ptr {view}, i32 0, i32 2")
+            self.emit(f"store ptr {keys}, ptr {view_keys}")
+            self.emit(f"store ptr {values}, ptr {view_values}")
+            self.emit(f"store i64 {length}, ptr {view_length}")
+            return f"ptr {view}"
+        if declared in self.structures or declared in self.classes:
+            fields = self.fields(declared)
+            count = len(fields)
+            array = self.temporary()
+            self.emit(f"{array} = alloca [{count} x %CfvRecordField]")
+            for index, (field_name, field_type) in enumerate(fields):
+                source_slot = self.temporary(); source_value = self.temporary()
+                field = self.temporary(); name_slot = self.temporary(); abi_value = self.temporary()
+                self.emit(
+                    f"{source_slot} = getelementptr {self.type_symbol(declared)}, "
+                    f"ptr {value.ref}, i32 0, i32 {index}"
+                )
+                llvm_field_type = self.llvm_type(field_type)
+                self.emit(f"{source_value} = load {llvm_field_type}, ptr {source_slot}")
+                self.emit(
+                    f"{field} = getelementptr [{count} x %CfvRecordField], "
+                    f"ptr {array}, i64 0, i64 {index}"
+                )
+                self.emit(f"{name_slot} = getelementptr %CfvRecordField, ptr {field}, i32 0, i32 0")
+                field_name_value = self.string(field_name)
+                self.emit(f"store ptr {field_name_value.ref}, ptr {name_slot}")
+                self.emit(f"{abi_value} = getelementptr %CfvRecordField, ptr {field}, i32 0, i32 1")
+                self.emit(f"store %CfvAbiValue zeroinitializer, ptr {abi_value}")
+                tag_slot = self.temporary()
+                self.emit(f"{tag_slot} = getelementptr %CfvAbiValue, ptr {abi_value}, i32 0, i32 0")
+                tag = {"numero": 2, "texto": 3, "booleano": 4}[field_type]
+                self.emit(f"store i32 {tag}, ptr {tag_slot}")
+                if field_type == "numero":
+                    data_slot = self.temporary()
+                    self.emit(f"{data_slot} = getelementptr %CfvAbiValue, ptr {abi_value}, i32 0, i32 3")
+                    self.emit(f"store double {source_value}, ptr {data_slot}")
+                elif field_type == "texto":
+                    data_slot = self.temporary()
+                    self.emit(f"{data_slot} = getelementptr %CfvAbiValue, ptr {abi_value}, i32 0, i32 4")
+                    self.emit(f"store ptr {source_value}, ptr {data_slot}")
+                else:
+                    integer = self.temporary(); data_slot = self.temporary()
+                    self.emit(f"{integer} = zext i1 {source_value} to i64")
+                    self.emit(f"{data_slot} = getelementptr %CfvAbiValue, ptr {abi_value}, i32 0, i32 2")
+                    self.emit(f"store i64 {integer}, ptr {data_slot}")
+            view = self.temporary(); type_slot = self.temporary()
+            fields_slot = self.temporary(); length_slot = self.temporary(); first = self.temporary()
+            self.emit(f"{view} = alloca %CfvRecordView")
+            self.emit(f"{type_slot} = getelementptr %CfvRecordView, ptr {view}, i32 0, i32 0")
+            type_name = self.string(declared)
+            self.emit(f"store ptr {type_name.ref}, ptr {type_slot}")
+            self.emit(f"{fields_slot} = getelementptr %CfvRecordView, ptr {view}, i32 0, i32 1")
+            self.emit(f"{first} = getelementptr [{count} x %CfvRecordField], ptr {array}, i64 0, i64 0")
+            self.emit(f"store ptr {first}, ptr {fields_slot}")
+            self.emit(f"{length_slot} = getelementptr %CfvRecordView, ptr {view}, i32 0, i32 2")
+            self.emit(f"store i64 {count}, ptr {length_slot}")
+            return f"ptr {view}"
+        return f"{value.type} {value.ref}"
+
+    @staticmethod
+    def type_symbol(name: str) -> str:
+        return "%Cfv." + name
+
+    def string(self, value: str) -> IRValue:
+        encoded = value.encode("utf-8") + b"\0"
+        escaped = "".join(chr(byte) if 32 <= byte < 127 and byte not in {34, 92}
+                          else f"\\{byte:02X}" for byte in encoded)
+        self.string_counter += 1; name = f"@.str.{self.string_counter}"
+        self.globals.append(
+            f'{name} = private unnamed_addr constant [{len(encoded)} x i8] c"{escaped}"'
+        )
+        return IRValue(
+            f"getelementptr inbounds ([{len(encoded)} x i8], ptr {name}, i64 0, i64 0)",
+            "ptr", "texto"
+        )
+
+    def temporary(self) -> str:
+        self.counter += 1
+        return f"%t{self.counter}"
+
+    def label(self, prefix: str) -> str:
+        self.block += 1
+        return f"{prefix}.{self.block}"
+
+    def emit(self, value: str) -> None:
+        self.lines.append("  " + value)
+
+    def checked_failure(self, condition: str, message: str, valid_prefix: str) -> None:
+        """Ramifica a un capturador activo o termina con diagnóstico C-Forge."""
+        valid = self.label(valid_prefix)
+        if self.exception_targets:
+            handler, message_slot = self.exception_targets[-1]
+            text = self.string(message)
+            self.emit(f"store ptr {text.ref}, ptr {message_slot}")
+            self.emit(f"br i1 {condition}, label %{handler}, label %{valid}")
+        else:
+            failed_prefix = (valid_prefix[:-6] + ".error"
+                             if valid_prefix.endswith(".valid") else valid_prefix + ".error")
+            failed = self.label(failed_prefix)
+            self.emit(f"br i1 {condition}, label %{failed}, label %{valid}")
+            self.lines.append(f"{failed}:")
+            text = self.string("[C-Forge Runtime Exception] " + message)
+            ignored = self.temporary()
+            self.emit(f"{ignored} = call i32 (ptr, ...) @printf(ptr @.fmt_text, ptr {text.ref})")
+            self.emit("call void @abort()")
+            self.emit("unreachable")
+        self.lines.append(f"{valid}:")
+
+    def checked_failure_value(self, condition: str, message: str, valid_prefix: str) -> None:
+        """Versión para un mensaje UTF-8 entregado por una frontera FFI."""
+        valid = self.label(valid_prefix)
+        if self.exception_targets:
+            handler, message_slot = self.exception_targets[-1]
+            self.emit(f"store ptr {message}, ptr {message_slot}")
+            self.emit(f"br i1 {condition}, label %{handler}, label %{valid}")
+        else:
+            failed_prefix = (valid_prefix[:-6] + ".error"
+                             if valid_prefix.endswith(".valid") else valid_prefix + ".error")
+            failed = self.label(failed_prefix)
+            self.emit(f"br i1 {condition}, label %{failed}, label %{valid}")
+            self.lines.append(f"{failed}:")
+            prefix = self.string("[C-Forge Runtime Exception] ")
+            combined = self.temporary()
+            self.emit(f"{combined} = call ptr @cfv_concat(ptr {prefix.ref}, ptr {message})")
+            ignored = self.temporary()
+            self.emit(f"{ignored} = call i32 (ptr, ...) @printf(ptr @.fmt_text, ptr {combined})")
+            self.emit(f"call void @free(ptr {combined})")
+            self.emit("call void @abort()")
+            self.emit("unreachable")
+        self.lines.append(f"{valid}:")
+
+    def expression(self, node: tuple) -> IRValue:
+        kind = node[0]
+        if kind == "number": return IRValue(str(float(node[1])), "double", "numero")
+        if kind == "bool": return IRValue("1" if node[1] else "0", "i1", "booleano")
+        if kind == "string": return self.string(json.loads(node[1]))
+        if kind == "variable":
+            if node[1] not in self.variables: raise CForgevError(f"LLVM: variable desconocida '{node[1]}'")
+            pointer, value_type, semantic = self.variables[node[1]]
+            result = self.temporary(); self.emit(f"{result} = load {value_type}, ptr {pointer}")
+            return IRValue(result, value_type, semantic)
+        if kind == "list":
+            values = [self.number(self.expression(item)) for item in node[1]]
+            result = self.temporary(); self.emit(f"{result} = call ptr @cfv_list_new(i64 {len(values)})")
+            for index, value in enumerate(values):
+                self.emit(f"call void @cfv_list_set(ptr {result}, i64 {index}, double {value.ref})")
+            return IRValue(result, "ptr", "lista")
+        if kind in {"tuple", "set"}:
+            values = [self.expression(item) for item in node[1]]
+            semantics = [value.semantic for value in values]
+            if any(value not in {"numero", "texto", "booleano"} for value in semantics):
+                raise CForgevError("LLVM: tuplas y conjuntos admiten escalares tipados")
+            if kind == "set" and len(set(semantics)) > 1:
+                raise CForgevError("LLVM: un conjunto requiere elementos homogéneos")
+            result = self.temporary(); self.emit(
+                f"{result} = call ptr @cfv_collection_new(i64 {len(values)})"
+            )
+            unique = "1" if kind == "set" else "0"
+            for value in values:
+                if value.semantic == "numero":
+                    self.emit(f"call void @cfv_collection_add_number(ptr {result}, double {value.ref}, i1 {unique})")
+                elif value.semantic == "texto":
+                    self.emit(f"call void @cfv_collection_add_text(ptr {result}, ptr {value.ref}, i1 {unique})")
+                else:
+                    self.emit(f"call void @cfv_collection_add_bool(ptr {result}, i1 {value.ref}, i1 {unique})")
+            semantic = ("tupla<" + ",".join(semantics) + ">") if kind == "tuple" else (
+                "conjunto<" + (semantics[0] if semantics else "cualquiera") + ">"
+            )
+            return IRValue(result, "ptr", semantic)
+        if kind == "map":
+            entries = [(self.expression(key), self.expression(value)) for key, value in node[1]]
+            if any(key.semantic != "texto" for key, _ in entries):
+                raise CForgevError("LLVM: los mapas requieren claves de texto")
+            semantics = {value.semantic for _, value in entries}
+            if not entries:
+                value_semantic = "numero"
+            elif len(semantics) != 1 or None in semantics:
+                raise CForgevError("LLVM: un mapa debe tener valores homogéneos tipados")
+            else:
+                value_semantic = next(iter(semantics))
+            if value_semantic not in {"numero", "texto", "booleano"}:
+                raise CForgevError("LLVM: el mapa admite valores numero, texto o booleano")
+            value_type = self.llvm_type(value_semantic)
+            result = self.temporary()
+            self.emit(f"{result} = call ptr @cfv_map_new(i64 {len(entries)}, i64 {8 if value_type in {'double', 'ptr'} else 1})")
+            setter = {"numero": "cfv_map_set_number", "texto": "cfv_map_set_text", "booleano": "cfv_map_set_bool"}[value_semantic]
+            for index, (key, value) in enumerate(entries):
+                self.emit(f"call void @{setter}(ptr {result}, i64 {index}, ptr {key.ref}, {value_type} {value.ref})")
+            return IRValue(result, "ptr", f"mapa<{value_semantic}>")
+        if kind == "index":
+            owner = self.expression(node[1]); index = self.expression(node[2])
+            if self.is_list_semantic(owner.semantic):
+                index = self.number(index)
+                integer = self.temporary(); self.emit(f"{integer} = fptosi double {index.ref} to i64")
+                result = self.temporary(); self.emit(f"{result} = call double @cfv_list_get(ptr {owner.ref}, i64 {integer})")
+                return IRValue(result, "double", "numero")
+            map_semantic = self.map_value_semantic(owner.semantic)
+            if map_semantic:
+                if index.semantic != "texto": raise CForgevError("LLVM: la clave del mapa debe ser texto")
+                value_type = self.llvm_type(map_semantic)
+                getter = {"numero": "cfv_map_get_number", "texto": "cfv_map_get_text", "booleano": "cfv_map_get_bool"}[map_semantic]
+                result = self.temporary(); self.emit(
+                    f"{result} = call {value_type} @{getter}(ptr {owner.ref}, ptr {index.ref})"
+                )
+                return IRValue(result, value_type, map_semantic)
+            if owner.semantic and owner.semantic.startswith("tupla<") and owner.semantic.endswith(">"):
+                if node[2][0] != "number" or "." in node[2][1]:
+                    raise CForgevError("LLVM: el índice de tupla debe ser constante entero")
+                elements = owner.semantic[6:-1].split(",") if owner.semantic[6:-1] else []
+                position = int(node[2][1])
+                if position < 0 or position >= len(elements):
+                    raise CForgevError("LLVM: índice de tupla fuera de rango")
+                semantic = elements[position]; value_type = self.llvm_type(semantic)
+                getter = {"numero": "cfv_collection_get_number", "texto": "cfv_collection_get_text",
+                          "booleano": "cfv_collection_get_bool"}[semantic]
+                result = self.temporary(); self.emit(
+                    f"{result} = call {value_type} @{getter}(ptr {owner.ref}, i64 {position})"
+                )
+                return IRValue(result, value_type, semantic)
+            raise CForgevError("LLVM: el índice requiere una lista o mapa")
+        if kind == "field":
+            owner = self.expression(node[1])
+            if self.is_list_semantic(owner.semantic) and node[2] in {"length", "len"}:
+                length = self.temporary(); self.emit(f"{length} = call i64 @cfv_list_length(ptr {owner.ref})")
+                result = self.temporary(); self.emit(f"{result} = uitofp i64 {length} to double")
+                return IRValue(result, "double", "numero")
+            if self.map_value_semantic(owner.semantic) and node[2] in {"length", "len"}:
+                length = self.temporary(); self.emit(f"{length} = call i64 @cfv_map_length(ptr {owner.ref})")
+                result = self.temporary(); self.emit(f"{result} = uitofp i64 {length} to double")
+                return IRValue(result, "double", "numero")
+            if owner.semantic and owner.semantic.startswith(("tupla<", "conjunto<")) and node[2] in {"length", "len"}:
+                length = self.temporary(); self.emit(f"{length} = call i64 @cfv_collection_length(ptr {owner.ref})")
+                result = self.temporary(); self.emit(f"{result} = uitofp i64 {length} to double")
+                return IRValue(result, "double", "numero")
+            if owner.semantic in self.structures or owner.semantic in self.classes:
+                fields = self.fields(owner.semantic); names = [field[0] for field in fields]
+                if node[2] not in names: raise CForgevError(f"LLVM: campo desconocido '{node[2]}'")
+                index = names.index(node[2]); field_type = fields[index][1]
+                pointer = self.temporary(); self.emit(
+                    f"{pointer} = getelementptr {self.type_symbol(owner.semantic)}, ptr {owner.ref}, i32 0, i32 {index}"
+                )
+                result = self.temporary(); llvm_type = self.llvm_type(field_type)
+                self.emit(f"{result} = load {llvm_type}, ptr {pointer}")
+                return IRValue(result, llvm_type, field_type)
+            raise CForgevError(f"LLVM: miembro no admitido '{node[2]}'")
+        if kind == "method_call":
+            owner = self.expression(node[1])
+            if self.is_list_semantic(owner.semantic) and node[2] in {"append", "push", "agregar"} and len(node[3]) == 1:
+                value = self.number(self.expression(node[3][0]))
+                self.emit(f"call void @cfv_list_append(ptr {owner.ref}, double {value.ref})")
+                return owner
+            if self.is_list_semantic(owner.semantic) and node[2] in {"length", "len"} and not node[3]:
+                length = self.temporary(); self.emit(f"{length} = call i64 @cfv_list_length(ptr {owner.ref})")
+                result = self.temporary(); self.emit(f"{result} = uitofp i64 {length} to double")
+                return IRValue(result, "double", "numero")
+            if self.map_value_semantic(owner.semantic) and node[2] in {"length", "len"} and not node[3]:
+                length = self.temporary(); self.emit(f"{length} = call i64 @cfv_map_length(ptr {owner.ref})")
+                result = self.temporary(); self.emit(f"{result} = uitofp i64 {length} to double")
+                return IRValue(result, "double", "numero")
+            if owner.semantic and owner.semantic.startswith(("tupla<", "conjunto<")) and node[2] in {"length", "len"} and not node[3]:
+                length = self.temporary(); self.emit(f"{length} = call i64 @cfv_collection_length(ptr {owner.ref})")
+                result = self.temporary(); self.emit(f"{result} = uitofp i64 {length} to double")
+                return IRValue(result, "double", "numero")
+            if owner.semantic in self.classes:
+                methods = {method[2]: method for method in self.classes[owner.semantic][1]}
+                method = methods.get(node[2])
+                if method is None: raise CForgevError(f"LLVM: método desconocido '{node[2]}'")
+                arguments = [self.expression(argument) for argument in node[3]]
+                expected = list(method[5]) if len(method) > 5 else ["cualquiera"] * len(method[3])
+                if len(arguments) != len(expected): raise CForgevError("LLVM: cantidad incorrecta de argumentos")
+                for value, wanted in zip(arguments, expected):
+                    if wanted != "cualquiera" and value.type != self.llvm_type(wanted):
+                        raise CForgevError(f"LLVM: argumento incompatible para método '{node[2]}'")
+                returned = method[6] if len(method) > 6 else "cualquiera"
+                result_type = self.llvm_type(returned); result = self.temporary()
+                params = [f"ptr {owner.ref}", *(f"{value.type} {value.ref}" for value in arguments)]
+                self.emit(f"{result} = call {result_type} @{owner.semantic}_{node[2]}(" + ", ".join(params) + ")")
+                return IRValue(result, result_type, returned)
+            raise CForgevError(f"LLVM: método no admitido '{node[2]}'")
+        if kind == "unary":
+            value = self.expression(node[2])
+            if node[1] == "no":
+                condition = self.condition(value); result = self.temporary()
+                self.emit(f"{result} = xor i1 {condition.ref}, true"); return IRValue(result, "i1")
+            number = self.number(value); result = self.temporary()
+            self.emit(f"{result} = fneg double {number.ref}"); return IRValue(result, "double")
+        if kind == "binary":
+            op = node[1]
+            left, right = self.expression(node[2]), self.expression(node[3])
+            if op in {"+", "-", "*", "/"}:
+                if op == "+" and left.semantic == right.semantic == "texto":
+                    result = self.temporary(); self.emit(
+                        f"{result} = call ptr @cfv_concat(ptr {left.ref}, ptr {right.ref})"
+                    ); return IRValue(result, "ptr")
+                left, right = self.number(left), self.number(right)
+                if op == "/":
+                    zero = self.temporary()
+                    self.emit(f"{zero} = fcmp oeq double {right.ref}, 0.0")
+                    self.checked_failure(zero, "no se puede dividir por cero", "division.valid")
+                result = self.temporary(); opcode = {"+": "fadd", "-": "fsub", "*": "fmul", "/": "fdiv"}[op]
+                self.emit(f"{result} = {opcode} double {left.ref}, {right.ref}"); return IRValue(result, "double")
+            if op in {">", ">=", "<", "<=", "==", "!="}:
+                if left.semantic == right.semantic == "texto":
+                    if op not in {"==", "!="}: raise CForgevError("LLVM: textos solo admiten == y !=")
+                    compared = self.temporary(); self.emit(
+                        f"{compared} = call i32 @strcmp(ptr {left.ref}, ptr {right.ref})"
+                    )
+                    result = self.temporary(); predicate = "eq" if op == "==" else "ne"
+                    self.emit(f"{result} = icmp {predicate} i32 {compared}, 0")
+                    return IRValue(result, "i1")
+                left, right = self.number(left), self.number(right)
+                predicate = {">": "ogt", ">=": "oge", "<": "olt", "<=": "ole", "==": "oeq", "!=": "one"}[op]
+                result = self.temporary(); self.emit(f"{result} = fcmp {predicate} double {left.ref}, {right.ref}")
+                return IRValue(result, "i1")
+            if op in {"y", "o"}:
+                left, right = self.condition(left), self.condition(right)
+                result = self.temporary(); self.emit(f"{result} = {'and' if op == 'y' else 'or'} i1 {left.ref}, {right.ref}")
+                return IRValue(result, "i1")
+        if kind == "call":
+            if node[1] in {"mover", "prestar", "prestar_mut"} and len(node[2]) == 1:
+                return self.expression(node[2][0])
+            if node[1] in {"soltar_prestamo", "destruir"} and len(node[2]) == 1:
+                value = self.expression(node[2][0])
+                if node[1] == "destruir" and self.is_list_semantic(value.semantic):
+                    self.emit(f"call void @cfv_list_free(ptr {value.ref})")
+                elif node[1] == "destruir" and self.map_value_semantic(value.semantic):
+                    self.emit(f"call void @cfv_map_free(ptr {value.ref})")
+                elif node[1] == "destruir" and value.semantic and value.semantic.startswith(("tupla<", "conjunto<")):
+                    self.emit(f"call void @cfv_collection_free(ptr {value.ref})")
+                elif node[1] == "destruir" and value.semantic and value.semantic.startswith("opcion"):
+                    self.emit(f"call void @cfv_option_free(ptr {value.ref})")
+                elif node[1] == "destruir" and (value.semantic in self.structures or value.semantic in self.classes):
+                    self.emit(f"call void @cfv_drop_{value.semantic}(ptr {value.ref})")
+                return IRValue("0.0", "double")
+            if node[1] == "algunos":
+                if len(node[2]) != 1: raise CForgevError("LLVM: algunos requiere un argumento")
+                value = self.expression(node[2][0])
+                tags = {"numero": 1, "texto": 2, "booleano": 3}
+                if value.semantic not in tags:
+                    raise CForgevError("LLVM: opcion admite escalares numero, texto o booleano")
+                result = self.temporary(); self.emit(f"{result} = call ptr @cfv_option_new(i8 {tags[value.semantic]})")
+                setter = {"numero": "cfv_option_set_number", "texto": "cfv_option_set_text",
+                          "booleano": "cfv_option_set_bool"}[value.semantic]
+                self.emit(f"call void @{setter}(ptr {result}, {value.type} {value.ref})")
+                return IRValue(result, "ptr", f"opcion<{value.semantic}>")
+            if node[1] == "ninguno":
+                if node[2]: raise CForgevError("LLVM: ninguno no recibe argumentos")
+                result = self.temporary(); self.emit(f"{result} = call ptr @cfv_option_new(i8 0)")
+                return IRValue(result, "ptr", "opcion<cualquiera>")
+            if node[1] == "es_algunos":
+                if len(node[2]) != 1: raise CForgevError("LLVM: es_algunos requiere una opcion")
+                value = self.expression(node[2][0])
+                if not value.semantic or not value.semantic.startswith("opcion"):
+                    raise CForgevError("LLVM: es_algunos requiere una opcion")
+                result = self.temporary(); self.emit(f"{result} = call i1 @cfv_option_has_value(ptr {value.ref})")
+                return IRValue(result, "i1", "booleano")
+            if node[1] == "desenvolver":
+                if len(node[2]) != 1: raise CForgevError("LLVM: desenvolver requiere una opcion")
+                value = self.expression(node[2][0])
+                if not value.semantic or not value.semantic.startswith("opcion<"):
+                    raise CForgevError("LLVM: desenvolver requiere una opcion tipada")
+                contained = value.semantic[7:-1]
+                if contained not in {"numero", "texto", "booleano"}:
+                    raise CForgevError("LLVM: no se puede desenvolver una opcion sin tipo escalar concreto")
+                has_value = self.temporary(); self.emit(
+                    f"{has_value} = call i1 @cfv_option_has_value(ptr {value.ref})"
+                )
+                missing = self.temporary(); self.emit(f"{missing} = xor i1 {has_value}, true")
+                self.checked_failure(missing, "no se puede desenvolver ninguno", "option.valid")
+                getter = {"numero": "cfv_option_get_number", "texto": "cfv_option_get_text",
+                          "booleano": "cfv_option_get_bool"}[contained]
+                result_type = self.llvm_type(contained); result = self.temporary()
+                self.emit(f"{result} = call {result_type} @{getter}(ptr {value.ref})")
+                return IRValue(result, result_type, contained)
+            if node[1] in {"longitud", "len"} and len(node[2]) == 1:
+                owner = self.expression(node[2][0])
+                if self.is_list_semantic(owner.semantic):
+                    length = self.temporary(); self.emit(f"{length} = call i64 @cfv_list_length(ptr {owner.ref})")
+                elif self.map_value_semantic(owner.semantic):
+                    length = self.temporary(); self.emit(f"{length} = call i64 @cfv_map_length(ptr {owner.ref})")
+                elif owner.semantic and owner.semantic.startswith(("tupla<", "conjunto<")):
+                    length = self.temporary(); self.emit(f"{length} = call i64 @cfv_collection_length(ptr {owner.ref})")
+                else: raise CForgevError("LLVM: longitud requiere lista o mapa")
+                result = self.temporary(); self.emit(f"{result} = uitofp i64 {length} to double")
+                return IRValue(result, "double", "numero")
+            if node[1] in self.structures or node[1] in self.classes:
+                fields = self.fields(node[1]); arguments = [self.expression(argument) for argument in node[2]]
+                if len(arguments) != len(fields): raise CForgevError(f"LLVM: '{node[1]}' requiere {len(fields)} campos")
+                result = self.temporary(); size_ptr = self.temporary(); size = self.temporary()
+                symbol = self.type_symbol(node[1])
+                self.emit(f"{size_ptr} = getelementptr {symbol}, ptr null, i32 1")
+                self.emit(f"{size} = ptrtoint ptr {size_ptr} to i64")
+                self.emit(f"{result} = call ptr @malloc(i64 {size})")
+                for index, ((_, field_type), value) in enumerate(zip(fields, arguments)):
+                    expected = self.llvm_type(field_type)
+                    if value.type != expected: raise CForgevError(f"LLVM: campo {index + 1} incompatible para '{node[1]}'")
+                    slot = self.temporary(); self.emit(f"{slot} = getelementptr {symbol}, ptr {result}, i32 0, i32 {index}")
+                    self.emit(f"store {expected} {value.ref}, ptr {slot}")
+                return IRValue(result, "ptr", node[1])
+            if node[1] in self.ffi_functions and self.ffi_functions[node[1]][2]:
+                expected, returned, _ = self.ffi_functions[node[1]]
+                arguments = [self.expression(argument) for argument in node[2]]
+                llvm_expected = [self.llvm_type(value) for value in expected]
+                if len(arguments) != len(llvm_expected):
+                    raise CForgevError(f"LLVM FFI: cantidad incorrecta para '{node[1]}'")
+                if any(value.type != wanted for value, wanted in zip(arguments, llvm_expected)):
+                    raise CForgevError(f"LLVM FFI: argumentos incompatibles para '{node[1]}'")
+                result_type = self.llvm_type(returned)
+                output = self.temporary(); error = self.temporary()
+                if returned == "lista<numero>":
+                    self.emit(f"{output} = alloca %CfvOwnedNumberList")
+                    self.emit(f"store %CfvOwnedNumberList zeroinitializer, ptr {output}")
+                elif returned == "texto":
+                    self.emit(f"{output} = alloca %CfvOwnedText")
+                    self.emit(f"store %CfvOwnedText zeroinitializer, ptr {output}")
+                else:
+                    self.emit(f"{output} = alloca {result_type}")
+                self.emit(f"{error} = alloca ptr")
+                self.emit(f"store ptr null, ptr {error}")
+                status = self.temporary()
+                call_arguments = [*(self.ffi_call_argument(declared, value)
+                                    for declared, value in zip(expected, arguments)),
+                                  f"ptr {output}", f"ptr {error}"]
+                self.emit(f"{status} = call i32 @{node[1]}(" + ", ".join(call_arguments) + ")")
+                failed = self.temporary(); self.emit(f"{failed} = icmp ne i32 {status}, 0")
+                raw_message = self.temporary(); self.emit(f"{raw_message} = load ptr, ptr {error}")
+                missing_message = self.temporary(); self.emit(
+                    f"{missing_message} = icmp eq ptr {raw_message}, null"
+                )
+                fallback = self.string(f"{node[1]} falló sin mensaje")
+                message = self.temporary(); self.emit(
+                    f"{message} = select i1 {missing_message}, ptr {fallback.ref}, ptr {raw_message}"
+                )
+                self.checked_failure_value(failed, message, "ffi.valid")
+                result = self.temporary()
+                if returned == "lista<numero>":
+                    data_slot = self.temporary(); data = self.temporary()
+                    length_slot = self.temporary(); length = self.temporary()
+                    missing = self.temporary(); nonempty = self.temporary(); invalid = self.temporary()
+                    self.emit(f"{data_slot} = getelementptr %CfvOwnedNumberList, ptr {output}, i32 0, i32 0")
+                    self.emit(f"{data} = load ptr, ptr {data_slot}")
+                    self.emit(f"{length_slot} = getelementptr %CfvOwnedNumberList, ptr {output}, i32 0, i32 1")
+                    self.emit(f"{length} = load i64, ptr {length_slot}")
+                    self.emit(f"{missing} = icmp eq ptr {data}, null")
+                    self.emit(f"{nonempty} = icmp ne i64 {length}, 0")
+                    self.emit(f"{invalid} = and i1 {missing}, {nonempty}")
+                    invalid_message = self.string(f"{node[1]} devolvió una lista ABI inválida")
+                    self.emit(f"call void @cfv_ffi_release_if(i1 {invalid}, ptr {output})")
+                    self.checked_failure_value(invalid, invalid_message.ref, "ffi.list.valid")
+                    self.emit(f"{result} = call ptr @cfv_list_from_ffi(ptr {output})")
+                elif returned == "texto":
+                    data_slot = self.temporary(); data = self.temporary()
+                    length_slot = self.temporary(); length = self.temporary(); invalid = self.temporary()
+                    self.emit(f"{data_slot} = getelementptr %CfvOwnedText, ptr {output}, i32 0, i32 0")
+                    self.emit(f"{data} = load ptr, ptr {data_slot}")
+                    self.emit(f"{length_slot} = getelementptr %CfvOwnedText, ptr {output}, i32 0, i32 1")
+                    self.emit(f"{length} = load i64, ptr {length_slot}")
+                    self.emit(f"{invalid} = call i1 @cfv_ffi_text_invalid(ptr {data}, i64 {length})")
+                    invalid_message = self.string(f"{node[1]} devolvió texto UTF-8 ABI inválido")
+                    self.emit(f"call void @cfv_ffi_release_if(i1 {invalid}, ptr {output})")
+                    self.checked_failure_value(invalid, invalid_message.ref, "ffi.text.valid")
+                    self.emit(f"{result} = call ptr @cfv_text_from_ffi(ptr {output})")
+                else:
+                    self.emit(f"{result} = load {result_type}, ptr {output}")
+                return IRValue(result, result_type, returned)
+            if node[1] in self.ffi_functions:
+                expected, returned, _ = self.ffi_functions[node[1]]
+                arguments = [self.expression(argument) for argument in node[2]]
+                llvm_expected = [self.llvm_type(value) for value in expected]
+                if len(arguments) != len(llvm_expected):
+                    raise CForgevError(f"LLVM FFI: cantidad incorrecta para '{node[1]}'")
+                if any(value.type != wanted for value, wanted in zip(arguments, llvm_expected)):
+                    raise CForgevError(f"LLVM FFI: argumentos incompatibles para '{node[1]}'")
+                result_type = self.llvm_type(returned)
+                result = self.temporary()
+                call_arguments = [self.ffi_call_argument(declared, value)
+                                  for declared, value in zip(expected, arguments)]
+                self.emit(f"{result} = call {result_type} @{node[1]}(" + ", ".join(call_arguments) + ")")
+                return IRValue(result, result_type, returned)
+            if node[1] in self.generic_functions:
+                function = self.generic_functions[node[1]]
+                arguments = [self.expression(argument) for argument in node[2]]
+                expected = list(function[4]); parameters = list(function[8])
+                if len(arguments) != len(expected): raise CForgevError("LLVM: cantidad incorrecta de argumentos genéricos")
+                substitutions: dict[str, str] = {}
+                for wanted, value in zip(expected, arguments):
+                    actual = value.semantic or {"double": "numero", "i1": "booleano", "ptr": "texto"}.get(value.type)
+                    if wanted in parameters:
+                        previous = substitutions.setdefault(wanted, actual or "cualquiera")
+                        if actual and previous != actual: raise CForgevError(f"LLVM: sustitución contradictoria para '{wanted}'")
+                    elif value.type != self.llvm_type(wanted):
+                        raise CForgevError(f"LLVM: argumento genérico requiere {wanted}")
+                if any(parameter not in substitutions or substitutions[parameter] == "cualquiera" for parameter in parameters):
+                    raise CForgevError("LLVM: no se pudieron inferir todos los parámetros genéricos")
+                key = (node[1], tuple(substitutions[parameter] for parameter in parameters))
+                symbol = self.specializations.get(key)
+                if symbol is None:
+                    suffix = "__".join(substitutions[parameter] for parameter in parameters)
+                    symbol = f"{node[1]}__{suffix}"; self.specializations[key] = symbol
+                    self.pending_specializations.append((function, substitutions, symbol))
+                returned = substitutions.get(function[5], function[5]); result_type = self.llvm_type(returned)
+                result = self.temporary(); self.emit(f"{result} = call {result_type} @{symbol}(" + ", ".join(
+                    f"{value.type} {value.ref}" for value in arguments) + ")")
+                return IRValue(result, result_type, returned)
+            if node[1] not in self.signatures:
+                raise CForgevError(f"LLVM: función desconocida '{node[1]}'")
+            expected, returned = self.signatures[node[1]]
+            arguments = [self.expression(argument) for argument in node[2]]
+            llvm_expected = [self.llvm_type(value) for value in expected]
+            if len(arguments) != len(llvm_expected): raise CForgevError("LLVM: cantidad incorrecta de argumentos")
+            if any(value.type != wanted for value, wanted in zip(arguments, llvm_expected)):
+                raise CForgevError(f"LLVM: argumentos incompatibles para '{node[1]}'")
+            result = self.temporary()
+            result_type = self.llvm_type(returned)
+            self.emit(f"{result} = call {result_type} @{node[1]}(" + ", ".join(f"{value.type} {value.ref}" for value in arguments) + ")")
+            return IRValue(result, result_type, returned)
+        raise CForgevError(f"LLVM 1.0 todavía no admite la expresión '{kind}'")
+
+    def number(self, value: IRValue) -> IRValue:
+        if value.type == "double": return value
+        if value.type != "i1": raise CForgevError("LLVM: esta operación requiere un número")
+        result = self.temporary(); self.emit(f"{result} = uitofp i1 {value.ref} to double"); return IRValue(result, "double")
+
+    def condition(self, value: IRValue) -> IRValue:
+        if value.type == "i1": return value
+        if value.type == "ptr":
+            result = self.temporary(); self.emit(f"{result} = icmp ne ptr {value.ref}, null")
+            return IRValue(result, "i1")
+        result = self.temporary(); self.emit(f"{result} = fcmp one double {value.ref}, 0.0"); return IRValue(result, "i1")
+
+    def statements(self, statements: list[tuple]) -> bool:
+        terminated = False
+        for statement in statements:
+            if terminated: break
+            kind = statement[0]
+            if kind == "let":
+                value = self.expression(statement[3]); pointer = f"%v.{statement[1]}.{self.counter}"
+                self.emit(f"{pointer} = alloca {value.type}"); self.emit(f"store {value.type} {value.ref}, ptr {pointer}")
+                semantic = value.semantic
+                if (statement[2] and statement[2].startswith("opcion<")
+                        and value.semantic == "opcion<cualquiera>"):
+                    semantic = statement[2]
+                self.variables[statement[1]] = (pointer, value.type, semantic)
+            elif kind == "assign":
+                if statement[1] not in self.variables: raise CForgevError(f"LLVM: variable desconocida '{statement[1]}'")
+                pointer, expected, semantic = self.variables[statement[1]]; value = self.expression(statement[2])
+                if value.type != expected: raise CForgevError(f"LLVM: asignación incompatible para '{statement[1]}'")
+                if semantic and value.semantic and semantic != value.semantic:
+                    raise CForgevError(f"LLVM: asignación semánticamente incompatible para '{statement[1]}'")
+                self.emit(f"store {expected} {value.ref}, ptr {pointer}")
+            elif kind == "field_assign":
+                owner = self.expression(("variable", statement[1]))
+                if owner.semantic not in self.structures and owner.semantic not in self.classes:
+                    raise CForgevError("LLVM: asignación de campo requiere un objeto nominal")
+                fields = self.fields(owner.semantic); names = [field[0] for field in fields]
+                if statement[2] not in names: raise CForgevError(f"LLVM: campo desconocido '{statement[2]}'")
+                index = names.index(statement[2]); field_type = fields[index][1]
+                value = self.expression(statement[3]); expected = self.llvm_type(field_type)
+                if value.type != expected: raise CForgevError(f"LLVM: asignación incompatible para campo '{statement[2]}'")
+                slot = self.temporary(); self.emit(
+                    f"{slot} = getelementptr {self.type_symbol(owner.semantic)}, ptr {owner.ref}, i32 0, i32 {index}"
+                ); self.emit(f"store {expected} {value.ref}, ptr {slot}")
+            elif kind == "print":
+                value = self.expression(statement[1]); result = self.temporary()
+                if self.is_list_semantic(value.semantic):
+                    self.emit(f"call void @cfv_list_print(ptr {value.ref})")
+                elif value.semantic and value.semantic.startswith(("tupla<", "conjunto<")):
+                    is_set = "1" if value.semantic.startswith("conjunto<") else "0"
+                    self.emit(f"call void @cfv_collection_print(ptr {value.ref}, i1 {is_set})")
+                elif value.semantic and value.semantic.startswith("opcion"):
+                    self.emit(f"call void @cfv_option_print(ptr {value.ref})")
+                elif value.type == "ptr":
+                    self.emit(f"{result} = call i32 (ptr, ...) @printf(ptr @.fmt_text, ptr {value.ref})")
+                elif value.type == "i1":
+                    selected = self.temporary(); self.emit(
+                        f"{selected} = select i1 {value.ref}, ptr @.true_text, ptr @.false_text"
+                    )
+                    self.emit(f"{result} = call i32 (ptr, ...) @printf(ptr @.fmt_text, ptr {selected})")
+                else:
+                    value = self.number(value)
+                    self.emit(f"{result} = call i32 (ptr, ...) @printf(ptr @.fmt_number, double {value.ref})")
+            elif kind == "expression": self.expression(statement[1])
+            elif kind == "return":
+                value = self.expression(statement[1])
+                if value.type != self.return_type: raise CForgevError("LLVM: tipo de retorno incompatible")
+                self.emit(f"ret {value.type} {value.ref}"); terminated = True
+            elif kind == "if":
+                condition = self.condition(self.expression(statement[1])); yes, no, end = self.label("if.yes"), self.label("if.no"), self.label("if.end")
+                self.emit(f"br i1 {condition.ref}, label %{yes}, label %{no}")
+                self.lines.append(f"{yes}:"); yes_term = self.statements(statement[2])
+                if not yes_term: self.emit(f"br label %{end}")
+                self.lines.append(f"{no}:"); no_term = self.statements(statement[3])
+                if not no_term: self.emit(f"br label %{end}")
+                if yes_term and no_term: terminated = True
+                else: self.lines.append(f"{end}:")
+            elif kind == "while":
+                test, body, end = self.label("while.test"), self.label("while.body"), self.label("while.end")
+                self.emit(f"br label %{test}"); self.lines.append(f"{test}:")
+                condition = self.condition(self.expression(statement[1])); self.emit(f"br i1 {condition.ref}, label %{body}, label %{end}")
+                self.lines.append(f"{body}:"); body_term = self.statements(statement[2])
+                if not body_term: self.emit(f"br label %{test}")
+                self.lines.append(f"{end}:")
+            elif kind == "try":
+                handler, end = self.label("try.catch"), self.label("try.end")
+                outer_variables = dict(self.variables)
+                message_slot = f"%try.error.{self.counter}.{self.block}"
+                self.emit(f"{message_slot} = alloca ptr")
+                self.exception_targets.append((handler, message_slot))
+                protected_term = self.statements(statement[1])
+                self.exception_targets.pop()
+                if not protected_term: self.emit(f"br label %{end}")
+                self.lines.append(f"{handler}:")
+                self.variables = dict(outer_variables)
+                self.variables[statement[2]] = (message_slot, "ptr", "texto")
+                handler_term = self.statements(statement[3])
+                if not handler_term: self.emit(f"br label %{end}")
+                self.variables = outer_variables
+                if protected_term and handler_term:
+                    terminated = True
+                else:
+                    self.lines.append(f"{end}:")
+            elif kind in {"region", "unsafe"}:
+                terminated = self.statements(statement[1])
+            elif kind in {"structure", "class", "interface", "ffi_function"}:
+                continue
+            else: raise CForgevError(f"LLVM 1.0 todavía no admite la sentencia '{kind}'")
+        return terminated
+
+    def function(self, statement: tuple) -> str:
+        self.lines, self.counter, self.block = [], 0, 0
+        self.variables = {}
+        self.exception_targets = []
+        parameters = statement[2]
+        parameter_types = statement[4] if len(statement) > 4 else ["numero"] * len(parameters)
+        llvm_parameters = [self.llvm_type(value) for value in parameter_types]
+        self.return_type = self.llvm_type(statement[5] if len(statement) > 5 else "numero")
+        signature = ", ".join(f"{value_type} %arg.{name}" for name, value_type in zip(parameters, llvm_parameters))
+        self.lines.append(f"define {self.return_type} @{statement[1]}({signature}) {{")
+        for name, value_type in zip(parameters, llvm_parameters):
+            pointer = f"%v.{name}.arg"; self.emit(f"{pointer} = alloca {value_type}")
+            semantic = parameter_types[parameters.index(name)]
+            self.emit(f"store {value_type} %arg.{name}, ptr {pointer}"); self.variables[name] = (pointer, value_type, semantic)
+        if not self.statements(statement[3]):
+            default = "null" if self.return_type == "ptr" else ("0" if self.return_type == "i1" else "0.0")
+            self.emit(f"ret {self.return_type} {default}")
+        self.lines.append("}"); return "\n".join(self.lines)
+
+    def method_function(self, class_name: str, method: tuple) -> str:
+        parameter_types = list(method[5]) if len(method) > 5 else ["cualquiera"] * len(method[3])
+        return_type = method[6] if len(method) > 6 else "cualquiera"
+        lowered = ("function", f"{class_name}_{method[2]}", ["este", *method[3]],
+                   method[4], [class_name, *parameter_types], return_type, False, False, [])
+        return self.function(lowered)
+
+    def specialized_function(self, function: tuple, substitutions: dict[str, str], symbol: str) -> str:
+        parameter_types = [substitutions.get(value, value) for value in function[4]]
+        return_type = substitutions.get(function[5], function[5])
+        lowered = ("function", symbol, function[2], function[3], parameter_types,
+                   return_type, False, False, [])
+        return self.function(lowered)
+
+    def drop_function(self, name: str, fields: list[tuple[str, str]]) -> str:
+        lines = [f"define void @cfv_drop_{name}(ptr %object) {{"]
+        for index, (_, field_type) in enumerate(fields):
+            destructor = None
+            if field_type == "lista": destructor = "cfv_list_free"
+            elif field_type == "mapa" or field_type.startswith("mapa<"): destructor = "cfv_map_free"
+            elif field_type in {"tupla", "conjunto"} or field_type.startswith(("tupla<", "conjunto<")):
+                destructor = "cfv_collection_free"
+            elif field_type == "opcion" or field_type.startswith("opcion<"):
+                destructor = "cfv_option_free"
+            elif field_type in self.structures or field_type in self.classes:
+                destructor = f"cfv_drop_{field_type}"
+            if destructor:
+                slot = f"%drop.slot.{index}"
+                value = f"%drop.value.{index}"
+                lines.append(
+                    f"  {slot} = getelementptr {self.type_symbol(name)}, ptr %object, i32 0, i32 {index}"
+                )
+                lines.append(f"  {value} = load ptr, ptr {slot}")
+                lines.append(f"  call void @{destructor}(ptr {value})")
+        lines.extend(["  call void @free(ptr %object)", "  ret void", "}"])
+        return "\n".join(lines)
+
+    def generate(self, program: Program) -> str:
+        if any(len(function) > 6 and function[6] for function in program.functions):
+            raise CForgevError("LLVM 1.0 todavía no admite funciones async; usa VM o backend C++")
+        self.structures = {statement[1]: statement[2] for statement in program.statements
+                           if statement[0] == "structure"}
+        self.classes = {statement[1]: (statement[2], statement[3]) for statement in program.statements
+                        if statement[0] == "class"}
+        self.generic_functions = {function[1]: function for function in program.functions
+                                  if len(function) > 8 and function[8]}
+        self.ffi_functions = {
+            statement[1]: (list(statement[3]), statement[4], bool(statement[5]))
+            for statement in program.statements if statement[0] == "ffi_function"
+        }
+        allowed_ffi_parameters = {
+            "numero", "booleano", "texto", "lista<numero>", "mapa<numero>"
+        }
+        allowed_ffi_returns = {"numero", "booleano", "texto", "lista<numero>"}
+        for name, (parameters, returned, checked) in self.ffi_functions.items():
+            unsafe_nominals = [
+                value for value in parameters
+                if value in self.structures or value in self.classes
+                if any(field_type not in {"numero", "texto", "booleano"}
+                       for _, field_type in self.fields(value))
+            ]
+            unsupported = [
+                value for value in parameters
+                if value not in allowed_ffi_parameters
+                and value not in self.structures and value not in self.classes
+            ]
+            if unsafe_nominals:
+                raise CForgevError(
+                    f"LLVM FFI: '{name}' no puede prestar {unsafe_nominals[0]} porque contiene "
+                    "campos no escalares"
+                )
+            if returned not in allowed_ffi_returns or unsupported or (
+                returned == "lista<numero>" and not checked
+            ):
+                raise CForgevError(
+                    f"LLVM FFI: '{name}' admite escalares, vistas numéricas y objetos escalares; "
+                    "los retornos propietarios requieren extern_c segura"
+                )
+        self.signatures = {
+            function[1]: (
+                list(function[4]) if len(function) > 4 else ["numero"] * len(function[2]),
+                function[5] if len(function) > 5 else "numero",
+            ) for function in program.functions if function[1] not in self.generic_functions
+        }
+        self.signatures.update({
+            name: (parameters, returned)
+            for name, (parameters, returned, _) in self.ffi_functions.items()
+        })
+        functions = [self.function(function) for function in program.functions
+                     if function[1] not in self.generic_functions]
+        functions += [self.method_function(class_name, method)
+                      for class_name, (_, methods) in self.classes.items() for method in methods]
+        functions += [self.drop_function(name, fields) for name, fields in self.structures.items()]
+        functions += [self.drop_function(name, definition[0]) for name, definition in self.classes.items()]
+        self.lines, self.counter, self.block, self.variables = ["define i32 @main() {"], 0, 0, {}
+        self.exception_targets = []
+        terminated = self.statements(program.statements)
+        if not terminated: self.emit("ret i32 0")
+        self.lines.append("}")
+        main_ir = "\n".join(self.lines)
+        cursor = 0
+        while cursor < len(self.pending_specializations):
+            function, substitutions, symbol = self.pending_specializations[cursor]; cursor += 1
+            functions.append(self.specialized_function(function, substitutions, symbol))
+        nominal_types = "\n".join(
+            f"{self.type_symbol(name)} = type {{" + ", ".join(
+                self.llvm_type(field_type) for _, field_type in fields
+            ) + "}"
+            for name, fields in [
+                *self.structures.items(),
+                *((name, definition[0]) for name, definition in self.classes.items()),
+            ]
+        )
+        prelude = '''; C-Forge LLVM IR 1.4
+@.fmt_number = private unnamed_addr constant [7 x i8] c"%.15g\\0A\\00"
+@.fmt_text = private unnamed_addr constant [4 x i8] c"%s\\0A\\00"
+@.true_text = private unnamed_addr constant [10 x i8] c"verdadero\\00"
+@.false_text = private unnamed_addr constant [6 x i8] c"falso\\00"
+@.fmt_raw = private unnamed_addr constant [3 x i8] c"%s\\00"
+@.fmt_list_number = private unnamed_addr constant [6 x i8] c"%.15g\\00"
+@.list_open = private unnamed_addr constant [2 x i8] c"[\\00"
+@.list_separator = private unnamed_addr constant [3 x i8] c", \\00"
+@.list_close = private unnamed_addr constant [3 x i8] c"]\\0A\\00"
+@.tuple_open = private unnamed_addr constant [2 x i8] c"(\\00"
+@.set_open = private unnamed_addr constant [10 x i8] c"conjunto(\\00"
+@.collection_close = private unnamed_addr constant [3 x i8] c")\\0A\\00"
+@.option_open = private unnamed_addr constant [9 x i8] c"algunos(\\00"
+@.option_none = private unnamed_addr constant [8 x i8] c"ninguno\\00"
+%CfvList = type { i64, i64, ptr }
+%CfvNumberSlice = type { ptr, i64 }
+%CfvOwnedNumberList = type { ptr, i64, ptr, ptr }
+%CfvOwnedText = type { ptr, i64, ptr, ptr }
+%CfvNumberMapView = type { ptr, ptr, i64 }
+%CfvAbiValue = type { i32, i32, i64, double, ptr, ptr, ptr }
+%CfvRecordField = type { ptr, %CfvAbiValue }
+%CfvRecordView = type { ptr, ptr, i64 }
+%CfvMap = type { i64, ptr, ptr, i64 }
+%CfvScalarValue = type { i8, double, ptr }
+%CfvScalarCollection = type { i64, i64, ptr }
+%CfvOption = type { i8, double, ptr }
+declare i32 @printf(ptr, ...)
+declare i64 @strlen(ptr)
+declare ptr @malloc(i64)
+declare ptr @realloc(ptr, i64)
+declare void @free(ptr)
+declare ptr @memcpy(ptr, ptr, i64)
+declare void @abort()
+declare ptr @strcpy(ptr, ptr)
+declare ptr @strcat(ptr, ptr)
+declare i32 @strcmp(ptr, ptr)
+define ptr @cfv_concat(ptr %a, ptr %b) {
+  %la = call i64 @strlen(ptr %a)
+  %lb = call i64 @strlen(ptr %b)
+  %sum = add i64 %la, %lb
+  %size = add i64 %sum, 1
+  %out = call ptr @malloc(i64 %size)
+  %copy = call ptr @strcpy(ptr %out, ptr %a)
+  %append = call ptr @strcat(ptr %out, ptr %b)
+  ret ptr %out
+}
+define void @cfv_ffi_release_if(i1 %condition, ptr %foreign) {
+entry:
+  br i1 %condition, label %inspect, label %done
+inspect:
+  %ownerp = getelementptr %CfvOwnedText, ptr %foreign, i32 0, i32 2
+  %releasep = getelementptr %CfvOwnedText, ptr %foreign, i32 0, i32 3
+  %owner = load ptr, ptr %ownerp
+  %release = load ptr, ptr %releasep
+  %hasrelease = icmp ne ptr %release, null
+  br i1 %hasrelease, label %release.call, label %done
+release.call:
+  call void %release(ptr %owner)
+  br label %done
+done:
+  ret void
+}
+define i1 @cfv_ffi_text_invalid(ptr %data, i64 %len) {
+entry:
+  %missing = icmp eq ptr %data, null
+  br i1 %missing, label %missing.case, label %scan.test
+missing.case:
+  %nonempty = icmp ne i64 %len, 0
+  ret i1 %nonempty
+scan.test:
+  %i = phi i64 [ 0, %entry ], [ %next, %scan.next ]
+  %more = icmp ult i64 %i, %len
+  br i1 %more, label %scan.body, label %valid
+scan.body:
+  %slot = getelementptr i8, ptr %data, i64 %i
+  %byte = load i8, ptr %slot
+  %nul = icmp eq i8 %byte, 0
+  br i1 %nul, label %invalid, label %scan.next
+scan.next:
+  %next = add i64 %i, 1
+  br label %scan.test
+invalid:
+  ret i1 true
+valid:
+  ret i1 false
+}
+define ptr @cfv_text_from_ffi(ptr %foreign) {
+entry:
+  %datap = getelementptr %CfvOwnedText, ptr %foreign, i32 0, i32 0
+  %lenp = getelementptr %CfvOwnedText, ptr %foreign, i32 0, i32 1
+  %ownerp = getelementptr %CfvOwnedText, ptr %foreign, i32 0, i32 2
+  %releasep = getelementptr %CfvOwnedText, ptr %foreign, i32 0, i32 3
+  %data = load ptr, ptr %datap
+  %len = load i64, ptr %lenp
+  %owner = load ptr, ptr %ownerp
+  %release = load ptr, ptr %releasep
+  %size = add i64 %len, 1
+  %text = call ptr @malloc(i64 %size)
+  %nonempty = icmp ne i64 %len, 0
+  br i1 %nonempty, label %copy, label %terminate
+copy:
+  %copied = call ptr @memcpy(ptr %text, ptr %data, i64 %len)
+  br label %terminate
+terminate:
+  %end = getelementptr i8, ptr %text, i64 %len
+  store i8 0, ptr %end
+  %hasrelease = icmp ne ptr %release, null
+  br i1 %hasrelease, label %release.call, label %done
+release.call:
+  call void %release(ptr %owner)
+  br label %done
+done:
+  ret ptr %text
+}
+define ptr @cfv_list_new(i64 %count) {
+  %object = call ptr @malloc(i64 24)
+  %has = icmp ugt i64 %count, 0
+  %capacity = select i1 %has, i64 %count, i64 1
+  %bytes = mul i64 %capacity, 8
+  %data = call ptr @malloc(i64 %bytes)
+  %lenp = getelementptr %CfvList, ptr %object, i32 0, i32 0
+  %capp = getelementptr %CfvList, ptr %object, i32 0, i32 1
+  %datap = getelementptr %CfvList, ptr %object, i32 0, i32 2
+  store i64 %count, ptr %lenp
+  store i64 %capacity, ptr %capp
+  store ptr %data, ptr %datap
+  ret ptr %object
+}
+define i64 @cfv_list_length(ptr %list) {
+  %lenp = getelementptr %CfvList, ptr %list, i32 0, i32 0
+  %len = load i64, ptr %lenp
+  ret i64 %len
+}
+define void @cfv_list_set(ptr %list, i64 %index, double %value) {
+  %len = call i64 @cfv_list_length(ptr %list)
+  %ok = icmp ult i64 %index, %len
+  br i1 %ok, label %valid, label %invalid
+valid:
+  %datap = getelementptr %CfvList, ptr %list, i32 0, i32 2
+  %data = load ptr, ptr %datap
+  %slot = getelementptr double, ptr %data, i64 %index
+  store double %value, ptr %slot
+  ret void
+invalid:
+  call void @abort()
+  unreachable
+}
+define double @cfv_list_get(ptr %list, i64 %index) {
+  %len = call i64 @cfv_list_length(ptr %list)
+  %ok = icmp ult i64 %index, %len
+  br i1 %ok, label %valid, label %invalid
+valid:
+  %datap = getelementptr %CfvList, ptr %list, i32 0, i32 2
+  %data = load ptr, ptr %datap
+  %slot = getelementptr double, ptr %data, i64 %index
+  %value = load double, ptr %slot
+  ret double %value
+invalid:
+  call void @abort()
+  unreachable
+}
+define void @cfv_list_append(ptr %list, double %value) {
+  %lenp = getelementptr %CfvList, ptr %list, i32 0, i32 0
+  %capp = getelementptr %CfvList, ptr %list, i32 0, i32 1
+  %datap = getelementptr %CfvList, ptr %list, i32 0, i32 2
+  %len = load i64, ptr %lenp
+  %cap = load i64, ptr %capp
+  %full = icmp uge i64 %len, %cap
+  br i1 %full, label %grow, label %store
+grow:
+  %next = mul i64 %cap, 2
+  %bytes = mul i64 %next, 8
+  %old = load ptr, ptr %datap
+  %new = call ptr @realloc(ptr %old, i64 %bytes)
+  store ptr %new, ptr %datap
+  store i64 %next, ptr %capp
+  br label %store
+store:
+  %data = load ptr, ptr %datap
+  %slot = getelementptr double, ptr %data, i64 %len
+  store double %value, ptr %slot
+  %updated = add i64 %len, 1
+  store i64 %updated, ptr %lenp
+  ret void
+}
+define ptr @cfv_list_from_ffi(ptr %foreign) {
+entry:
+  %datap = getelementptr %CfvOwnedNumberList, ptr %foreign, i32 0, i32 0
+  %lenp = getelementptr %CfvOwnedNumberList, ptr %foreign, i32 0, i32 1
+  %ownerp = getelementptr %CfvOwnedNumberList, ptr %foreign, i32 0, i32 2
+  %releasep = getelementptr %CfvOwnedNumberList, ptr %foreign, i32 0, i32 3
+  %data = load ptr, ptr %datap
+  %len = load i64, ptr %lenp
+  %owner = load ptr, ptr %ownerp
+  %release = load ptr, ptr %releasep
+  %list = call ptr @cfv_list_new(i64 %len)
+  br label %copy.test
+copy.test:
+  %i = phi i64 [ 0, %entry ], [ %next, %copy.body ]
+  %more = icmp ult i64 %i, %len
+  br i1 %more, label %copy.body, label %release.test
+copy.body:
+  %slot = getelementptr double, ptr %data, i64 %i
+  %value = load double, ptr %slot
+  call void @cfv_list_set(ptr %list, i64 %i, double %value)
+  %next = add i64 %i, 1
+  br label %copy.test
+release.test:
+  %hasrelease = icmp ne ptr %release, null
+  br i1 %hasrelease, label %release.call, label %done
+release.call:
+  call void %release(ptr %owner)
+  br label %done
+done:
+  ret ptr %list
+}
+define void @cfv_list_free(ptr %list) {
+  %datap = getelementptr %CfvList, ptr %list, i32 0, i32 2
+  %data = load ptr, ptr %datap
+  call void @free(ptr %data)
+  call void @free(ptr %list)
+  ret void
+}
+define void @cfv_list_print(ptr %list) {
+entry:
+  %open = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr @.list_open)
+  %len = call i64 @cfv_list_length(ptr %list)
+  br label %test
+test:
+  %i = phi i64 [ 0, %entry ], [ %next, %valueblock ]
+  %more = icmp ult i64 %i, %len
+  br i1 %more, label %body, label %done
+body:
+  %notfirst = icmp ugt i64 %i, 0
+  br i1 %notfirst, label %separator, label %valueblock
+separator:
+  %sep = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr @.list_separator)
+  br label %valueblock
+valueblock:
+  %value = call double @cfv_list_get(ptr %list, i64 %i)
+  %printed = call i32 (ptr, ...) @printf(ptr @.fmt_list_number, double %value)
+  %next = add i64 %i, 1
+  br label %test
+done:
+  %close = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr @.list_close)
+  ret void
+}
+define ptr @cfv_collection_new(i64 %requested) {
+  %object = call ptr @malloc(i64 24)
+  %has = icmp ugt i64 %requested, 0
+  %capacity = select i1 %has, i64 %requested, i64 1
+  %bytes = mul i64 %capacity, 24
+  %data = call ptr @malloc(i64 %bytes)
+  %lenp = getelementptr %CfvScalarCollection, ptr %object, i32 0, i32 0
+  %capp = getelementptr %CfvScalarCollection, ptr %object, i32 0, i32 1
+  %datap = getelementptr %CfvScalarCollection, ptr %object, i32 0, i32 2
+  store i64 0, ptr %lenp
+  store i64 %capacity, ptr %capp
+  store ptr %data, ptr %datap
+  ret ptr %object
+}
+define i64 @cfv_collection_length(ptr %collection) {
+  %lenp = getelementptr %CfvScalarCollection, ptr %collection, i32 0, i32 0
+  %len = load i64, ptr %lenp
+  ret i64 %len
+}
+define i1 @cfv_collection_has(ptr %collection, i8 %wanted_tag, double %wanted_number, ptr %wanted_pointer) {
+entry:
+  %len = call i64 @cfv_collection_length(ptr %collection)
+  %datap = getelementptr %CfvScalarCollection, ptr %collection, i32 0, i32 2
+  %data = load ptr, ptr %datap
+  br label %test
+test:
+  %i = phi i64 [ 0, %entry ], [ %next, %continue ]
+  %more = icmp ult i64 %i, %len
+  br i1 %more, label %body, label %missing
+body:
+  %slot = getelementptr %CfvScalarValue, ptr %data, i64 %i
+  %tagp = getelementptr %CfvScalarValue, ptr %slot, i32 0, i32 0
+  %tag = load i8, ptr %tagp
+  %same_tag = icmp eq i8 %tag, %wanted_tag
+  br i1 %same_tag, label %compare_kind, label %continue
+compare_kind:
+  %is_text = icmp eq i8 %tag, 2
+  br i1 %is_text, label %compare_text, label %compare_number
+compare_text:
+  %pointerp = getelementptr %CfvScalarValue, ptr %slot, i32 0, i32 2
+  %pointer = load ptr, ptr %pointerp
+  %comparison = call i32 @strcmp(ptr %pointer, ptr %wanted_pointer)
+  %text_equal = icmp eq i32 %comparison, 0
+  br i1 %text_equal, label %found, label %continue
+compare_number:
+  %numberp = getelementptr %CfvScalarValue, ptr %slot, i32 0, i32 1
+  %number = load double, ptr %numberp
+  %number_equal = fcmp oeq double %number, %wanted_number
+  br i1 %number_equal, label %found, label %continue
+continue:
+  %next = add i64 %i, 1
+  br label %test
+found:
+  ret i1 1
+missing:
+  ret i1 0
+}
+define void @cfv_collection_add(ptr %collection, i8 %tag, double %number, ptr %pointer, i1 %unique) {
+entry:
+  %exists = call i1 @cfv_collection_has(ptr %collection, i8 %tag, double %number, ptr %pointer)
+  %skip = and i1 %unique, %exists
+  br i1 %skip, label %done, label %store
+store:
+  %lenp = getelementptr %CfvScalarCollection, ptr %collection, i32 0, i32 0
+  %datap = getelementptr %CfvScalarCollection, ptr %collection, i32 0, i32 2
+  %len = load i64, ptr %lenp
+  %data = load ptr, ptr %datap
+  %slot = getelementptr %CfvScalarValue, ptr %data, i64 %len
+  %tagp = getelementptr %CfvScalarValue, ptr %slot, i32 0, i32 0
+  %numberp = getelementptr %CfvScalarValue, ptr %slot, i32 0, i32 1
+  %pointerp = getelementptr %CfvScalarValue, ptr %slot, i32 0, i32 2
+  store i8 %tag, ptr %tagp
+  store double %number, ptr %numberp
+  store ptr %pointer, ptr %pointerp
+  %next = add i64 %len, 1
+  store i64 %next, ptr %lenp
+  br label %done
+done:
+  ret void
+}
+define void @cfv_collection_add_number(ptr %collection, double %value, i1 %unique) {
+  call void @cfv_collection_add(ptr %collection, i8 1, double %value, ptr null, i1 %unique)
+  ret void
+}
+define void @cfv_collection_add_text(ptr %collection, ptr %value, i1 %unique) {
+  call void @cfv_collection_add(ptr %collection, i8 2, double 0.0, ptr %value, i1 %unique)
+  ret void
+}
+define void @cfv_collection_add_bool(ptr %collection, i1 %value, i1 %unique) {
+  %number = uitofp i1 %value to double
+  call void @cfv_collection_add(ptr %collection, i8 3, double %number, ptr null, i1 %unique)
+  ret void
+}
+define ptr @cfv_collection_slot(ptr %collection, i64 %index) {
+  %len = call i64 @cfv_collection_length(ptr %collection)
+  %ok = icmp ult i64 %index, %len
+  br i1 %ok, label %valid, label %invalid
+valid:
+  %datap = getelementptr %CfvScalarCollection, ptr %collection, i32 0, i32 2
+  %data = load ptr, ptr %datap
+  %slot = getelementptr %CfvScalarValue, ptr %data, i64 %index
+  ret ptr %slot
+invalid:
+  call void @abort()
+  unreachable
+}
+define double @cfv_collection_get_number(ptr %collection, i64 %index) {
+  %slot = call ptr @cfv_collection_slot(ptr %collection, i64 %index)
+  %numberp = getelementptr %CfvScalarValue, ptr %slot, i32 0, i32 1
+  %number = load double, ptr %numberp
+  ret double %number
+}
+define ptr @cfv_collection_get_text(ptr %collection, i64 %index) {
+  %slot = call ptr @cfv_collection_slot(ptr %collection, i64 %index)
+  %pointerp = getelementptr %CfvScalarValue, ptr %slot, i32 0, i32 2
+  %pointer = load ptr, ptr %pointerp
+  ret ptr %pointer
+}
+define i1 @cfv_collection_get_bool(ptr %collection, i64 %index) {
+  %number = call double @cfv_collection_get_number(ptr %collection, i64 %index)
+  %value = fcmp one double %number, 0.0
+  ret i1 %value
+}
+define void @cfv_collection_print(ptr %collection, i1 %is_set) {
+entry:
+  %open_text = select i1 %is_set, ptr @.set_open, ptr @.tuple_open
+  %open = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr %open_text)
+  %len = call i64 @cfv_collection_length(ptr %collection)
+  br label %test
+test:
+  %i = phi i64 [ 0, %entry ], [ %next, %value_done ]
+  %more = icmp ult i64 %i, %len
+  br i1 %more, label %body, label %done
+body:
+  %not_first = icmp ugt i64 %i, 0
+  br i1 %not_first, label %separator, label %dispatch
+separator:
+  %separator_print = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr @.list_separator)
+  br label %dispatch
+dispatch:
+  %slot = call ptr @cfv_collection_slot(ptr %collection, i64 %i)
+  %tagp = getelementptr %CfvScalarValue, ptr %slot, i32 0, i32 0
+  %tag = load i8, ptr %tagp
+  %is_number = icmp eq i8 %tag, 1
+  br i1 %is_number, label %number, label %not_number
+not_number:
+  %is_text = icmp eq i8 %tag, 2
+  br i1 %is_text, label %text, label %boolean
+number:
+  %number_value = call double @cfv_collection_get_number(ptr %collection, i64 %i)
+  %number_print = call i32 (ptr, ...) @printf(ptr @.fmt_list_number, double %number_value)
+  br label %value_done
+text:
+  %text_value = call ptr @cfv_collection_get_text(ptr %collection, i64 %i)
+  %text_print = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr %text_value)
+  br label %value_done
+boolean:
+  %bool_value = call i1 @cfv_collection_get_bool(ptr %collection, i64 %i)
+  %bool_text = select i1 %bool_value, ptr @.true_text, ptr @.false_text
+  %bool_print = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr %bool_text)
+  br label %value_done
+value_done:
+  %next = add i64 %i, 1
+  br label %test
+done:
+  %close = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr @.collection_close)
+  ret void
+}
+define void @cfv_collection_free(ptr %collection) {
+  %datap = getelementptr %CfvScalarCollection, ptr %collection, i32 0, i32 2
+  %data = load ptr, ptr %datap
+  call void @free(ptr %data)
+  call void @free(ptr %collection)
+  ret void
+}
+define ptr @cfv_option_new(i8 %tag) {
+  %end = getelementptr %CfvOption, ptr null, i32 1
+  %size = ptrtoint ptr %end to i64
+  %option = call ptr @malloc(i64 %size)
+  %tagp = getelementptr %CfvOption, ptr %option, i32 0, i32 0
+  %numberp = getelementptr %CfvOption, ptr %option, i32 0, i32 1
+  %pointerp = getelementptr %CfvOption, ptr %option, i32 0, i32 2
+  store i8 %tag, ptr %tagp
+  store double 0.0, ptr %numberp
+  store ptr null, ptr %pointerp
+  ret ptr %option
+}
+define void @cfv_option_set_number(ptr %option, double %value) {
+  %slot = getelementptr %CfvOption, ptr %option, i32 0, i32 1
+  store double %value, ptr %slot
+  ret void
+}
+define void @cfv_option_set_text(ptr %option, ptr %value) {
+  %slot = getelementptr %CfvOption, ptr %option, i32 0, i32 2
+  store ptr %value, ptr %slot
+  ret void
+}
+define void @cfv_option_set_bool(ptr %option, i1 %value) {
+  %numeric = uitofp i1 %value to double
+  %slot = getelementptr %CfvOption, ptr %option, i32 0, i32 1
+  store double %numeric, ptr %slot
+  ret void
+}
+define i1 @cfv_option_has_value(ptr %option) {
+  %tagp = getelementptr %CfvOption, ptr %option, i32 0, i32 0
+  %tag = load i8, ptr %tagp
+  %has = icmp ne i8 %tag, 0
+  ret i1 %has
+}
+define double @cfv_option_get_number(ptr %option) {
+  %slot = getelementptr %CfvOption, ptr %option, i32 0, i32 1
+  %value = load double, ptr %slot
+  ret double %value
+}
+define ptr @cfv_option_get_text(ptr %option) {
+  %slot = getelementptr %CfvOption, ptr %option, i32 0, i32 2
+  %value = load ptr, ptr %slot
+  ret ptr %value
+}
+define i1 @cfv_option_get_bool(ptr %option) {
+  %slot = getelementptr %CfvOption, ptr %option, i32 0, i32 1
+  %numeric = load double, ptr %slot
+  %value = fcmp one double %numeric, 0.0
+  ret i1 %value
+}
+define void @cfv_option_print(ptr %option) {
+  %tagp = getelementptr %CfvOption, ptr %option, i32 0, i32 0
+  %tag = load i8, ptr %tagp
+  switch i8 %tag, label %none [i8 1, label %number i8 2, label %text i8 3, label %boolean]
+none:
+  %none_print = call i32 (ptr, ...) @printf(ptr @.fmt_text, ptr @.option_none)
+  ret void
+number:
+  %number_open = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr @.option_open)
+  %number_value = call double @cfv_option_get_number(ptr %option)
+  %number_print = call i32 (ptr, ...) @printf(ptr @.fmt_list_number, double %number_value)
+  br label %close
+text:
+  %text_open = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr @.option_open)
+  %text_value = call ptr @cfv_option_get_text(ptr %option)
+  %text_print = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr %text_value)
+  br label %close
+boolean:
+  %bool_open = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr @.option_open)
+  %bool_value = call i1 @cfv_option_get_bool(ptr %option)
+  %bool_text = select i1 %bool_value, ptr @.true_text, ptr @.false_text
+  %bool_print = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr %bool_text)
+  br label %close
+close:
+  %close_print = call i32 (ptr, ...) @printf(ptr @.fmt_raw, ptr @.collection_close)
+  ret void
+}
+define void @cfv_option_free(ptr %option) {
+  call void @free(ptr %option)
+  ret void
+}
+define ptr @cfv_map_new(i64 %count, i64 %element_size) {
+  %object = call ptr @malloc(i64 32)
+  %key_bytes = mul i64 %count, 8
+  %value_bytes = mul i64 %count, %element_size
+  %keys = call ptr @malloc(i64 %key_bytes)
+  %values = call ptr @malloc(i64 %value_bytes)
+  %lenp = getelementptr %CfvMap, ptr %object, i32 0, i32 0
+  %keysp = getelementptr %CfvMap, ptr %object, i32 0, i32 1
+  %valuesp = getelementptr %CfvMap, ptr %object, i32 0, i32 2
+  %sizep = getelementptr %CfvMap, ptr %object, i32 0, i32 3
+  store i64 %count, ptr %lenp
+  store ptr %keys, ptr %keysp
+  store ptr %values, ptr %valuesp
+  store i64 %element_size, ptr %sizep
+  ret ptr %object
+}
+define i64 @cfv_map_length(ptr %map) {
+  %lenp = getelementptr %CfvMap, ptr %map, i32 0, i32 0
+  %len = load i64, ptr %lenp
+  ret i64 %len
+}
+define void @cfv_map_set_key(ptr %map, i64 %index, ptr %key) {
+  %len = call i64 @cfv_map_length(ptr %map)
+  %ok = icmp ult i64 %index, %len
+  br i1 %ok, label %valid, label %invalid
+valid:
+  %keysp = getelementptr %CfvMap, ptr %map, i32 0, i32 1
+  %keys = load ptr, ptr %keysp
+  %slot = getelementptr ptr, ptr %keys, i64 %index
+  store ptr %key, ptr %slot
+  ret void
+invalid:
+  call void @abort()
+  unreachable
+}
+define void @cfv_map_set_number(ptr %map, i64 %index, ptr %key, double %value) {
+  call void @cfv_map_set_key(ptr %map, i64 %index, ptr %key)
+  %valuesp = getelementptr %CfvMap, ptr %map, i32 0, i32 2
+  %values = load ptr, ptr %valuesp
+  %slot = getelementptr double, ptr %values, i64 %index
+  store double %value, ptr %slot
+  ret void
+}
+define void @cfv_map_set_text(ptr %map, i64 %index, ptr %key, ptr %value) {
+  call void @cfv_map_set_key(ptr %map, i64 %index, ptr %key)
+  %valuesp = getelementptr %CfvMap, ptr %map, i32 0, i32 2
+  %values = load ptr, ptr %valuesp
+  %slot = getelementptr ptr, ptr %values, i64 %index
+  store ptr %value, ptr %slot
+  ret void
+}
+define void @cfv_map_set_bool(ptr %map, i64 %index, ptr %key, i1 %value) {
+  call void @cfv_map_set_key(ptr %map, i64 %index, ptr %key)
+  %valuesp = getelementptr %CfvMap, ptr %map, i32 0, i32 2
+  %values = load ptr, ptr %valuesp
+  %slot = getelementptr i1, ptr %values, i64 %index
+  store i1 %value, ptr %slot
+  ret void
+}
+define i64 @cfv_map_find(ptr %map, ptr %key) {
+entry:
+  %len = call i64 @cfv_map_length(ptr %map)
+  %keysp = getelementptr %CfvMap, ptr %map, i32 0, i32 1
+  %keys = load ptr, ptr %keysp
+  br label %test
+test:
+  %index = phi i64 [ 0, %entry ], [ %next, %continue ]
+  %more = icmp ult i64 %index, %len
+  br i1 %more, label %body, label %missing
+body:
+  %slot = getelementptr ptr, ptr %keys, i64 %index
+  %candidate = load ptr, ptr %slot
+  %comparison = call i32 @strcmp(ptr %candidate, ptr %key)
+  %equal = icmp eq i32 %comparison, 0
+  br i1 %equal, label %found, label %continue
+continue:
+  %next = add i64 %index, 1
+  br label %test
+found:
+  ret i64 %index
+missing:
+  call void @abort()
+  unreachable
+}
+define double @cfv_map_get_number(ptr %map, ptr %key) {
+  %index = call i64 @cfv_map_find(ptr %map, ptr %key)
+  %valuesp = getelementptr %CfvMap, ptr %map, i32 0, i32 2
+  %values = load ptr, ptr %valuesp
+  %slot = getelementptr double, ptr %values, i64 %index
+  %value = load double, ptr %slot
+  ret double %value
+}
+define ptr @cfv_map_get_text(ptr %map, ptr %key) {
+  %index = call i64 @cfv_map_find(ptr %map, ptr %key)
+  %valuesp = getelementptr %CfvMap, ptr %map, i32 0, i32 2
+  %values = load ptr, ptr %valuesp
+  %slot = getelementptr ptr, ptr %values, i64 %index
+  %value = load ptr, ptr %slot
+  ret ptr %value
+}
+define i1 @cfv_map_get_bool(ptr %map, ptr %key) {
+  %index = call i64 @cfv_map_find(ptr %map, ptr %key)
+  %valuesp = getelementptr %CfvMap, ptr %map, i32 0, i32 2
+  %values = load ptr, ptr %valuesp
+  %slot = getelementptr i1, ptr %values, i64 %index
+  %value = load i1, ptr %slot
+  ret i1 %value
+}
+define void @cfv_map_free(ptr %map) {
+  %keysp = getelementptr %CfvMap, ptr %map, i32 0, i32 1
+  %valuesp = getelementptr %CfvMap, ptr %map, i32 0, i32 2
+  %keys = load ptr, ptr %keysp
+  %values = load ptr, ptr %valuesp
+  call void @free(ptr %keys)
+  call void @free(ptr %values)
+  call void @free(ptr %map)
+  ret void
+}
+'''
+        globals_text = "\n".join(self.globals)
+        ffi_declarations = "\n".join(
+            (f"declare i32 @{name}(" + ", ".join([
+                *(self.llvm_type(value) for value in parameters), "ptr", "ptr"
+            ]) + ")") if checked else (
+                f"declare {self.llvm_type(returned)} @{name}(" + ", ".join(
+                    self.llvm_type(value) for value in parameters
+                ) + ")"
+            )
+            for name, (parameters, returned, checked) in self.ffi_functions.items()
+        )
+        return (prelude + nominal_types + "\n" + globals_text + "\n" + ffi_declarations
+                + "\n\n" + "\n\n".join(functions + [main_ir]) + "\n")
+
+
+def compile_source(source: str) -> str:
+    program = Parser(tokenize(source)).program(); StaticTypeAnalyzer().analyze(program)
+    from cforge_memory import MemorySafetyAnalyzer
+    MemorySafetyAnalyzer().analyze(program)
+    return LLVMGenerator().generate(program)
+
+
+def compile_file(source: Path) -> str:
+    try: text = source.read_text(encoding="utf-8")
+    except OSError as error: raise CForgevError(f"No se pudo abrir {source}: {error}") from error
+    program = resolve_imports(Parser(tokenize(text)).program(), source.resolve().parent, set())
+    StaticTypeAnalyzer().analyze(program)
+    from cforge_memory import MemorySafetyAnalyzer
+    MemorySafetyAnalyzer().analyze(program)
+    return LLVMGenerator().generate(program)
+
+
+def emit_file(source: Path, output: Path) -> Path:
+    text = compile_file(source)
+    output.parent.mkdir(parents=True, exist_ok=True); output.write_text(text, encoding="utf-8")
+    return output
+
+
+def compile_native(
+    source: Path,
+    output: Path,
+    clang: str = "clang",
+    linked_sources: list[Path] | None = None,
+) -> Path:
+    llvm_path = output.with_suffix(".ll"); emit_file(source, llvm_path)
+    linked_sources = linked_sources or []
+    allowed = {".c", ".cc", ".cpp", ".cxx", ".o", ".a", ".so", ".dylib"}
+    for path in linked_sources:
+        if path.suffix.lower() not in allowed:
+            raise CForgevError(f"LLVM FFI: formato de vínculo no permitido: {path}")
+        if not path.exists():
+            raise CForgevError(f"LLVM FFI: no existe el archivo vinculado: {path}")
+    compiler = "clang++" if clang == "clang" and any(
+        path.suffix.lower() in {".cc", ".cpp", ".cxx"} for path in linked_sources
+    ) else clang
+    process = subprocess.run(
+        [compiler, "-O2", llvm_path, *(str(path) for path in linked_sources), "-o", output],
+        capture_output=True,
+        text=True,
+    )
+    if process.returncode: raise CForgevError("LLVM/Clang rechazó el módulo:\n" + process.stderr.strip())
+    return output
+)CFV7DATA"},
+        {R"CFV8DATA(cforge_diagnostics.py)CFV8DATA", R"CFV9DATA("""Diagnósticos estructurados de C-Forge para CLI, editores y CI."""
 
 from __future__ import annotations
 
@@ -3552,7 +5791,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from cforgev import CForgevError, tokenize
-from compilador_nativo import Parser, StaticTypeAnalyzer
+from compilador_nativo import Parser, StaticTypeAnalyzer, resolve_imports
+from cforge_memory import MemorySafetyAnalyzer
 
 
 @dataclass(frozen=True)
@@ -3587,6 +5827,10 @@ def analyze_source(source: str) -> list[Diagnostic]:
         StaticTypeAnalyzer().analyze(program)
     except CForgevError as error:
         return [_from_error(error, "CF2001")]
+    try:
+        MemorySafetyAnalyzer().analyze(program)
+    except CForgevError as error:
+        return [_from_error(error, "CF3001")]
     return []
 
 
@@ -3595,9 +5839,22 @@ def analyze_file(path: Path) -> list[Diagnostic]:
         source = path.read_text(encoding="utf-8")
     except OSError as error:
         return [Diagnostic(1, 1, "error", "CF0001", f"No se pudo abrir {path}: {error}")]
-    return analyze_source(source)
-)CFV7DATA"},
-        {R"CFV8DATA(cforge_lsp.py)CFV8DATA", R"CFV9DATA("""Servidor LSP 3.17 mínimo de C-Forge mediante JSON-RPC por stdio."""
+    try:
+        tokens = tokenize(source)
+        program = resolve_imports(Parser(tokens).program(), path.resolve().parent, set())
+    except CForgevError as error:
+        return [_from_error(error, "CF1002")]
+    try:
+        StaticTypeAnalyzer().analyze(program)
+    except CForgevError as error:
+        return [_from_error(error, "CF2001")]
+    try:
+        MemorySafetyAnalyzer().analyze(program)
+    except CForgevError as error:
+        return [_from_error(error, "CF3001")]
+    return []
+)CFV9DATA"},
+        {R"CFV10DATA(cforge_lsp.py)CFV10DATA", R"CFV11DATA("""Servidor LSP 3.17 mínimo de C-Forge mediante JSON-RPC por stdio."""
 
 from __future__ import annotations
 
@@ -3611,11 +5868,18 @@ from cforgev import format_source
 
 
 KEYWORDS = [
-    "sea", "si", "sino", "mientras", "funcion", "retornar", "estructura",
+    "sea", "si", "sino", "mientras", "funcion", "async", "await", "retornar", "estructura", "interfaz", "implementa",
     "clase", "campo", "metodo", "intentar", "capturar", "gpu", "cluster",
     "test", "verdadero", "falso", "nulo", "mostrar", "print", "console.log",
     "System.out.println", "file_read", "file_write", "json_parse", "sys_fetch",
     "forge_hash", "forge_bench", "forge_catalogo", "forge_arena_estado",
+    "region", "unsafe", "mover", "prestar", "prestar_mut",
+    "soltar_prestamo", "destruir", "opcion", "algunos", "ninguno",
+    "es_algunos", "desenvolver",
+    "numero", "texto", "booleano", "lista", "mapa", "tupla", "conjunto",
+    "tarea", "esperar", "cancelar", "canal", "enviar", "recibir",
+    "cerrar_canal",
+    "extern_c", "segura",
 ]
 
 
@@ -3690,32 +5954,81 @@ def _locations(uri: str, source: str, word: str) -> list[dict[str, object]]:
 
 
 def _definitions(uri: str, source: str, word: str) -> list[dict[str, object]]:
-    pattern = re.compile(rf"^\s*(?:sea\s+|funcion\s+|estructura\s+|clase\s+)?({re.escape(word)})\b")
-    for line_number, line in enumerate(source.splitlines()):
-        match = pattern.search(line)
-        if match:
-            return [{"uri": uri, "range": {
-                "start": {"line": line_number, "character": match.start(1)},
-                "end": {"line": line_number, "character": match.end(1)},
-            }}]
+    for declaration in _declarations(source):
+        if declaration["name"] == word:
+            return [{"uri": uri, "range": declaration["range"]}]
     return []
 
 
-def _symbols(source: str) -> list[dict[str, object]]:
-    result = []
-    patterns = ((r"^\s*(?:cluster\s+)?funcion\s+([A-Za-z_]\w*)", 12),
-                (r"^\s*(?:cluster\s+)?sea\s+([A-Za-z_]\w*)", 13),
-                (r"^\s*estructura\s+([A-Za-z_]\w*)", 23),
-                (r"^\s*clase\s+([A-Za-z_]\w*)", 5))
+def _infer_expression_type(expression: str) -> str:
+    value = expression.strip()
+    if re.match(r'^"', value): return "texto"
+    if re.match(r"^-?\d+(?:\.\d+)?\b", value): return "numero"
+    if re.match(r"^(?:verdadero|falso)\b", value): return "booleano"
+    if value.startswith("["): return "lista"
+    if value.startswith("{"): return "mapa"
+    if value.startswith("conjunto("): return "conjunto"
+    option = re.match(r"algunos\((.*)\)\s*$", value)
+    if option: return f"opcion<{_infer_expression_type(option.group(1))}>"
+    if value.startswith("ninguno("): return "opcion<cualquiera>"
+    return "cualquiera"
+
+
+def _declarations(source: str) -> list[dict[str, object]]:
+    """Extrae símbolos y firmas sin ejecutar código; tolera archivos incompletos."""
+    result: list[dict[str, object]] = []
+    type_pattern = r"[A-Za-z_][A-Za-z0-9_]*(?:<[^>\n]+>)?"
+    function_pattern = re.compile(
+        rf"^\s*(?P<prefix>(?:extern_c\s+(?:segura\s+)?)|(?:cluster\s+)?(?:async\s+)?)"
+        rf"funcion\s+(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^)]*)\)"
+        rf"(?:\s*:\s*(?P<return>{type_pattern}))?"
+    )
+    variable_pattern = re.compile(
+        rf"^\s*(?:cluster\s+)?sea\s+(?P<name>[A-Za-z_]\w*)"
+        rf"(?:\s*:\s*(?P<type>{type_pattern}))?\s*=\s*(?P<value>.*)$"
+    )
+    nominal_pattern = re.compile(r"^\s*(estructura|clase|interfaz)\s+([A-Za-z_]\w*)")
     for line_number, line in enumerate(source.splitlines()):
-        for pattern, kind in patterns:
-            match = re.search(pattern, line)
-            if match:
-                area = {"start": {"line": line_number, "character": match.start(1)},
-                        "end": {"line": line_number, "character": match.end(1)}}
-                result.append({"name": match.group(1), "kind": kind, "range": area, "selectionRange": area})
-                break
+        function = function_pattern.search(line)
+        if function:
+            name = function.group("name"); prefix = function.group("prefix").strip()
+            returned = function.group("return") or "cualquiera"
+            parameters = function.group("params").strip()
+            marker = "extern C ABI segura" if prefix.startswith("extern_c segura") else (
+                "extern C ABI" if prefix.startswith("extern_c") else "función"
+            )
+            detail = f"{marker} {name}({parameters}): {returned}"
+            start = function.start("name")
+            result.append({"name": name, "kind": 12, "detail": detail, "range": {
+                "start": {"line": line_number, "character": start},
+                "end": {"line": line_number, "character": function.end("name")},
+            }})
+            continue
+        variable = variable_pattern.search(line)
+        if variable:
+            name = variable.group("name")
+            value_type = variable.group("type") or _infer_expression_type(variable.group("value"))
+            start = variable.start("name")
+            result.append({"name": name, "kind": 13, "detail": f"{name}: {value_type}", "range": {
+                "start": {"line": line_number, "character": start},
+                "end": {"line": line_number, "character": variable.end("name")},
+            }})
+            continue
+        nominal = nominal_pattern.search(line)
+        if nominal:
+            name = nominal.group(2); category = nominal.group(1)
+            kind = {"estructura": 23, "clase": 5, "interfaz": 11}[category]
+            result.append({"name": name, "kind": kind, "detail": f"{category} {name}", "range": {
+                "start": {"line": line_number, "character": nominal.start(2)},
+                "end": {"line": line_number, "character": nominal.end(2)},
+            }})
     return result
+
+
+def _symbols(source: str) -> list[dict[str, object]]:
+    return [{"name": item["name"], "kind": item["kind"], "detail": item["detail"],
+             "range": item["range"], "selectionRange": item["range"]}
+            for item in _declarations(source)]
 
 
 def run(input_stream: BinaryIO | None = None, output_stream: BinaryIO | None = None) -> int:
@@ -3732,7 +6045,7 @@ def run(input_stream: BinaryIO | None = None, output_stream: BinaryIO | None = N
         if method == "initialize":
             _write(output_stream, {
                 "jsonrpc": "2.0", "id": request_id,
-                "result": {"serverInfo": {"name": "C-Forge LSP", "version": "1.5.0"},
+                "result": {"serverInfo": {"name": "C-Forge LSP", "version": "1.6.0"},
                            "capabilities": {"textDocumentSync": 1,
                                             "completionProvider": {"triggerCharacters": ["."]},
                                             "hoverProvider": True,
@@ -3759,12 +6072,27 @@ def run(input_stream: BinaryIO | None = None, output_stream: BinaryIO | None = N
             documents[uri] = source
             _publish(output_stream, uri, source)
         elif method == "textDocument/completion":
+            symbols = {
+                str(item["name"]): int(item["kind"])
+                for source in documents.values() for item in _declarations(source)
+            }
+            completion = [{"label": word, "kind": 14} for word in KEYWORDS]
+            completion.extend({"label": name, "kind": kind, "detail": "símbolo C-Forge del proyecto"}
+                              for name, kind in sorted(symbols.items()))
             _write(output_stream, {"jsonrpc": "2.0", "id": request_id,
-                                   "result": [{"label": word, "kind": 14} for word in KEYWORDS]})
+                                   "result": completion})
         elif method == "textDocument/hover":
+            assert isinstance(params, dict)
+            document = params.get("textDocument", {}); position = params.get("position", {})
+            assert isinstance(document, dict) and isinstance(position, dict)
+            uri = str(document.get("uri", "")); source = documents.get(uri, "")
+            word = _word_at(source, position)
+            detail = next((str(item["detail"]) for text in documents.values()
+                           for item in _declarations(text) if item["name"] == word), None)
+            value = f"```cforge\n{detail}\n```" if detail else "**C-Forge 1.6.0** — ForgeValue y sintaxis `.cfv`."
             _write(output_stream, {"jsonrpc": "2.0", "id": request_id,
                                    "result": {"contents": {"kind": "markdown",
-                                                            "value": "**C-Forge 1.5.0** — ForgeValue y sintaxis `.cfv`."}}})
+                                                            "value": value}}})
         elif method in {"textDocument/definition", "textDocument/references", "textDocument/rename"}:
             assert isinstance(params, dict)
             document = params.get("textDocument", {}); position = params.get("position", {})
@@ -3772,17 +6100,23 @@ def run(input_stream: BinaryIO | None = None, output_stream: BinaryIO | None = N
             uri = str(document.get("uri", "")); source = documents.get(uri, "")
             word = _word_at(source, position)
             if method.endswith("definition"):
-                result = _definitions(uri, source, word)
+                result = next((found for target_uri, text in documents.items()
+                               if (found := _definitions(target_uri, text, word))), [])
             elif method.endswith("references"):
-                result = _locations(uri, source, word)
+                result = [location for target_uri, text in documents.items()
+                          for location in _locations(target_uri, text, word)]
             else:
                 new_name = str(params.get("newName", ""))
                 if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", new_name):
                     _write(output_stream, {"jsonrpc": "2.0", "id": request_id,
                                            "error": {"code": -32602, "message": "Nombre C-Forge inválido"}})
                     continue
-                edits = [{"range": item["range"], "newText": new_name} for item in _locations(uri, source, word)]
-                result = {"changes": {uri: edits}}
+                changes = {}
+                for target_uri, text in documents.items():
+                    edits = [{"range": item["range"], "newText": new_name}
+                             for item in _locations(target_uri, text, word)]
+                    if edits: changes[target_uri] = edits
+                result = {"changes": changes}
             _write(output_stream, {"jsonrpc": "2.0", "id": request_id, "result": result})
         elif method == "textDocument/documentSymbol":
             assert isinstance(params, dict)
@@ -3806,12 +6140,364 @@ def run(input_stream: BinaryIO | None = None, output_stream: BinaryIO | None = N
 
 if __name__ == "__main__":
     raise SystemExit(run())
-)CFV9DATA"},
-        {R"CFV10DATA(cforge_packages.py)CFV10DATA", R"CFV11DATA("""Gestor local, reproducible y seguro de paquetes C-Forge."""
+)CFV11DATA"},
+        {R"CFV12DATA(cforge_dap.py)CFV12DATA", R"CFV13DATA("""Adaptador Debug Adapter Protocol para la VM de C-Forge."""
+from __future__ import annotations
+
+import json
+import ast
+import re
+import sys
+import threading
+from pathlib import Path
+from typing import Any, BinaryIO
+
+from cforgev import CForgevError
+from cforge_vm import BytecodeProgram, Instruction, VirtualMachine, compile_file
+
+
+class DAPSession:
+    def __init__(self, reader: BinaryIO, writer: BinaryIO) -> None:
+        self.reader, self.writer = reader, writer
+        self.sequence = 1
+        self.send_lock = threading.Lock()
+        self.program: BytecodeProgram | None = None
+        self.source: Path | None = None
+        self.breakpoints: dict[int, dict[str, Any]] = {}
+        self.breakpoint_hits: dict[int, int] = {}
+        self.condition = threading.Condition()
+        self.paused = False
+        self.stepping = False
+        self.terminated = False
+        self.snapshot: dict[str, Any] = {}
+        self.chunk = "<main>"; self.line = 1
+        self.frames: list[dict[str, Any]] = []
+        self.references: dict[int, Any] = {}
+        self.frame_references: dict[int, int] = {}
+        self.next_reference = 1
+        self.vm: VirtualMachine | None = None
+        self.last_location: tuple[int, int] | None = None
+        self.resume_location: tuple[int, int] | None = None
+        self.step_mode: str | None = None
+        self.step_depth = 0
+        self.worker: threading.Thread | None = None
+
+    def send(self, message: dict[str, Any]) -> None:
+        with self.send_lock:
+            message.setdefault("seq", self.sequence); self.sequence += 1
+            body = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode()
+            self.writer.write(f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+            self.writer.flush()
+
+    def response(self, request: dict[str, Any], body: dict[str, Any] | None = None,
+                 success: bool = True, message: str | None = None) -> None:
+        result: dict[str, Any] = {"type": "response", "request_seq": request.get("seq", 0),
+                                  "command": request.get("command", ""), "success": success}
+        if body is not None: result["body"] = body
+        if message: result["message"] = message
+        self.send(result)
+
+    def event(self, name: str, body: dict[str, Any] | None = None) -> None:
+        message: dict[str, Any] = {"type": "event", "event": name}
+        if body is not None: message["body"] = body
+        self.send(message)
+
+    def _all_lines(self) -> set[int]:
+        if self.program is None: return set()
+        chunks = [self.program.main, *self.program.functions.values()]
+        for definition in self.program.classes.values():
+            chunks.extend(definition["methods"].values())
+        return {instruction.line for chunk in chunks for instruction in chunk.code
+                if instruction.line is not None}
+
+    def trace(self, chunk: str, offset: int, instruction: Instruction,
+              scope: dict[str, Any]) -> None:
+        line = instruction.line or self.line
+        frames = self.vm.debug_frames() if self.vm is not None else [
+            {"name": chunk, "line": line, "offset": offset, "scope": scope}
+        ]
+        location = (len(frames), line)
+        changed = location != self.resume_location
+        if self.resume_location is not None and changed:
+            self.resume_location = None
+        breakpoint = self.breakpoints.get(line)
+        should_pause = bool(breakpoint and changed)
+        if breakpoint and changed:
+            self.breakpoint_hits[line] = self.breakpoint_hits.get(line, 0) + 1
+            condition = str(breakpoint.get("condition") or "").strip()
+            if condition:
+                try: should_pause = bool(self._evaluate_safe(condition, scope))
+                except Exception as error:
+                    should_pause = True
+                    self.event("output", {"category": "stderr",
+                        "output": f"[C-Forge Debug] Condición inválida en línea {line}: {error}\n"})
+            hit_condition = str(breakpoint.get("hitCondition") or "").strip()
+            if should_pause and hit_condition:
+                try: should_pause = self._hit_matches(hit_condition, self.breakpoint_hits[line])
+                except Exception as error:
+                    should_pause = True
+                    self.event("output", {"category": "stderr",
+                        "output": f"[C-Forge Debug] Hit condition inválida en línea {line}: {error}\n"})
+            log_message = str(breakpoint.get("logMessage") or "")
+            if should_pause and log_message:
+                try: rendered = self._format_logpoint(log_message, scope)
+                except Exception as error: rendered = f"[C-Forge Debug] Logpoint inválido: {error}"
+                self.event("output", {"category": "console", "output": rendered + "\n"})
+                should_pause = False
+        if self.step_mode == "in" and changed: should_pause = True
+        elif self.step_mode == "over" and len(frames) <= self.step_depth and changed: should_pause = True
+        elif self.step_mode == "out" and len(frames) < self.step_depth: should_pause = True
+        if not should_pause: return
+        with self.condition:
+            self.chunk, self.line, self.snapshot = chunk, line, dict(scope)
+            self.frames = frames; self._rebuild_references()
+            self.paused = True; self.stepping = False; self.step_mode = None
+            self.last_location = location
+            self.event("stopped", {"reason": "breakpoint" if line in self.breakpoints else "step",
+                                   "threadId": 1, "allThreadsStopped": True})
+            self.condition.wait_for(lambda: not self.paused or self.terminated)
+
+    def start(self) -> None:
+        if self.program is None or self.worker is not None: return
+        def execute() -> None:
+            try:
+                vm = VirtualMachine(self.program,
+                    lambda text: self.event("output", {"category": "stdout", "output": text + "\n"}),
+                    base_dir=(self.source.parent if self.source else Path.cwd()), trace=self.trace)
+                self.vm = vm; vm.run()
+            except Exception as error:
+                self.event("output", {"category": "stderr", "output": f"[C-Forge Debug] {error}\n"})
+            finally:
+                self.terminated = True; self.event("terminated")
+                with self.condition:
+                    self.paused = False; self.condition.notify_all()
+        self.worker = threading.Thread(target=execute, name="cforge-dap-vm", daemon=True)
+        self.worker.start()
+
+    @staticmethod
+    def value(value: Any) -> str:
+        if value is None: return "nulo"
+        if isinstance(value, bool): return "verdadero" if value else "falso"
+        return repr(value)
+
+    def _reference(self, value: Any) -> int:
+        if not isinstance(value, (dict, list, tuple, set)) and not hasattr(value, "__dict__"):
+            return 0
+        for reference, existing in self.references.items():
+            if existing is value: return reference
+        reference = self.next_reference; self.next_reference += 1
+        self.references[reference] = value
+        return reference
+
+    def _rebuild_references(self) -> None:
+        self.references = {}; self.frame_references = {}; self.next_reference = 1
+        for frame_id, frame in enumerate(reversed(self.frames), 1):
+            self.frame_references[frame_id] = self._reference(frame["scope"])
+
+    def _children(self, value: Any) -> list[tuple[str, Any]]:
+        if isinstance(value, dict): return [(str(key), item) for key, item in value.items()]
+        if isinstance(value, (list, tuple)): return [(f"[{index}]", item) for index, item in enumerate(value)]
+        if isinstance(value, set): return [(f"[{index}]", item) for index, item in enumerate(sorted(value, key=repr))]
+        if hasattr(value, "__dict__"): return list(vars(value).items())
+        return []
+
+    def _variable(self, name: str, value: Any) -> dict[str, Any]:
+        return {"name": name, "value": self.value(value), "type": type(value).__name__,
+                "variablesReference": self._reference(value)}
+
+    def _inspect(self, expression: str) -> Any:
+        match = re.match(r"^[A-Za-z_]\w*", expression)
+        if not match: raise CForgevError("Solo se permiten variables, campos e índices")
+        name = match.group(); value = self.snapshot.get(name, self.vm.globals.get(name) if self.vm else None)
+        if name not in self.snapshot and (self.vm is None or name not in self.vm.globals):
+            raise CForgevError(f"Variable desconocida '{name}'")
+        cursor = match.end()
+        while cursor < len(expression):
+            if expression[cursor] == ".":
+                field = re.match(r"[A-Za-z_]\w*", expression[cursor + 1:])
+                if not field: raise CForgevError("Campo inválido")
+                key = field.group(); cursor += 1 + len(key)
+                if not isinstance(value, dict) or key not in value: raise CForgevError(f"Campo desconocido '{key}'")
+                value = value[key]
+            elif expression[cursor] == "[":
+                end = expression.find("]", cursor)
+                if end < 0: raise CForgevError("Índice sin cerrar")
+                raw = expression[cursor + 1:end].strip()
+                try: key = json.loads(raw) if raw.startswith('"') else int(raw)
+                except Exception as error: raise CForgevError("Índice inválido") from error
+                value = value[key]; cursor = end + 1
+            else: raise CForgevError("La evaluación no permite llamadas ni operadores")
+        return value
+
+    @classmethod
+    def _evaluate_safe(cls, expression: str, scope: dict[str, Any]) -> Any:
+        """Evalúa condiciones DAP sin llamadas, asignaciones ni acceso arbitrario."""
+        operators = {
+            ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
+            ast.Mult: lambda a, b: a * b, ast.Div: lambda a, b: a / b,
+            ast.Mod: lambda a, b: a % b, ast.Eq: lambda a, b: a == b,
+            ast.NotEq: lambda a, b: a != b, ast.Lt: lambda a, b: a < b,
+            ast.LtE: lambda a, b: a <= b, ast.Gt: lambda a, b: a > b,
+            ast.GtE: lambda a, b: a >= b,
+        }
+        def visit(node: ast.AST) -> Any:
+            if isinstance(node, ast.Expression): return visit(node.body)
+            if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, float, bool, type(None))):
+                return node.value
+            if isinstance(node, ast.Name):
+                if node.id not in scope: raise CForgevError(f"variable desconocida '{node.id}'")
+                return scope[node.id]
+            if isinstance(node, ast.BinOp) and type(node.op) in operators:
+                return operators[type(node.op)](visit(node.left), visit(node.right))
+            if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.Not, ast.USub, ast.UAdd)):
+                value = visit(node.operand)
+                return not value if isinstance(node.op, ast.Not) else (-value if isinstance(node.op, ast.USub) else +value)
+            if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
+                values = [bool(visit(value)) for value in node.values]
+                return all(values) if isinstance(node.op, ast.And) else any(values)
+            if isinstance(node, ast.Compare):
+                left = visit(node.left)
+                for operator, comparator in zip(node.ops, node.comparators):
+                    if type(operator) not in operators: raise CForgevError("operador de comparación no permitido")
+                    right = visit(comparator)
+                    if not operators[type(operator)](left, right): return False
+                    left = right
+                return True
+            if isinstance(node, ast.Subscript):
+                container = visit(node.value); key = visit(node.slice)
+                return container[key]
+            if isinstance(node, ast.Attribute):
+                container = visit(node.value)
+                if not isinstance(container, dict) or node.attr not in container:
+                    raise CForgevError(f"campo desconocido '{node.attr}'")
+                return container[node.attr]
+            raise CForgevError("la condición contiene una operación no permitida")
+        expression = re.sub(r"\bverdadero\b", "True", expression)
+        expression = re.sub(r"\bfalso\b", "False", expression)
+        expression = re.sub(r"\bnulo\b", "None", expression)
+        expression = re.sub(r"\by\b", "and", expression)
+        expression = re.sub(r"\bo\b", "or", expression)
+        expression = re.sub(r"\bno\b", "not", expression)
+        try: tree = ast.parse(expression, mode="eval")
+        except SyntaxError as error: raise CForgevError("sintaxis de condición inválida") from error
+        return visit(tree)
+
+    @staticmethod
+    def _hit_matches(expression: str, count: int) -> bool:
+        if expression.isdigit(): return count == int(expression)
+        match = re.fullmatch(r"(>=|>|==|%)(\d+)", expression.replace(" ", ""))
+        if not match: raise CForgevError("hitCondition debe ser N, >=N, >N, ==N o %N")
+        operator, raw = match.groups(); target = int(raw)
+        if operator == ">=": return count >= target
+        if operator == ">": return count > target
+        if operator == "==": return count == target
+        return target > 0 and count % target == 0
+
+    @classmethod
+    def _format_logpoint(cls, template: str, scope: dict[str, Any]) -> str:
+        def replace(match: re.Match[str]) -> str:
+            return cls.value(cls._evaluate_safe(match.group(1), scope))
+        return re.sub(r"\{([^{}]+)\}", replace, template)
+
+    def handle(self, request: dict[str, Any]) -> bool:
+        command = request.get("command"); arguments = request.get("arguments") or {}
+        try:
+            if command == "initialize":
+                self.response(request, {"supportsConfigurationDoneRequest": True,
+                    "supportsTerminateRequest": True, "supportsStepBack": False,
+                    "supportsEvaluateForHovers": True,
+                    "supportsConditionalBreakpoints": True,
+                    "supportsHitConditionalBreakpoints": True,
+                    "supportsLogPoints": True})
+                self.event("initialized")
+            elif command == "launch":
+                path = Path(str(arguments.get("program", ""))).resolve()
+                if path.suffix != ".cfv": raise CForgevError("DAP requiere un archivo .cfv")
+                self.program, self.source = compile_file(path), path
+                self.response(request)
+            elif command == "setBreakpoints":
+                specifications = list(arguments.get("breakpoints", []))
+                requested = [int(item.get("line", 0)) for item in specifications]
+                available = self._all_lines()
+                self.breakpoints = {int(item.get("line", 0)): dict(item) for item in specifications
+                                    if int(item.get("line", 0)) in available}
+                self.breakpoint_hits = {}
+                self.response(request, {"breakpoints": [
+                    {"verified": line in available, "line": line,
+                     **({} if line in available else {"message": "No hay instrucción ejecutable en esta línea"})}
+                    for line in requested]})
+            elif command == "configurationDone": self.response(request); self.start()
+            elif command == "threads":
+                self.response(request, {"threads": [{"id": 1, "name": "C-Forge VM"}]})
+            elif command == "stackTrace":
+                frames = list(reversed(self.frames)) or [{"name": self.chunk, "line": self.line}]
+                self.response(request, {"stackFrames": [{"id": index, "name": frame["name"],
+                    "line": frame["line"], "column": 1,
+                    "source": {"name": self.source.name if self.source else "programa.cfv",
+                               "path": str(self.source) if self.source else ""}}
+                    for index, frame in enumerate(frames, 1)], "totalFrames": len(frames)})
+            elif command == "scopes":
+                self.response(request, {"scopes": [{"name": "Variables C-Forge",
+                    "variablesReference": self.frame_references.get(int(arguments.get("frameId", 1)), 0),
+                    "expensive": False}]})
+            elif command == "variables":
+                value = self.references.get(int(arguments.get("variablesReference", 0)))
+                self.response(request, {"variables": [self._variable(name, item)
+                    for name, item in self._children(value)]})
+            elif command == "evaluate":
+                value = self._inspect(str(arguments.get("expression", "")))
+                self.response(request, {"result": self.value(value),
+                    "type": type(value).__name__, "variablesReference": self._reference(value)})
+            elif command in {"continue", "next", "stepIn", "stepOut"}:
+                with self.condition:
+                    self.resume_location = self.last_location
+                    self.step_mode = {"next": "over", "stepIn": "in", "stepOut": "out"}.get(command)
+                    self.step_depth = len(self.frames)
+                    self.stepping = command != "continue"; self.paused = False; self.condition.notify_all()
+                self.response(request, {"allThreadsContinued": True})
+            elif command in {"disconnect", "terminate"}:
+                self.terminated = True
+                with self.condition: self.paused = False; self.condition.notify_all()
+                self.response(request); return False
+            else: self.response(request, success=False, message=f"Comando DAP no soportado: {command}")
+        except Exception as error:
+            self.response(request, success=False, message=str(error))
+        return True
+
+
+def _read_message(reader: BinaryIO) -> dict[str, Any] | None:
+    length = None
+    while True:
+        line = reader.readline()
+        if not line: return None
+        if line in {b"\r\n", b"\n"}: break
+        key, _, value = line.decode("ascii").partition(":")
+        if key.lower() == "content-length": length = int(value.strip())
+    if length is None: raise CForgevError("DAP: falta Content-Length")
+    payload = reader.read(length)
+    if len(payload) != length: raise CForgevError("DAP: mensaje truncado")
+    value = json.loads(payload)
+    if not isinstance(value, dict): raise CForgevError("DAP: mensaje inválido")
+    return value
+
+
+def run(reader: BinaryIO | None = None, writer: BinaryIO | None = None) -> int:
+    session = DAPSession(reader or sys.stdin.buffer, writer or sys.stdout.buffer)
+    while True:
+        message = _read_message(session.reader)
+        if message is None or not session.handle(message): break
+    return 0
+
+
+if __name__ == "__main__": raise SystemExit(run())
+)CFV13DATA"},
+        {R"CFV14DATA(cforge_packages.py)CFV14DATA", R"CFV15DATA("""Gestor local, reproducible y seguro de paquetes C-Forge."""
 
 from __future__ import annotations
 
 import hashlib
+import base64
+import gzip
 import json
 import re
 import tarfile
@@ -3828,6 +6514,104 @@ NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$")
 DEFAULT_REGISTRY = "https://raw.githubusercontent.com/VemorisGroup/C-Forge/main/registry/index.json"
 MAX_PACKAGE_BYTES = 32 * 1024 * 1024
+
+
+def _crypto():
+    try:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+    except ImportError as error:
+        raise CForgevError(
+            "Las firmas Ed25519 requieren el componente oficial 'cryptography'"
+        ) from error
+    return serialization, Ed25519PrivateKey, Ed25519PublicKey
+
+
+def _signature_message(name: str, version: str, digest: str) -> bytes:
+    if not NAME_RE.fullmatch(name) or not VERSION_RE.fullmatch(version):
+        raise CForgevError("Nombre o versión inválidos para firmar")
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise CForgevError("SHA-256 inválido para firmar")
+    return b"C-FORGE-PACKAGE-V1\0" + name.encode() + b"\0" + version.encode() + b"\0" + bytes.fromhex(digest)
+
+
+def generate_keypair(private_path: Path, public_path: Path) -> str:
+    """Genera una identidad Ed25519; nunca sobrescribe material existente."""
+    if private_path.exists() or public_path.exists():
+        raise CForgevError("La clave ya existe; no se sobrescribirá")
+    serialization, Private, _ = _crypto()
+    private = Private.generate(); public = private.public_key()
+    private_path.parent.mkdir(parents=True, exist_ok=True)
+    private_path.write_bytes(private.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ))
+    public_path.write_bytes(public.public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo,
+    ))
+    try: private_path.chmod(0o600)
+    except OSError: pass
+    raw = public.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    return hashlib.sha256(raw).hexdigest()
+
+
+def sign_package(archive: Path, private_path: Path, name: str, version: str,
+                 output: Path | None = None) -> Path:
+    serialization, Private, _ = _crypto()
+    try:
+        private = serialization.load_pem_private_key(private_path.read_bytes(), password=None)
+    except (OSError, ValueError) as error:
+        raise CForgevError(f"Clave privada inválida: {error}") from error
+    if not isinstance(private, Private): raise CForgevError("La clave no es Ed25519")
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    public = private.public_key()
+    raw_public = public.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    document = {
+        "format": 1, "algorithm": "Ed25519", "name": name, "version": version,
+        "sha256": digest,
+        "public_key": base64.b64encode(raw_public).decode("ascii"),
+        "key_id": hashlib.sha256(raw_public).hexdigest(),
+        "signature": base64.b64encode(private.sign(_signature_message(name, version, digest))).decode("ascii"),
+    }
+    destination = output or archive.with_suffix(archive.suffix + ".sig.json")
+    destination.write_text(json.dumps(document, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    return destination
+
+
+def verify_package_signature(payload: bytes, release: dict[str, object], name: str,
+                             version: str, revocations: set[str] | None = None) -> str:
+    _, _, Public = _crypto()
+    digest = hashlib.sha256(payload).hexdigest()
+    expected = str(release.get("sha256", "")).lower()
+    key_id = str(release.get("key_id", "")).lower()
+    if digest != expected: raise CForgevError("La suma SHA-256 del paquete no coincide")
+    revoked = revocations or set()
+    if f"{name}@{version}" in revoked or key_id in revoked:
+        raise CForgevError(f"Paquete o clave revocados: {name}@{version}")
+    try:
+        raw_public = base64.b64decode(str(release["public_key"]), validate=True)
+        signature = base64.b64decode(str(release["signature"]), validate=True)
+        calculated_id = hashlib.sha256(raw_public).hexdigest()
+        if key_id != calculated_id: raise CForgevError("Identificador de clave inválido")
+        Public.from_public_bytes(raw_public).verify(
+            signature, _signature_message(name, version, digest)
+        )
+    except CForgevError: raise
+    except Exception as error:
+        raise CForgevError("Firma Ed25519 inválida") from error
+    return key_id
+
+
+def verify_publisher(index: dict[str, object], metadata: dict[str, object], key_id: str) -> str:
+    publisher = metadata.get("publisher")
+    publishers = index.get("publishers", {})
+    account = publishers.get(publisher) if isinstance(publishers, dict) else None
+    if not isinstance(publisher, str) or not isinstance(account, dict):
+        raise CForgevError("El paquete no posee un publicador registrado")
+    keys = account.get("keys", [])
+    if account.get("status") != "active" or not isinstance(keys, list) or key_id not in keys:
+        raise CForgevError("La identidad o clave del publicador no está autorizada")
+    return publisher
 
 
 def _load(root: Path) -> dict[str, object]:
@@ -3850,7 +6634,7 @@ def init(root: Path, name: str | None = None) -> None:
     path = root / MANIFEST
     if path.exists():
         raise CForgevError(f"{MANIFEST} ya existe")
-    value = {"name": project, "version": "0.1.0", "language": ">=1.5.0", "dependencies": {}}
+    value = {"name": project, "version": "0.1.0", "language": ">=1.6.0", "dependencies": {}}
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     _write_lock(root, value)
 
@@ -3909,7 +6693,7 @@ def fetch_registry(url: str = DEFAULT_REGISTRY) -> dict[str, object]:
     try: value = json.loads(raw.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as error:
         raise CForgevError(f"Índice del registro inválido: {error}") from error
-    if not isinstance(value, dict) or value.get("format") != 1 or not isinstance(value.get("packages"), dict):
+    if not isinstance(value, dict) or value.get("format") not in {1, 2} or not isinstance(value.get("packages"), dict):
         raise CForgevError("Formato de registro C-Forge incompatible")
     return value
 
@@ -3950,6 +6734,12 @@ def install_registry(root: Path, name: str, version: str | None = None,
         raise CForgevError(f"No se pudo descargar {name}: {error}") from error
     if len(payload) > MAX_PACKAGE_BYTES or hashlib.sha256(payload).hexdigest() != expected:
         raise CForgevError("El paquete excede el límite o su SHA-256 no coincide")
+    if index.get("format") == 2:
+        revocations_value = index.get("revocations", [])
+        if not isinstance(revocations_value, list) or not all(isinstance(item, str) for item in revocations_value):
+            raise CForgevError("Lista de revocaciones inválida")
+        key_id = verify_package_signature(payload, release, name, selected, set(revocations_value))
+        verify_publisher(index, metadata, key_id)
     destination = root / ".cforge" / "packages" / name / selected
     destination.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix=".tar.gz") as temporary:
@@ -3974,9 +6764,28 @@ def build_package(root: Path, output: Path) -> tuple[Path, str]:
         raise CForgevError("El manifiesto requiere name y version semántica válidos")
     output.mkdir(parents=True, exist_ok=True)
     target = output / f"{name}-{version}.tar.gz"
-    files = [path for path in sorted(root.rglob("*")) if path.is_file() and ".cforge" not in path.parts and ".git" not in path.parts]
-    with tarfile.open(target, "w:gz") as archive:
-        for path in files: archive.add(path, arcname=Path(name) / path.relative_to(root))
+    output_resolved = output.resolve()
+    files = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        resolved = path.resolve()
+        if output_resolved == resolved or output_resolved in resolved.parents:
+            continue
+        if ".cforge" in path.parts or ".git" in path.parts:
+            continue
+        files.append(path)
+    with target.open("wb") as stream:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=stream, mtime=0) as compressed:
+            with tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive:
+                for path in files:
+                    info = archive.gettarinfo(str(path), str(Path(name) / path.relative_to(root)))
+                    info.uid = info.gid = 0
+                    info.uname = info.gname = ""
+                    info.mtime = 0
+                    info.mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
+                    with path.open("rb") as source:
+                        archive.addfile(info, source)
     return target, hashlib.sha256(target.read_bytes()).hexdigest()
 
 
@@ -3999,8 +6808,8 @@ def _write_lock(root: Path, manifest: dict[str, object]) -> None:
     (root / LOCKFILE).write_text(
         json.dumps(locked, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-)CFV11DATA"},
-        {R"CFV12DATA(cforge_vm.py)CFV12DATA", R"CFV13DATA("""Compilador de bytecode y máquina virtual alojada de C-Forge.
+)CFV15DATA"},
+        {R"CFV16DATA(cforge_vm.py)CFV16DATA", R"CFV17DATA("""Compilador de bytecode y máquina virtual alojada de C-Forge.
 
 El formato es propio de C-Forge; esta primera versión se aloja en Python para
 facilitar su auditoría y portabilidad. No ejecuta código extranjero.
@@ -4009,19 +6818,41 @@ facilitar su auditoría y portabilidad. No ejecuta código extranjero.
 from __future__ import annotations
 
 import json
+import hashlib
+import concurrent.futures
 import math
+import os
+import platform
+import socket
+import struct
+import subprocess
+import queue
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from cforgev import CForgevError, tokenize
-from compilador_nativo import Parser, Program, StaticTypeAnalyzer
+from cforgev import CForgevError, ForgeOption, tokenize
+from compilador_nativo import Parser, Program, StaticTypeAnalyzer, resolve_imports
+
+BYTECODE_MAGIC = b"CFBC"
+BYTECODE_VERSION = (1, 1)
+BYTECODE_HEADER = struct.Struct(">4sBBQ32s")
+MAX_BYTECODE_PAYLOAD = 256 * 1024 * 1024
+MAX_BYTECODE_NESTING = 256
+VALID_OPCODES = {
+    "CONST", "LOAD", "STORE", "POP", "PRINT", "BUILD_LIST", "BUILD_TUPLE",
+    "BUILD_SET", "BUILD_MAP",
+    "UNARY", "BINARY", "INDEX", "FIELD", "METHOD", "CALL", "TRY",
+    "JUMP", "JUMP_IF_FALSE", "RETURN", "HALT", "SET_FIELD", "AWAIT",
+}
 
 
 @dataclass(frozen=True)
 class Instruction:
     op: str
     arg: Any = None
+    line: int | None = None
 
 
 @dataclass
@@ -4029,45 +6860,226 @@ class Chunk:
     name: str
     parameters: list[str] = field(default_factory=list)
     code: list[Instruction] = field(default_factory=list)
+    is_async: bool = False
+    current_line: int | None = field(default=None, repr=False)
 
-    def emit(self, op: str, arg: Any = None) -> int:
-        self.code.append(Instruction(op, arg))
+    def emit(self, op: str, arg: Any = None, line: int | None = None) -> int:
+        self.code.append(Instruction(op, arg, self.current_line if line is None else line))
         return len(self.code) - 1
 
     def patch(self, position: int, target: int) -> None:
         old = self.code[position]
-        self.code[position] = Instruction(old.op, target)
+        self.code[position] = Instruction(old.op, target, old.line)
 
 
 @dataclass
 class BytecodeProgram:
     main: Chunk
     functions: dict[str, Chunk]
+    structures: dict[str, list[list[str]]] = field(default_factory=dict)
+    classes: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass
+class VMTask:
+    future: concurrent.futures.Future[Any]
+
+
+@dataclass
+class VMChannel:
+    values: queue.Queue[Any] = field(default_factory=queue.Queue)
+    closed: bool = False
+
+
+def _encode_chunk(chunk: Chunk) -> dict[str, Any]:
+    instructions = []
+    for instruction in chunk.code:
+        argument = instruction.arg
+        if instruction.op == "TRY":
+            protected, error_name, handler = argument
+            argument = {"protected": _encode_chunk(protected), "error": error_name,
+                        "handler": _encode_chunk(handler)}
+        encoded = {"op": instruction.op, "arg": argument}
+        if instruction.line is not None: encoded["line"] = instruction.line
+        instructions.append(encoded)
+    return {"name": chunk.name, "parameters": chunk.parameters,
+            "async": chunk.is_async, "code": instructions}
+
+
+def _decode_chunk(document: dict[str, Any], depth: int = 0) -> Chunk:
+    if depth > MAX_BYTECODE_NESTING:
+        raise CForgevError("Bytecode: anidamiento excesivo")
+    if not isinstance(document, dict) or not isinstance(document.get("name"), str):
+        raise CForgevError("Bytecode: chunk inválido")
+    parameters = document.get("parameters", [])
+    code = document.get("code", [])
+    if not isinstance(parameters, list) or not all(isinstance(x, str) for x in parameters):
+        raise CForgevError("Bytecode: parámetros inválidos")
+    if not isinstance(code, list) or len(code) > 10_000_000:
+        raise CForgevError("Bytecode: tabla de instrucciones inválida")
+    asynchronous = document.get("async", False)
+    if not isinstance(asynchronous, bool): raise CForgevError("Bytecode: marca async inválida")
+    chunk = Chunk(document["name"], parameters, is_async=asynchronous)
+    for encoded in code:
+        if not isinstance(encoded, dict) or encoded.get("op") not in VALID_OPCODES:
+            raise CForgevError("Bytecode: opcode desconocido o inválido")
+        operation, argument = encoded["op"], encoded.get("arg")
+        if operation == "TRY":
+            if not isinstance(argument, dict): raise CForgevError("Bytecode: TRY inválido")
+            if not isinstance(argument.get("error"), str):
+                raise CForgevError("Bytecode: nombre de error TRY inválido")
+            argument = (_decode_chunk(argument.get("protected"), depth + 1), argument["error"],
+                        _decode_chunk(argument.get("handler"), depth + 1))
+        elif operation in {"CALL", "METHOD"} and isinstance(argument, list):
+            argument = tuple(argument)
+        line = encoded.get("line")
+        if line is not None and (not isinstance(line, int) or line < 1):
+            raise CForgevError("Bytecode: línea de depuración inválida")
+        chunk.emit(operation, argument, line)
+    _verify_chunk(chunk)
+    return chunk
+
+
+def _verify_chunk(chunk: Chunk) -> None:
+    """Rechaza operandos estructuralmente inválidos antes de ejecutar bytecode."""
+    size = len(chunk.code)
+    for offset, instruction in enumerate(chunk.code):
+        op, argument = instruction.op, instruction.arg
+        if op in {"JUMP", "JUMP_IF_FALSE"}:
+            if not isinstance(argument, int) or isinstance(argument, bool) or not 0 <= argument <= size:
+                raise CForgevError(
+                    f"Bytecode: destino de salto inválido en {chunk.name}:{offset}"
+                )
+        elif op in {"BUILD_LIST", "BUILD_TUPLE", "BUILD_SET", "BUILD_MAP"}:
+            if not isinstance(argument, int) or isinstance(argument, bool) or argument < 0:
+                raise CForgevError(f"Bytecode: cantidad inválida para {op}")
+        elif op in {"LOAD", "STORE", "SET_FIELD", "FIELD", "UNARY", "BINARY"}:
+            if not isinstance(argument, str):
+                raise CForgevError(f"Bytecode: operando inválido para {op}")
+        elif op in {"CALL", "METHOD"}:
+            if (not isinstance(argument, tuple) or len(argument) != 2
+                    or not isinstance(argument[0], str)
+                    or not isinstance(argument[1], int) or isinstance(argument[1], bool)
+                    or argument[1] < 0):
+                raise CForgevError(f"Bytecode: invocación inválida para {op}")
+        elif op == "TRY":
+            if (not isinstance(argument, tuple) or len(argument) != 3
+                    or not isinstance(argument[0], Chunk)
+                    or not isinstance(argument[1], str)
+                    or not isinstance(argument[2], Chunk)):
+                raise CForgevError("Bytecode: TRY inválido")
+
+
+def serialize(program: BytecodeProgram) -> bytes:
+    document = {
+        "format": "C-Forge Bytecode",
+        "version": list(BYTECODE_VERSION),
+        "main": _encode_chunk(program.main),
+        "functions": {name: _encode_chunk(chunk) for name, chunk in sorted(program.functions.items())},
+        "structures": program.structures,
+        "classes": {
+            name: {"fields": definition["fields"],
+                   "methods": {method: _encode_chunk(chunk) for method, chunk in sorted(definition["methods"].items())}}
+            for name, definition in sorted(program.classes.items())
+        },
+    }
+    payload = json.dumps(document, ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":")).encode("utf-8")
+    return BYTECODE_HEADER.pack(BYTECODE_MAGIC, *BYTECODE_VERSION, len(payload),
+                                hashlib.sha256(payload).digest()) + payload
+
+
+def deserialize(data: bytes) -> BytecodeProgram:
+    if len(data) < BYTECODE_HEADER.size: raise CForgevError("Bytecode: archivo truncado")
+    magic, major, minor, length, expected = BYTECODE_HEADER.unpack_from(data)
+    if magic != BYTECODE_MAGIC: raise CForgevError("Bytecode: firma CFBC inválida")
+    if major != BYTECODE_VERSION[0] or minor > BYTECODE_VERSION[1]:
+        raise CForgevError(f"Bytecode: versión {major}.{minor} incompatible")
+    if length > MAX_BYTECODE_PAYLOAD:
+        raise CForgevError("Bytecode: carga excede el límite de 256 MiB")
+    payload = data[BYTECODE_HEADER.size:]
+    if length != len(payload): raise CForgevError("Bytecode: longitud inválida")
+    if hashlib.sha256(payload).digest() != expected:
+        raise CForgevError("Bytecode: suma SHA-256 inválida")
+    try: document = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise CForgevError("Bytecode: contenido JSON inválido") from error
+    if document.get("format") != "C-Forge Bytecode": raise CForgevError("Bytecode: formato desconocido")
+    if document.get("version") != [major, minor]:
+        raise CForgevError("Bytecode: versión interna no coincide con la cabecera")
+    functions = document.get("functions")
+    if not isinstance(functions, dict): raise CForgevError("Bytecode: funciones inválidas")
+    structures = document.get("structures", {})
+    classes_document = document.get("classes", {})
+    if not isinstance(structures, dict) or not isinstance(classes_document, dict):
+        raise CForgevError("Bytecode: tabla de tipos inválida")
+    classes = {}
+    for name, definition in classes_document.items():
+        if not isinstance(name, str) or not isinstance(definition, dict):
+            raise CForgevError("Bytecode: clase inválida")
+        methods = definition.get("methods", {})
+        fields = definition.get("fields", [])
+        if not isinstance(methods, dict) or not isinstance(fields, list):
+            raise CForgevError("Bytecode: definición de clase inválida")
+        classes[name] = {"fields": fields,
+                         "methods": {method: _decode_chunk(chunk) for method, chunk in methods.items()}}
+    return BytecodeProgram(_decode_chunk(document["main"]),
+                           {name: _decode_chunk(chunk) for name, chunk in functions.items()},
+                           structures, classes)
+
+
+def save_bytecode(program: BytecodeProgram, path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(serialize(program)); return path
+
+
+def load_bytecode(path: Path) -> BytecodeProgram:
+    try: return deserialize(path.read_bytes())
+    except OSError as error: raise CForgevError(f"No se pudo abrir {path}: {error}") from error
 
 
 class BytecodeCompiler:
     """Baja el AST verificado a instrucciones de pila de C-Forge."""
 
     def compile(self, program: Program) -> BytecodeProgram:
+        self.locations = program.locations
         functions: dict[str, Chunk] = {}
         for node in program.functions:
-            chunk = Chunk(node[1], list(node[2]))
+            chunk = Chunk(node[1], list(node[2]), is_async=bool(node[6]) if len(node) > 6 else False)
             self._statements(chunk, node[3])
             chunk.emit("CONST", None)
             chunk.emit("RETURN")
             functions[node[1]] = chunk
+        structures: dict[str, list[list[str]]] = {}
+        classes: dict[str, dict[str, Any]] = {}
+        for statement in program.statements:
+            if statement[0] == "structure":
+                structures[statement[1]] = [list(field) for field in statement[2]]
+            elif statement[0] == "class":
+                methods = {}
+                for method in statement[3]:
+                    method_chunk = Chunk(f"{statement[1]}.{method[2]}", ["este", *method[3]])
+                    self._statements(method_chunk, method[4])
+                    method_chunk.emit("CONST", None); method_chunk.emit("RETURN")
+                    methods[method[2]] = method_chunk
+                classes[statement[1]] = {
+                    "fields": [list(field) for field in statement[2]], "methods": methods
+                }
         main = Chunk("<main>")
         self._statements(main, program.statements)
         main.emit("HALT")
-        return BytecodeProgram(main, functions)
+        return BytecodeProgram(main, functions, structures, classes)
 
     def _statements(self, chunk: Chunk, statements: list[tuple]) -> None:
         for statement in statements:
+            chunk.current_line = self.locations.get(id(statement), chunk.current_line)
             kind = statement[0]
             if kind == "let":
                 self._expression(chunk, statement[3]); chunk.emit("STORE", statement[1])
             elif kind == "assign":
                 self._expression(chunk, statement[2]); chunk.emit("STORE", statement[1])
+            elif kind == "field_assign":
+                self._expression(chunk, statement[3]); chunk.emit("SET_FIELD", statement[2])
             elif kind == "print":
                 self._expression(chunk, statement[1]); chunk.emit("PRINT")
             elif kind == "expression":
@@ -4091,13 +7103,15 @@ class BytecodeCompiler:
                 chunk.patch(done, len(chunk.code))
             elif kind in {"gpu", "test"}:
                 self._statements(chunk, statement[-1])
+            elif kind in {"region", "unsafe"}:
+                self._statements(chunk, statement[1])
             elif kind == "try":
                 protected = Chunk(f"{chunk.name}:try")
                 handler = Chunk(f"{chunk.name}:catch")
                 self._statements(protected, statement[1]); protected.emit("CONST", None); protected.emit("RETURN")
                 self._statements(handler, statement[3]); handler.emit("CONST", None); handler.emit("RETURN")
                 chunk.emit("TRY", (protected, statement[2], handler))
-            elif kind in {"structure", "class", "import", "universal_import"}:
+            elif kind in {"structure", "class", "interface", "import", "universal_import"}:
                 continue
             else:
                 raise CForgevError(f"Bytecode 1.0 todavía no admite la sentencia '{kind}'")
@@ -4113,12 +7127,20 @@ class BytecodeCompiler:
         elif kind == "list":
             for item in expression[1]: self._expression(chunk, item)
             chunk.emit("BUILD_LIST", len(expression[1]))
+        elif kind == "tuple":
+            for item in expression[1]: self._expression(chunk, item)
+            chunk.emit("BUILD_TUPLE", len(expression[1]))
+        elif kind == "set":
+            for item in expression[1]: self._expression(chunk, item)
+            chunk.emit("BUILD_SET", len(expression[1]))
         elif kind == "map":
             for key, value in expression[1]:
                 self._expression(chunk, key); self._expression(chunk, value)
             chunk.emit("BUILD_MAP", len(expression[1]))
         elif kind == "unary":
             self._expression(chunk, expression[2]); chunk.emit("UNARY", expression[1])
+        elif kind == "await":
+            self._expression(chunk, expression[1]); chunk.emit("AWAIT")
         elif kind == "binary":
             self._expression(chunk, expression[2]); self._expression(chunk, expression[3])
             chunk.emit("BINARY", expression[1])
@@ -4142,40 +7164,105 @@ class VirtualMachine:
 
     def __init__(self, program: BytecodeProgram, output: Callable[[str], None] = print,
                  max_steps: int = 10_000_000,
-                 trace: Callable[[str, int, Instruction, dict[str, Any]], None] | None = None) -> None:
+                 trace: Callable[[str, int, Instruction, dict[str, Any]], None] | None = None,
+                 base_dir: Path | None = None, permissions: set[str] | None = None) -> None:
         self.program, self.output, self.max_steps = program, output, max_steps
         self.globals: dict[str, Any] = {}
         self.steps = 0
+        self._step_lock = threading.Lock()
+        self._debug_local = threading.local()
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max(2, min(32, os.cpu_count() or 2)),
+            thread_name_prefix="cforge-vm",
+        )
         self.trace = trace
+        self.base_dir = (base_dir or Path.cwd()).resolve()
+        self.permissions = permissions if permissions is not None else {
+            item.strip() for item in os.environ.get(
+                "CFORGE_PERMISSIONS", "fs-read,fs-write"
+            ).split(",") if item.strip()
+        }
         self.builtins: dict[str, Callable[..., Any]] = {
             "longitud": len, "len": len, "raiz": math.sqrt, "potencia": pow,
             "absoluto": abs, "redondear": round, "a_texto": str,
             "a_numero": lambda value: float(value) if "." in str(value) else int(value),
             "agregar": self._append, "afirmar": self._assert,
+            "mover": lambda value: value, "prestar": lambda value: value,
+            "prestar_mut": lambda value: value, "soltar_prestamo": lambda value: None,
+            "destruir": lambda value: None,
+            "algunos": lambda value: ForgeOption(True, value),
+            "ninguno": lambda: ForgeOption(False),
+            "es_algunos": lambda value: isinstance(value, ForgeOption) and value.has_value,
+            "desenvolver": self._unwrap,
+            "file_read": self._file_read, "leer_archivo": self._file_read,
+            "file_write": self._file_write, "escribir_archivo": self._file_write,
+            "file_append": self._file_append, "existe_archivo": self._file_exists,
+            "sys_run": self._sys_run, "sys_info": self._sys_info,
+            "net_send": self._net_send, "net_listen": self._net_listen,
+            "tarea": self._task, "esperar": self._await_task,
+            "cancelar": self._cancel_task, "canal": self._channel,
+            "enviar": self._send_channel, "recibir": self._receive_channel,
+            "cerrar_canal": self._close_channel,
         }
 
     def run(self) -> Any:
         return self._run_chunk(self.program.main, self.globals)
 
+    def debug_frames(self) -> list[dict[str, Any]]:
+        """Instantánea inmutable de la pila del hilo que está ejecutando el trace."""
+        frames = getattr(self._debug_local, "frames", [])
+        return [{"name": frame["name"], "line": frame["line"],
+                 "offset": frame["offset"], "scope": dict(frame["scope"])}
+                for frame in frames]
+
     def _run_chunk(self, chunk: Chunk, scope: dict[str, Any]) -> Any:
         stack: list[Any] = []; ip = 0
-        while ip < len(chunk.code):
-            self.steps += 1
-            if self.steps > self.max_steps: raise CForgevError("VM: límite de instrucciones excedido")
-            instruction = chunk.code[ip]; ip += 1
-            if self.trace is not None:
-                self.trace(chunk.name, ip - 1, instruction, dict(scope))
-            op, arg = instruction.op, instruction.arg
+        frames = getattr(self._debug_local, "frames", None)
+        if frames is None:
+            frames = []; self._debug_local.frames = frames
+        frame = {"name": chunk.name, "line": 1, "offset": 0, "scope": scope}
+        frames.append(frame)
+        try:
+            while ip < len(chunk.code):
+                with self._step_lock:
+                    self.steps += 1
+                    if self.steps > self.max_steps: raise CForgevError("VM: límite de instrucciones excedido")
+                instruction = chunk.code[ip]; ip += 1
+                frame["line"], frame["offset"] = instruction.line or frame["line"], ip - 1
+                if self.trace is not None:
+                    self.trace(chunk.name, ip - 1, instruction, dict(scope))
+                op, arg = instruction.op, instruction.arg
+                result, returned = self._execute_instruction(op, arg, stack, scope, chunk, ip)
+                if returned: return result
+                if op == "JUMP": ip = arg
+                elif op == "JUMP_IF_FALSE" and result is not None: ip = result
+            return None
+        finally:
+            frames.pop()
+
+    def _execute_instruction(self, op: str, arg: Any, stack: list[Any],
+                             scope: dict[str, Any], chunk: Chunk, ip: int) -> tuple[Any, bool]:
             if op == "CONST": stack.append(arg)
             elif op == "LOAD":
                 if arg in scope: stack.append(scope[arg])
                 elif arg in self.globals: stack.append(self.globals[arg])
                 else: raise CForgevError(f"VM: variable desconocida '{arg}'")
             elif op == "STORE": scope[arg] = stack.pop()
+            elif op == "SET_FIELD":
+                owner = scope.get("este")
+                if not isinstance(owner, dict) or arg not in owner:
+                    raise CForgevError(f"VM: campo desconocido '{arg}'")
+                owner[arg] = stack.pop()
             elif op == "POP": stack.pop()
             elif op == "PRINT": self.output(self._display(stack.pop()))
             elif op == "BUILD_LIST":
                 values = stack[-arg:] if arg else []; self._drop(stack, arg); stack.append(values)
+            elif op == "BUILD_TUPLE":
+                values = stack[-arg:] if arg else []; self._drop(stack, arg); stack.append(tuple(values))
+            elif op == "BUILD_SET":
+                values = stack[-arg:] if arg else []; self._drop(stack, arg)
+                try: stack.append(set(values))
+                except TypeError as error: raise CForgevError("VM: los elementos del conjunto deben ser inmutables") from error
             elif op == "BUILD_MAP":
                 values = stack[-2 * arg:] if arg else []; self._drop(stack, 2 * arg)
                 stack.append({values[i]: values[i + 1] for i in range(0, len(values), 2)})
@@ -4191,6 +7278,7 @@ class VirtualMachine:
             elif op == "CALL":
                 name, count = arg; args = stack[-count:] if count else []; self._drop(stack, count)
                 stack.append(self._call(name, args))
+            elif op == "AWAIT": stack.append(self._await_task(stack.pop()))
             elif op == "TRY":
                 protected, error_name, handler = arg
                 try:
@@ -4198,13 +7286,13 @@ class VirtualMachine:
                 except Exception as error:
                     scope[error_name] = str(error)
                     self._run_chunk(handler, scope)
-            elif op == "JUMP": ip = arg
+            elif op == "JUMP": pass
             elif op == "JUMP_IF_FALSE":
-                if not stack.pop(): ip = arg
-            elif op == "RETURN": return stack.pop()
-            elif op == "HALT": return stack[-1] if stack else None
+                if not stack.pop(): return arg, False
+            elif op == "RETURN": return stack.pop(), True
+            elif op == "HALT": return (stack[-1] if stack else None), True
             else: raise CForgevError(f"VM: opcode desconocido '{op}'")
-        return None
+            return None, False
 
     @staticmethod
     def _drop(stack: list[Any], count: int, keep: bool = False) -> None:
@@ -4217,10 +7305,24 @@ class VirtualMachine:
 
     def _call(self, name: str, args: list[Any]) -> Any:
         if name in self.builtins: return self.builtins[name](*args)
+        definition = self.program.structures.get(name)
+        class_definition = self.program.classes.get(name)
+        fields = definition if definition is not None else (
+            class_definition["fields"] if class_definition is not None else None
+        )
+        if fields is not None:
+            if len(args) != len(fields):
+                raise CForgevError(f"VM: '{name}' requiere {len(fields)} campos")
+            value = {field[0]: argument for field, argument in zip(fields, args)}
+            if class_definition is not None: value["__clase"] = name
+            return value
         if name not in self.program.functions: raise CForgevError(f"VM: función desconocida '{name}'")
         chunk = self.program.functions[name]
         if len(args) != len(chunk.parameters): raise CForgevError(f"VM: '{name}' requiere {len(chunk.parameters)} argumentos")
-        return self._run_chunk(chunk, dict(zip(chunk.parameters, args)))
+        scope = dict(zip(chunk.parameters, args))
+        if chunk.is_async:
+            return VMTask(self._executor.submit(self._run_chunk, chunk, scope))
+        return self._run_chunk(chunk, scope)
 
     @staticmethod
     def _binary(op: str, left: Any, right: Any) -> Any:
@@ -4246,11 +7348,17 @@ class VirtualMachine:
         if isinstance(owner, dict) and name in owner: return owner[name]
         raise CForgevError(f"VM: miembro desconocido '{name}'")
 
-    @staticmethod
-    def _method(owner: Any, name: str, args: list[Any]) -> Any:
+    def _method(self, owner: Any, name: str, args: list[Any]) -> Any:
         if name in {"append", "push", "agregar"} and isinstance(owner, list) and len(args) == 1:
             owner.append(args[0]); return owner
         if name in {"length", "len"} and not args: return len(owner)
+        if isinstance(owner, dict) and "__clase" in owner:
+            definition = self.program.classes.get(owner["__clase"])
+            method = definition["methods"].get(name) if definition else None
+            if method is None: raise CForgevError(f"VM: método desconocido '{name}'")
+            if len(args) + 1 != len(method.parameters):
+                raise CForgevError(f"VM: '{name}' recibió una cantidad incorrecta de argumentos")
+            return self._run_chunk(method, dict(zip(method.parameters, [owner, *args])))
         raise CForgevError(f"VM: método incompatible '{name}'")
 
     @staticmethod
@@ -4262,23 +7370,180 @@ class VirtualMachine:
         return True
 
     @staticmethod
+    def _unwrap(value: Any) -> Any:
+        if not isinstance(value, ForgeOption): raise CForgevError("VM: desenvolver requiere una opcion")
+        if not value.has_value: raise CForgevError("VM: no se puede desenvolver ninguno")
+        return value.value
+
+    def _permit(self, permission: str) -> None:
+        if permission not in self.permissions:
+            raise CForgevError(
+                f"VM Sandbox: falta permiso '{permission}'. "
+                "Usa CFORGE_PERMISSIONS para concederlo explícitamente"
+            )
+
+    def _path(self, raw: Any) -> Path:
+        if not isinstance(raw, str): raise CForgevError("VM: la ruta debe ser texto")
+        path = (self.base_dir / raw).resolve()
+        try: path.relative_to(self.base_dir)
+        except ValueError as error: raise CForgevError("VM Sandbox: ruta fuera del proyecto") from error
+        return path
+
+    def _file_read(self, raw: Any) -> str:
+        self._permit("fs-read")
+        try: return self._path(raw).read_text(encoding="utf-8")
+        except OSError as error: raise CForgevError(f"VM: no se pudo leer archivo: {error}") from error
+
+    def _file_write(self, raw: Any, content: Any) -> None:
+        self._permit("fs-write")
+        if not isinstance(content, str): raise CForgevError("VM: el contenido debe ser texto")
+        path = self._path(raw); path.parent.mkdir(parents=True, exist_ok=True)
+        try: path.write_text(content, encoding="utf-8")
+        except OSError as error: raise CForgevError(f"VM: no se pudo escribir archivo: {error}") from error
+
+    def _file_append(self, raw: Any, content: Any) -> None:
+        self._permit("fs-write")
+        if not isinstance(content, str): raise CForgevError("VM: el contenido debe ser texto")
+        path = self._path(raw); path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with path.open("a", encoding="utf-8") as stream: stream.write(content)
+        except OSError as error: raise CForgevError(f"VM: no se pudo anexar archivo: {error}") from error
+
+    def _file_exists(self, raw: Any) -> bool:
+        self._permit("fs-read"); return self._path(raw).exists()
+
+    def _sys_run(self, command: Any) -> dict[str, Any]:
+        self._permit("process")
+        if not isinstance(command, str): raise CForgevError("VM: sys_run requiere texto")
+        try:
+            completed = subprocess.run(command, shell=True, cwd=self.base_dir,
+                                       capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise CForgevError(f"VM: sys_run falló: {error}") from error
+        return {"estado": completed.returncode, "salida": completed.stdout,
+                "error": completed.stderr}
+
+    @staticmethod
+    def _sys_info() -> dict[str, Any]:
+        return {"cpu": platform.machine(), "nucleos": os.cpu_count() or 1,
+                "sistema": platform.system()}
+
+    def _net_send(self, host: Any, port: Any, content: Any) -> int:
+        self._permit("network")
+        if not isinstance(host, str) or not isinstance(content, str):
+            raise CForgevError("VM: net_send requiere host, puerto y texto")
+        data = content.encode("utf-8")
+        try:
+            with socket.create_connection((host, int(port)), timeout=5) as connection:
+                connection.sendall(data)
+        except (OSError, ValueError) as error:
+            raise CForgevError(f"VM: net_send falló: {error}") from error
+        return len(data)
+
+    def _net_listen(self, port: Any, timeout_ms: Any = 5000) -> str:
+        self._permit("network")
+        try:
+            with socket.socket() as server:
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                server.bind(("127.0.0.1", int(port))); server.listen(1)
+                server.settimeout(float(timeout_ms) / 1000.0)
+                connection, _ = server.accept()
+                with connection: return connection.recv(16 * 1024 * 1024).decode("utf-8")
+        except (OSError, ValueError, UnicodeError) as error:
+            raise CForgevError(f"VM: net_listen falló: {error}") from error
+
+    def _task(self, function_name: Any, arguments: Any = None) -> VMTask:
+        if not isinstance(function_name, str) or function_name not in self.program.functions:
+            raise CForgevError("VM: tarea requiere el nombre de una función C-Forge")
+        if arguments is None: arguments = []
+        if not isinstance(arguments, list): raise CForgevError("VM: los argumentos de tarea deben ser una lista")
+        chunk = self.program.functions[function_name]
+        if len(arguments) != len(chunk.parameters):
+            raise CForgevError(f"VM: '{function_name}' requiere {len(chunk.parameters)} argumentos")
+        return VMTask(self._executor.submit(
+            self._run_chunk, chunk, dict(zip(chunk.parameters, list(arguments)))
+        ))
+
+    @staticmethod
+    def _await_task(task: Any, timeout_ms: Any = None) -> Any:
+        if not isinstance(task, VMTask): raise CForgevError("VM: esperar requiere una tarea")
+        timeout = None if timeout_ms is None else float(timeout_ms) / 1000.0
+        try: return task.future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError as error: raise CForgevError("VM: tiempo de espera agotado") from error
+        except concurrent.futures.CancelledError as error: raise CForgevError("VM: tarea cancelada") from error
+
+    @staticmethod
+    def _cancel_task(task: Any) -> bool:
+        if not isinstance(task, VMTask): raise CForgevError("VM: cancelar requiere una tarea")
+        return task.future.cancel()
+
+    @staticmethod
+    def _channel(capacity: Any = 0) -> VMChannel:
+        size = int(capacity)
+        if size < 0: raise CForgevError("VM: capacidad de canal inválida")
+        return VMChannel(queue.Queue(maxsize=size))
+
+    @staticmethod
+    def _send_channel(channel: Any, value: Any, timeout_ms: Any = None) -> None:
+        if not isinstance(channel, VMChannel): raise CForgevError("VM: enviar requiere un canal")
+        if channel.closed: raise CForgevError("VM: canal cerrado")
+        timeout = None if timeout_ms is None else float(timeout_ms) / 1000.0
+        try: channel.values.put(value, timeout=timeout)
+        except queue.Full as error: raise CForgevError("VM: canal lleno") from error
+
+    @staticmethod
+    def _receive_channel(channel: Any, timeout_ms: Any = None) -> Any:
+        if not isinstance(channel, VMChannel): raise CForgevError("VM: recibir requiere un canal")
+        timeout = None if timeout_ms is None else float(timeout_ms) / 1000.0
+        try: return channel.values.get(timeout=timeout)
+        except queue.Empty as error:
+            if channel.closed: raise CForgevError("VM: canal cerrado y vacío") from error
+            raise CForgevError("VM: tiempo de recepción agotado") from error
+
+    @staticmethod
+    def _close_channel(channel: Any) -> None:
+        if not isinstance(channel, VMChannel): raise CForgevError("VM: cerrar_canal requiere un canal")
+        channel.closed = True
+
+    @staticmethod
     def _display(value: Any) -> str:
+        if isinstance(value, ForgeOption):
+            return f"algunos({VirtualMachine._display(value.value)})" if value.has_value else "ninguno"
         if value is True: return "verdadero"
         if value is False: return "falso"
         if value is None: return "nulo"
+        if isinstance(value, tuple):
+            suffix = "," if len(value) == 1 else ""
+            return "(" + ", ".join(VirtualMachine._display(item) for item in value) + suffix + ")"
+        if isinstance(value, set):
+            return "conjunto(" + ", ".join(sorted(VirtualMachine._display(item) for item in value)) + ")"
         return str(value)
 
 
 def compile_source(source: str) -> BytecodeProgram:
     program = Parser(tokenize(source)).program()
     StaticTypeAnalyzer().analyze(program)
+    from cforge_memory import MemorySafetyAnalyzer
+    MemorySafetyAnalyzer().analyze(program)
+    return BytecodeCompiler().compile(program)
+
+
+def compile_file(path: Path) -> BytecodeProgram:
+    try: source = path.read_text(encoding="utf-8")
+    except OSError as error: raise CForgevError(f"No se pudo abrir {path}: {error.strerror or error}") from error
+    program = resolve_imports(Parser(tokenize(source)).program(), path.resolve().parent, set())
+    StaticTypeAnalyzer().analyze(program)
+    from cforge_memory import MemorySafetyAnalyzer
+    MemorySafetyAnalyzer().analyze(program)
     return BytecodeCompiler().compile(program)
 
 
 def execute_file(path: Path, output: Callable[[str], None] = print) -> VirtualMachine:
-    try: source = path.read_text(encoding="utf-8")
-    except OSError as error: raise CForgevError(f"No se pudo abrir {path}: {error.strerror or error}") from error
-    vm = VirtualMachine(compile_source(source), output)
+    if path.suffix == ".cfb":
+        program = load_bytecode(path)
+    else:
+        program = compile_file(path)
+    vm = VirtualMachine(program, output, base_dir=path.resolve().parent)
     vm.run(); return vm
 
 
@@ -4288,27 +7553,535 @@ def disassemble(program: BytecodeProgram) -> str:
         lines.append(f"== {chunk.name}({', '.join(chunk.parameters)}) ==")
         lines.extend(f"{index:04d} {item.op:<14} {item.arg!r}" for index, item in enumerate(chunk.code))
     return "\n".join(lines)
-)CFV13DATA"},
-        {R"CFV14DATA(registry/index.json)CFV14DATA", R"CFV15DATA({
-  "format": 1,
+)CFV17DATA"},
+        {R"CFV18DATA(cforge_memory.py)CFV18DATA", R"CFV19DATA("""Análisis estático de ownership, préstamos y efectos interprocedurales."""
+from __future__ import annotations
+from dataclasses import dataclass, field
+from cforgev import CForgevError
+
+@dataclass
+class MemoryState:
+    moved: bool = False
+    shared: int = 0
+    mutable: bool = False
+    owner: str | None = None
+    borrow_kind: str | None = None
+    destroyed: bool = False
+    owns: set[str] = field(default_factory=set)
+    parameter: bool = False
+    def clone(self):
+        return MemoryState(self.moved, self.shared, self.mutable, self.owner,
+                           self.borrow_kind, self.destroyed, set(self.owns), self.parameter)
+
+
+@dataclass(frozen=True)
+class FunctionMemorySummary:
+    consumed: frozenset[int] = frozenset()
+    returned_borrow: tuple[int, str] | None = None
+
+class MemorySafetyAnalyzer:
+    """Rechaza uso tras movimiento y alias mutables antes de generar código."""
+    def analyze(self, program):
+        self.unsafe_depth = 0
+        self.functions = {function[1]: function for function in program.functions}
+        constructors = {}
+        for statement in program.statements:
+            if statement[0] in {"structure", "class"}:
+                consumed = frozenset(
+                    index for index, (_, field_type) in enumerate(statement[2])
+                    if not self.copy_type(field_type)
+                )
+                constructors[statement[1]] = FunctionMemorySummary(consumed)
+        self.constructor_names = set(constructors)
+        self.summaries = self.build_summaries(program.functions, constructors)
+        states = {}
+        self.statements(program.statements, states)
+        for function in program.functions:
+            local = {name: state.clone() for name, state in states.items()}
+            local.update({parameter: MemoryState(parameter=True) for parameter in function[2]})
+            self.statements(function[3], local)
+
+    @staticmethod
+    def copy_type(type_name):
+        return type_name in {"numero", "booleano", "texto", "nulo", "cualquiera"}
+
+    def build_summaries(self, functions, initial=None):
+        summaries = dict(initial or {})
+        summaries.update({function[1]: FunctionMemorySummary() for function in functions})
+        for _ in range(max(1, len(functions) + 1)):
+            changed = False
+            for function in functions:
+                summary = self.summarize_function(function, summaries)
+                if summaries[function[1]] != summary:
+                    summaries[function[1]] = summary; changed = True
+            if not changed: break
+        return summaries
+
+    def summarize_function(self, function, summaries):
+        parameters = {name: index for index, name in enumerate(function[2])}
+        consumed: set[int] = set()
+        returned: tuple[int, str] | None = None
+
+        def visit_expression(expression, is_return=False):
+            nonlocal returned
+            kind = expression[0]
+            if kind in {"number", "string", "bool", "null", "variable"}: return
+            if kind in {"list", "tuple", "set"}:
+                for item in expression[1]: visit_expression(item)
+                return
+            if kind == "map":
+                for key, value in expression[1]: visit_expression(key); visit_expression(value)
+                return
+            if kind == "call":
+                name, arguments = expression[1], expression[2]
+                if name in {"mover", "destruir"} and len(arguments) == 1 and arguments[0][0] == "variable":
+                    index = parameters.get(arguments[0][1])
+                    if index is not None: consumed.add(index)
+                if is_return and name in {"prestar", "prestar_mut"} and len(arguments) == 1 and arguments[0][0] == "variable":
+                    index = parameters.get(arguments[0][1])
+                    if index is None:
+                        self.error("una función no puede devolver un préstamo de una variable local")
+                    candidate = (index, "mutable" if name == "prestar_mut" else "shared")
+                    if returned is not None and returned != candidate:
+                        self.error("la función devuelve préstamos con tiempos de vida incompatibles")
+                    returned = candidate
+                callee = summaries.get(name)
+                if callee:
+                    for position in callee.consumed:
+                        if position < len(arguments) and arguments[position][0] == "variable":
+                            outer = parameters.get(arguments[position][1])
+                            if outer is not None: consumed.add(outer)
+                    if is_return and callee.returned_borrow:
+                        position, borrow_kind = callee.returned_borrow
+                        if position < len(arguments) and arguments[position][0] == "variable":
+                            outer = parameters.get(arguments[position][1])
+                            if outer is None:
+                                self.error("un préstamo devuelto no puede referirse a una variable local")
+                            candidate = (outer, borrow_kind)
+                            if returned is not None and returned != candidate:
+                                self.error("la función devuelve préstamos con tiempos de vida incompatibles")
+                            returned = candidate
+                for argument in arguments: visit_expression(argument)
+                return
+            if kind == "unary": visit_expression(expression[2]); return
+            if kind == "await": visit_expression(expression[1], is_return); return
+            if kind == "binary": visit_expression(expression[2]); visit_expression(expression[3]); return
+            if kind in {"field", "index"}:
+                visit_expression(expression[1])
+                if kind == "index": visit_expression(expression[2])
+                return
+            if kind == "method_call":
+                visit_expression(expression[1])
+                for argument in expression[3]: visit_expression(argument)
+
+        def visit_statements(statements):
+            for statement in statements:
+                kind = statement[0]
+                if kind == "let": visit_expression(statement[3])
+                elif kind == "assign": visit_expression(statement[2])
+                elif kind == "field_assign": visit_expression(statement[3])
+                elif kind in {"print", "expression"}: visit_expression(statement[1])
+                elif kind == "return": visit_expression(statement[1], True)
+                elif kind == "if": visit_expression(statement[1]); visit_statements(statement[2]); visit_statements(statement[3])
+                elif kind == "while": visit_expression(statement[1]); visit_statements(statement[2])
+                elif kind == "try": visit_statements(statement[1]); visit_statements(statement[3])
+                elif kind in {"gpu", "region", "unsafe"}: visit_statements(statement[1])
+                elif kind == "test": visit_statements(statement[2])
+
+        visit_statements(function[3])
+        if returned and returned[0] in consumed:
+            self.error(f"'{function[1]}' no puede consumir y devolver prestado el mismo parámetro")
+        return FunctionMemorySummary(frozenset(consumed), returned)
+
+    def error(self, message):
+        raise CForgevError(f"Seguridad de memoria: {message}")
+
+    def state(self, name, states):
+        if name not in states: self.error(f"variable desconocida '{name}'")
+        return states[name]
+
+    def read(self, name, states):
+        state = self.state(name, states)
+        if (state.moved or state.destroyed) and not self.unsafe_depth:
+            self.error(f"uso después de mover la variable '{name}'")
+        return state
+
+    def release_alias(self, name, states):
+        alias = states.get(name)
+        if alias is None or alias.owner is None or alias.borrow_kind is None:
+            return False
+        owner = states.get(alias.owner)
+        if owner is not None:
+            if alias.borrow_kind == "mutable": owner.mutable = False
+            elif owner.shared > 0: owner.shared -= 1
+        alias.owner = None; alias.borrow_kind = None; alias.destroyed = True
+        return True
+
+    def consume(self, name, states, action="mover"):
+        state = self.read(name, states)
+        if state.shared or state.mutable:
+            self.error(f"no se puede {action} '{name}' mientras está prestada")
+        state.moved = True
+        state.destroyed = action == "destruir"
+        if state.destroyed: state.owns.clear()
+
+    def owned_references(self, expression):
+        kind = expression[0]
+        if kind == "variable": return {expression[1]}
+        if kind in {"list", "tuple", "set"}:
+            result = set()
+            for item in expression[1]: result.update(self.owned_references(item))
+            return result
+        if kind == "map":
+            result = set()
+            for key, value in expression[1]:
+                result.update(self.owned_references(key))
+                result.update(self.owned_references(value))
+            return result
+        if kind == "call" and expression[1] in self.constructor_names:
+            summary = self.summaries[expression[1]]
+            return {
+                expression[2][position][1]
+                for position in summary.consumed
+                if position < len(expression[2]) and expression[2][position][0] == "variable"
+            }
+        return set()
+
+    def reaches(self, source, target, states, visited=None):
+        if source == target: return True
+        visited = set() if visited is None else visited
+        if source in visited: return False
+        visited.add(source)
+        state = states.get(source)
+        if state is None or state.destroyed: return False
+        return any(self.reaches(child, target, states, visited) for child in state.owns)
+
+    def attach_ownership(self, owner, children, states, transferred=False):
+        state = self.state(owner, states)
+        for child in children:
+            if transferred: self.state(child, states)
+            else: self.read(child, states)
+            if not self.unsafe_depth and self.reaches(child, owner, states):
+                self.error(f"ciclo de ownership entre '{owner}' y '{child}'")
+            state.owns.add(child)
+
+    def returned_alias(self, expression):
+        if expression[0] != "call": return None
+        name, arguments = expression[1], expression[2]
+        if name in {"prestar", "prestar_mut"} and len(arguments) == 1 and arguments[0][0] == "variable":
+            return arguments[0][1], "mutable" if name == "prestar_mut" else "shared"
+        summary = self.summaries.get(name)
+        if summary and summary.returned_borrow:
+            position, borrow_kind = summary.returned_borrow
+            if position < len(arguments) and arguments[position][0] == "variable":
+                return arguments[position][1], borrow_kind
+        return None
+
+    def statements(self, statements, states):
+        for statement in statements:
+            kind = statement[0]
+            if kind == "let":
+                self.expression(statement[3], states)
+                alias = MemoryState()
+                expression = statement[3]
+                borrowed = self.returned_alias(expression)
+                if borrowed:
+                    alias.owner, alias.borrow_kind = borrowed
+                    if not (expression[0] == "call" and expression[1] in {"prestar", "prestar_mut"}):
+                        owner = self.read(alias.owner, states)
+                        if alias.borrow_kind == "mutable":
+                            if owner.mutable or owner.shared: self.error(f"'{alias.owner}' ya está prestada")
+                            owner.mutable = True
+                        else:
+                            if owner.mutable: self.error(f"'{alias.owner}' ya tiene un préstamo mutable")
+                            owner.shared += 1
+                alias.owns = self.owned_references(expression)
+                states[statement[1]] = alias
+                self.attach_ownership(
+                    statement[1], alias.owns, states,
+                    transferred=expression[0] == "call" and expression[1] in self.constructor_names,
+                )
+            elif kind == "assign":
+                state = self.state(statement[1], states)
+                if state.owner is not None:
+                    self.error(f"no se puede reasignar el préstamo '{statement[1]}'")
+                if state.shared or state.mutable:
+                    self.error(f"no se puede reasignar '{statement[1]}' mientras está prestada")
+                self.expression(statement[2], states); state.moved = False; state.destroyed = False
+                state.owns.clear()
+                self.attach_ownership(statement[1], self.owned_references(statement[2]), states)
+            elif kind in {"print", "return", "expression"}:
+                self.expression(statement[1], states)
+            elif kind == "if":
+                self.expression(statement[1], states)
+                yes = {n: s.clone() for n, s in states.items()}
+                no = {n: s.clone() for n, s in states.items()}
+                self.statements(statement[2], yes); self.statements(statement[3], no)
+                for name in states.keys() & yes.keys() & no.keys():
+                    states[name].moved = yes[name].moved or no[name].moved
+                    states[name].shared = max(yes[name].shared, no[name].shared)
+                    states[name].mutable = yes[name].mutable or no[name].mutable
+            elif kind == "while":
+                self.expression(statement[1], states)
+                loop = {n: s.clone() for n, s in states.items()}
+                self.statements(statement[2], loop)
+                for name in states.keys() & loop.keys():
+                    if loop[name].moved and not states[name].moved:
+                        self.error(f"'{name}' puede moverse dentro de un ciclo")
+            elif kind == "try":
+                protected = {n: s.clone() for n, s in states.items()}
+                handler = {n: s.clone() for n, s in states.items()}
+                handler[statement[2]] = MemoryState()
+                self.statements(statement[1], protected); self.statements(statement[3], handler)
+                for name in states.keys() & protected.keys() & handler.keys():
+                    states[name].moved = protected[name].moved or handler[name].moved
+            elif kind in {"gpu", "test"}:
+                self.statements(statement[1] if kind == "gpu" else statement[2], states)
+            elif kind == "region":
+                previous = {name: state.clone() for name, state in states.items()}
+                self.statements(statement[1], states)
+                for name in list(states):
+                    if name not in previous:
+                        self.release_alias(name, states)
+                        del states[name]
+                    else:
+                        states[name].shared = previous[name].shared
+                        states[name].mutable = previous[name].mutable
+            elif kind == "unsafe":
+                self.unsafe_depth += 1
+                try: self.statements(statement[1], states)
+                finally: self.unsafe_depth -= 1
+            elif kind == "universal_import":
+                states[statement[2]] = MemoryState()
+
+    def expression(self, expression, states):
+        kind = expression[0]
+        if kind == "variable": self.read(expression[1], states); return
+        if kind in {"number", "string", "bool", "null"}: return
+        if kind in {"list", "tuple", "set"}:
+            for item in expression[1]: self.expression(item, states)
+            return
+        if kind == "map":
+            for key, value in expression[1]:
+                self.expression(key, states); self.expression(value, states)
+            return
+        if kind == "call":
+            name, arguments = expression[1], expression[2]
+            if name in {"mover", "prestar", "prestar_mut", "soltar_prestamo", "destruir"}:
+                if len(arguments) != 1 or arguments[0][0] != "variable":
+                    self.error(f"{name} requiere el nombre de una variable")
+                variable = arguments[0][1]; state = self.state(variable, states)
+                if name != "soltar_prestamo": self.read(variable, states)
+                if name == "destruir" and self.release_alias(variable, states):
+                    return
+                if name in {"mover", "destruir"}:
+                    self.consume(variable, states, name)
+                elif name == "prestar":
+                    if state.mutable: self.error(f"'{variable}' ya tiene un préstamo mutable")
+                    state.shared += 1
+                elif name == "prestar_mut":
+                    if state.mutable or state.shared: self.error(f"'{variable}' ya está prestada")
+                    state.mutable = True
+                elif self.release_alias(variable, states): pass
+                elif state.mutable: state.mutable = False
+                elif state.shared: state.shared -= 1
+                else: self.error(f"'{variable}' no tiene préstamos activos")
+                return
+            for argument in arguments: self.expression(argument, states)
+            summary = self.summaries.get(name)
+            if summary:
+                for position in summary.consumed:
+                    if position < len(arguments) and arguments[position][0] == "variable":
+                        self.consume(arguments[position][1], states)
+            return
+        if kind == "unary": self.expression(expression[2], states); return
+        if kind == "await": self.expression(expression[1], states); return
+        if kind == "binary":
+            self.expression(expression[2], states); self.expression(expression[3], states); return
+        if kind == "method_call":
+            if not self.unsafe_depth and expression[2] in {"append", "push"}:
+                receiver = expression[1]
+                if receiver[0] == "variable":
+                    children = {argument[1] for argument in expression[3] if argument[0] == "variable"}
+                    self.attach_ownership(receiver[1], children, states)
+            self.expression(expression[1], states)
+            for argument in expression[3]: self.expression(argument, states)
+            return
+        if kind == "field": self.expression(expression[1], states); return
+        if kind == "index":
+            self.expression(expression[1], states); self.expression(expression[2], states)
+)CFV19DATA"},
+        {R"CFV20DATA(cforge_parity.py)CFV20DATA", R"CFV21DATA("""Matriz de paridad verificable entre los motores de C-Forge.
+
+Una característica solo puede declararse común a intérprete, VM y LLVM cuando
+el mismo archivo produce exactamente la misma salida y estado de terminación.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+import shutil
+import subprocess
+import tempfile
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+from cforgev import CForgevError, execute
+from cforge_vm import VirtualMachine, compile_file as compile_vm_file
+from compilador_llvm import compile_native as compile_llvm_native
+
+
+@dataclass(frozen=True)
+class EngineResult:
+    engine: str
+    supported: bool
+    returncode: int
+    stdout: str
+    stderr: str
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class ParityReport:
+    source: str
+    equal: bool
+    reference: str | None
+    results: tuple[EngineResult, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        value = asdict(self)
+        value["results"] = [asdict(result) for result in self.results]
+        return value
+
+
+def _interpreter(path: Path) -> EngineResult:
+    output = io.StringIO()
+    errors = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            execute(path)
+        return EngineResult("interpreter", True, 0, output.getvalue(), errors.getvalue())
+    except Exception as error:
+        return EngineResult(
+            "interpreter", True, 1, output.getvalue(), errors.getvalue(), str(error)
+        )
+
+
+def _vm(path: Path) -> EngineResult:
+    output: list[str] = []
+    try:
+        program = compile_vm_file(path)
+        VirtualMachine(program, output.append, base_dir=path.resolve().parent).run()
+        stdout = "".join(item + "\n" for item in output)
+        return EngineResult("vm", True, 0, stdout, "")
+    except Exception as error:
+        return EngineResult("vm", True, 1, "".join(item + "\n" for item in output), "", str(error))
+
+
+def _llvm(path: Path, clang: str, timeout: float) -> EngineResult:
+    resolved = shutil.which(clang)
+    if resolved is None:
+        return EngineResult("llvm", False, 127, "", "", f"no se encontró {clang}")
+    try:
+        with tempfile.TemporaryDirectory(prefix="cforge-parity-") as directory:
+            binary = Path(directory) / "programa"
+            compile_llvm_native(path, binary, clang=resolved)
+            completed = subprocess.run(
+                [str(binary)],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=path.resolve().parent,
+            )
+            return EngineResult(
+                "llvm", True, completed.returncode, completed.stdout, completed.stderr
+            )
+    except subprocess.TimeoutExpired:
+        return EngineResult("llvm", True, 124, "", "", "tiempo de ejecución agotado")
+    except Exception as error:
+        return EngineResult("llvm", False, 1, "", "", str(error))
+
+
+def compare_file(path: Path, clang: str = "clang", timeout: float = 30.0) -> ParityReport:
+    path = path.resolve()
+    if path.suffix != ".cfv":
+        raise CForgevError("Parity requiere un archivo .cfv")
+    if not path.is_file():
+        raise CForgevError(f"No se pudo abrir {path}")
+    results = (_interpreter(path), _vm(path), _llvm(path, clang, timeout))
+    supported = [result for result in results if result.supported]
+    reference = supported[0].engine if supported else None
+    signatures = {(result.returncode, result.stdout, result.stderr) for result in supported}
+    equal = (
+        len(supported) == len(results)
+        and all(result.error is None for result in supported)
+        and len(signatures) == 1
+    )
+    return ParityReport(str(path), equal, reference, results)
+
+
+def format_report(report: ParityReport) -> str:
+    lines = [f"C-Forge parity: {'OK' if report.equal else 'FALLO'} — {report.source}"]
+    for result in report.results:
+        state = "OK" if result.supported and result.error is None else (
+            "NO SOPORTADO" if not result.supported else "ERROR"
+        )
+        lines.append(
+            f"[{state}] {result.engine}: código={result.returncode}, "
+            f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+        )
+        if result.error:
+            lines.append(f"  {result.error}")
+    return "\n".join(lines)
+
+
+def reports_json(reports: list[ParityReport]) -> str:
+    return json.dumps(
+        {"schema": 1, "ok": all(report.equal for report in reports),
+         "reports": [report.to_dict() for report in reports]},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+)CFV21DATA"},
+        {R"CFV22DATA(registry/index.json)CFV22DATA", R"CFV23DATA({
+  "format": 2,
   "registry": "C-Forge Community Registry",
+  "publishers": {},
+  "revocations": [],
   "packages": {}
 }
-)CFV15DATA"},
-        {R"CFV16DATA(registry/README.md)CFV16DATA", R"CFV17DATA(# Registro público de paquetes C-Forge
+)CFV23DATA"},
+        {R"CFV24DATA(registry/README.md)CFV24DATA", R"CFV25DATA(# Registro público de paquetes C-Forge
 
 Este directorio define el índice público, auditable y versionado del gestor `cforge pkg`.
-Cada versión debe publicar una URL HTTPS y el SHA-256 exacto del archivo `.tar.gz`.
+Cada versión del formato 2 debe publicar una URL HTTPS, el SHA-256 exacto del
+archivo `.tar.gz`, la clave pública Ed25519, su `key_id` y la firma. El cliente
+verifica todos esos campos antes de extraer el paquete y rechaza versiones o claves
+incluidas en `revocations`.
 
 La publicación se realiza mediante pull request para conservar revisión, historial y
 protecciones de rama. `cforge pkg build` crea el archivo y su digest; ningún paquete se
 ejecuta durante instalación. El cliente rechaza HTTP, rutas ascendentes, enlaces,
 archivos mayores a 32 MiB y hashes incorrectos.
 
+El publicador crea su identidad mediante `cforge pkg keygen` y firma el archivo con
+`cforge pkg sign archivo.tar.gz clave.pem nombre versión`. La clave privada nunca
+se publica. La cuenta del publicador sigue representada por su identidad GitHub y
+la revisión del pull request; un servicio de cuentas independiente aún no está
+operativo.
+
 El registro está vacío hasta que el primer paquete sea revisado y aceptado. Esto evita
 presentar paquetes de ejemplo como dependencias oficiales.
-)CFV17DATA"},
-        {R"CFV18DATA(include/cforgev_ffi.h)CFV18DATA", R"CFV19DATA(#ifndef CFORGEV_FFI_H
+
+`publishers` contiene identidades aprobadas, claves y estado. El instalador exige
+que cada paquete señale un publicador `active` y que su `key_id` esté autorizada
+por esa cuenta. Esta fase usa
+identidades de GitHub y revisión por pull request; todavía no existe un servicio
+central de inicio de sesión, recuperación de cuenta ni publicación automática.
+)CFV25DATA"},
+        {R"CFV26DATA(include/cforgev_ffi.h)CFV26DATA", R"CFV27DATA(#ifndef CFORGEV_FFI_H
 #define CFORGEV_FFI_H
 
 #include <stddef.h>
@@ -4328,10 +8101,45 @@ typedef enum CfvType {
     CFV_NULL = 0,
     CFV_INTEGER = 1,
     CFV_DECIMAL = 2,
-    CFV_TEXT = 3
+    CFV_TEXT = 3,
+    CFV_BOOLEAN = 4,
+    CFV_LIST = 5,
+    CFV_MAP = 6,
+    CFV_RECORD = 7
 } CfvType;
 
 typedef void (*CfvReleaseFunction)(void* owner);
+
+/* Vista prestada, contigua y de solo lectura. El puntero solo es válido durante
+   la llamada extranjera y nunca debe liberarse ni conservarse. */
+typedef struct CfvNumberSlice {
+    const double* data;
+    uint64_t length;
+} CfvNumberSlice;
+
+/* Resultado propietario para extern_c segura. C-Forge copia el contenido a su
+   runtime y luego invoca release(owner) una vez. */
+typedef struct CfvOwnedNumberList {
+    const double* data;
+    uint64_t length;
+    void* owner;
+    CfvReleaseFunction release;
+} CfvOwnedNumberList;
+
+/* Texto UTF-8 propietario. data no contiene NUL dentro de length. */
+typedef struct CfvOwnedText {
+    const char* data;
+    uint64_t length;
+    void* owner;
+    CfvReleaseFunction release;
+} CfvOwnedText;
+
+/* Vista prestada de mapa texto->número. keys y values contienen length entradas. */
+typedef struct CfvNumberMapView {
+    const char* const* keys;
+    const double* values;
+    uint64_t length;
+} CfvNumberMapView;
 
 typedef struct CfvValue {
     int32_t type;
@@ -4342,6 +8150,18 @@ typedef struct CfvValue {
     CfvReleaseFunction release;
 } CfvValue;
 
+typedef struct CfvRecordField {
+    const char* name;
+    CfvValue value;
+} CfvRecordField;
+
+/* Vista prestada de un objeto nominal con campos escalares. */
+typedef struct CfvRecordView {
+    const char* type_name;
+    const CfvRecordField* fields;
+    uint64_t field_count;
+} CfvRecordView;
+
 typedef int (*CfvForeignFunction)(
     const CfvValue* arguments,
     size_t argument_count,
@@ -4350,15 +8170,64 @@ typedef int (*CfvForeignFunction)(
     size_t error_buffer_size
 );
 
+#define CFV_ABI_V2 0x00020000u
+#define CFV_V2_BORROWED 0x00000001ull
+#define CFV_V2_OWNED 0x00000002ull
+#define CFV_V2_MAX_DEPTH 64u
+
+typedef struct CfvValueV2 {
+    uint32_t struct_size;
+    uint32_t type;
+    uint64_t flags;
+    uint64_t length;
+    int64_t integer;
+    double decimal;
+    const void* data;
+    void* owner;
+    CfvReleaseFunction release;
+} CfvValueV2;
+
+/* Una lista V2 usa data=CfvValueV2[length]. Sus elementos son vistas
+   recursivas y no pueden conservarse después de la llamada si BORROWED. */
+typedef struct CfvMapEntryV2 {
+    CfvValueV2 key;
+    CfvValueV2 value;
+} CfvMapEntryV2;
+
+/* Un mapa V2 usa data=CfvMapEntryV2[length]. Las claves actuales deben ser
+   CFV_TEXT; la forma permite ampliar el ABI sin cambiar CfvValueV2. */
+typedef struct CfvRecordFieldV2 {
+    const char* name;
+    uint64_t name_length;
+    CfvValueV2 value;
+} CfvRecordFieldV2;
+
+typedef struct CfvRecordV2 {
+    const char* type_name;
+    uint64_t type_name_length;
+    const CfvRecordFieldV2* fields;
+    uint64_t field_count;
+} CfvRecordV2;
+
+typedef int (*CfvForeignFunctionV2)(
+    uint32_t abi_version,
+    const CfvValueV2* arguments,
+    size_t argument_count,
+    CfvValueV2* result,
+    char* error_buffer,
+    size_t error_buffer_size
+);
+
 CFV_EXPORT int cfv_register_function(const char* name, CfvForeignFunction function);
+CFV_EXPORT int cfv_register_function_v2(const char* name, CfvForeignFunctionV2 function);
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif
-)CFV19DATA"},
-        {R"CFV20DATA(include/cforge_shared_arena.h)CFV20DATA", R"CFV21DATA(#ifndef CFORGE_SHARED_ARENA_H
+)CFV27DATA"},
+        {R"CFV28DATA(include/cforge_shared_arena.h)CFV28DATA", R"CFV29DATA(#ifndef CFORGE_SHARED_ARENA_H
 #define CFORGE_SHARED_ARENA_H
 
 #include <atomic>
@@ -4708,8 +8577,8 @@ private:
 }  // namespace cforge::arena
 
 #endif
-)CFV21DATA"},
-        {R"CFV22DATA(herramientas/cforgev_ffi_runner.cpp)CFV22DATA", R"CFV23DATA(#include "cforgev_ffi.h"
+)CFV29DATA"},
+        {R"CFV30DATA(herramientas/cforgev_ffi_runner.cpp)CFV30DATA", R"CFV31DATA(#include "cforgev_ffi.h"
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -4738,6 +8607,7 @@ int main(int argc, char** argv) {
     for (int i = 3; i < argc; ++i) {
         std::string value = argv[i];
         if (value == "n:") values.push_back({CFV_NULL, 0, 0, nullptr});
+        else if (value == "b:true" || value == "b:false") values.push_back({CFV_BOOLEAN, value == "b:true" ? 1 : 0, 0, nullptr});
         else if (value.rfind("i:", 0) == 0) values.push_back({CFV_INTEGER, std::stoll(value.substr(2)), 0, nullptr});
         else if (value.rfind("d:", 0) == 0) values.push_back({CFV_DECIMAL, 0, std::stod(value.substr(2)), nullptr});
         else if (value.rfind("s:", 0) == 0) { texts.push_back(value.substr(2)); values.push_back({CFV_TEXT, 0, 0, texts.back().c_str()}); }
@@ -4751,12 +8621,13 @@ int main(int argc, char** argv) {
     if (result.type == CFV_INTEGER) std::cout << result.integer;
     else if (result.type == CFV_DECIMAL) std::cout << result.decimal;
     else if (result.type == CFV_TEXT && result.text) std::cout << result.text;
+    else if (result.type == CFV_BOOLEAN) std::cout << (result.integer ? "verdadero" : "falso");
     std::cout.flush();
     if (result.release) result.release(result.owner);
     return 0;
 }
-)CFV23DATA"},
-        {R"CFV24DATA(herramientas/cforge_cli.cpp)CFV24DATA", R"CFV25DATA(#include <cerrno>
+)CFV31DATA"},
+        {R"CFV32DATA(herramientas/cforge_cli.cpp)CFV32DATA", R"CFV33DATA(#include <cerrno>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -4787,7 +8658,7 @@ std::filesystem::path find_engine(const char* executable) {
 
 void print_help() {
     std::cout
-        << "C-Forge Toolchain 1.5.0 Developer Preview\n"
+        << "C-Forge Toolchain 1.6.0 Developer Preview\n"
         << "Uso:\n"
         << "  cforge fmt archivo.cfv\n"
         << "  cforge test archivo.cfv\n";
@@ -4827,12 +8698,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-)CFV25DATA"},
-        {R"CFV26DATA(herramientas/vscode-cforgev/package.json)CFV26DATA", R"CFV27DATA({
+)CFV33DATA"},
+        {R"CFV34DATA(herramientas/vscode-cforgev/package.json)CFV34DATA", R"CFV35DATA({
   "name": "cforgev-language",
   "displayName": "C-Forge Language Support",
   "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "publisher": "vemoris-group",
   "author": {
     "name": "Vemoris Group"
@@ -4841,7 +8712,7 @@ int main(int argc, char** argv) {
   "icon": "images/icon.png",
   "preview": true,
   "main": "./extension.js",
-  "activationEvents": ["onLanguage:cforgev", "onCommand:cforge.runFile", "onCommand:cforge.checkFile", "onCommand:cforge.debugBreakpoint"],
+  "activationEvents": ["onLanguage:cforgev", "onDebug:cforge", "onCommand:cforge.runFile", "onCommand:cforge.checkFile", "onCommand:cforge.debugBreakpoint"],
   "pricing": "Free",
   "engines": {
     "vscode": "^1.80.0"
@@ -4881,7 +8752,7 @@ int main(int argc, char** argv) {
     "commands": [
       {"command": "cforge.runFile", "title": "C-Forge: Ejecutar archivo"},
       {"command": "cforge.checkFile", "title": "C-Forge: Comprobar archivo"},
-      {"command": "cforge.debugBreakpoint", "title": "C-Forge: Depurar con breakpoint de bytecode"}
+      {"command": "cforge.debugBreakpoint", "title": "C-Forge: Iniciar depuración visual"}
     ],
     "languages": [
       {
@@ -4906,18 +8777,140 @@ int main(int argc, char** argv) {
         "scopeName": "source.cforgev",
         "path": "./syntaxes/cforgev.tmLanguage.json"
       }
+    ],
+    "debuggers": [
+      {
+        "type": "cforge",
+        "label": "C-Forge VM",
+        "languages": ["cforgev"],
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {"type": "string", "description": "Archivo .cfv", "default": "${file}"},
+              "cwd": {"type": "string", "default": "${workspaceFolder}"}
+            }
+          }
+        },
+        "initialConfigurations": [
+          {"type": "cforge", "request": "launch", "name": "Depurar C-Forge", "program": "${file}"}
+        ]
+      }
     ]
   }
 }
-)CFV27DATA"},
-        {R"CFV28DATA(herramientas/vscode-cforgev/extension.js)CFV28DATA", R"CFV29DATA("use strict";
+)CFV35DATA"},
+        {R"CFV36DATA(herramientas/vscode-cforgev/extension.js)CFV36DATA", R"CFV37DATA("use strict";
 
 const vscode = require("vscode");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
+
+let languageServer;
+
+class CForgeLanguageServer {
+  constructor(diagnostics) {
+    this.diagnostics = diagnostics;
+    this.sequence = 1;
+    this.available = true;
+    this.stopped = false;
+    this.pending = new Map();
+    this.buffer = Buffer.alloc(0);
+    this.process = spawn("cforge", ["lsp"], { stdio: ["pipe", "pipe", "pipe"] });
+    this.process.stdout.on("data", chunk => this.consume(chunk));
+    this.process.stderr.on("data", chunk => console.error(`[C-Forge LSP] ${chunk}`));
+    this.process.on("error", error => {
+      this.available = false;
+      for (const value of this.pending.values()) value.reject(error);
+      this.pending.clear();
+      console.error(`[C-Forge LSP] ${error.message}`);
+    });
+    this.process.on("exit", () => {
+      for (const value of this.pending.values()) value.reject(new Error("C-Forge LSP finalizó"));
+      this.pending.clear();
+    });
+    this.ready = this.request("initialize", {
+      processId: process.pid, rootUri: vscode.workspace.workspaceFolders?.[0]?.uri.toString() || null,
+      capabilities: {}
+    }).then(() => this.notify("initialized", {})).catch(() => { this.available = false; });
+  }
+  send(message) {
+    if (!this.available) return;
+    const body = Buffer.from(JSON.stringify({ jsonrpc: "2.0", ...message }), "utf8");
+    this.process.stdin.write(Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, "ascii"));
+    this.process.stdin.write(body);
+  }
+  request(method, params) {
+    if (!this.available) return Promise.reject(new Error("C-Forge LSP no está disponible"));
+    const id = this.sequence++;
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.send({ id, method, params });
+    });
+  }
+  async initializedRequest(method, params) {
+    await this.ready;
+    if (!this.available || this.stopped) throw new Error("C-Forge LSP no está disponible");
+    return this.request(method, params);
+  }
+  notify(method, params) { this.send({ method, params }); }
+  consume(chunk) {
+    this.buffer = Buffer.concat([this.buffer, chunk]);
+    while (true) {
+      const end = this.buffer.indexOf("\r\n\r\n");
+      if (end < 0) return;
+      const header = this.buffer.subarray(0, end).toString("ascii");
+      const match = /Content-Length:\s*(\d+)/i.exec(header);
+      if (!match) { this.buffer = this.buffer.subarray(end + 4); continue; }
+      const length = Number(match[1]);
+      if (this.buffer.length < end + 4 + length) return;
+      const message = JSON.parse(this.buffer.subarray(end + 4, end + 4 + length).toString("utf8"));
+      this.buffer = this.buffer.subarray(end + 4 + length);
+      if (message.id !== undefined && this.pending.has(message.id)) {
+        const pending = this.pending.get(message.id); this.pending.delete(message.id);
+        if (message.error) pending.reject(new Error(message.error.message)); else pending.resolve(message.result);
+      } else if (message.method === "textDocument/publishDiagnostics") {
+        const uri = vscode.Uri.parse(message.params.uri);
+        this.diagnostics.set(uri, (message.params.diagnostics || []).map(item => {
+          const diagnostic = new vscode.Diagnostic(asRange(item.range), item.message,
+            item.severity === 1 ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning);
+          diagnostic.source = item.source || "C-Forge"; diagnostic.code = item.code; return diagnostic;
+        }));
+      }
+    }
+  }
+  async open(document) {
+    await this.ready;
+    if (!this.available) return;
+    this.notify("textDocument/didOpen", { textDocument: {
+      uri: document.uri.toString(), languageId: "cforgev", version: document.version, text: document.getText()
+    }});
+  }
+  async change(document) {
+    await this.ready;
+    if (!this.available) return;
+    this.notify("textDocument/didChange", { textDocument: {
+      uri: document.uri.toString(), version: document.version
+    }, contentChanges: [{ text: document.getText() }] });
+  }
+  async stop() {
+    if (this.stopped) return;
+    this.stopped = true;
+    try { await this.request("shutdown", {}); this.notify("exit", {}); } catch (_) {}
+    this.available = false;
+    this.process.kill();
+  }
+}
+
+function asPosition(value) { return new vscode.Position(value.line, value.character); }
+function asRange(value) { return new vscode.Range(asPosition(value.start), asPosition(value.end)); }
+function textParams(document, position) {
+  return { textDocument: { uri: document.uri.toString() }, position: { line: position.line, character: position.character } };
+}
+function asLocation(value) { return new vscode.Location(vscode.Uri.parse(value.uri), asRange(value.range)); }
 
 const words = [
   "sea", "si", "sino", "mientras", "funcion", "retornar", "estructura",
-  "clase", "campo", "metodo", "intentar", "capturar", "gpu", "cluster",
+  "clase", "interfaz", "implementa", "campo", "metodo", "intentar", "capturar", "gpu", "cluster",
   "test", "mostrar", "print", "verdadero", "falso", "nulo", "file_read",
   "file_write", "json_parse", "sys_fetch", "forge_hash", "forge_bench"
 ];
@@ -4929,6 +8922,22 @@ function runCForge(args, callback) {
 function activate(context) {
   const diagnostics = vscode.languages.createDiagnosticCollection("cforge");
   context.subscriptions.push(diagnostics);
+  try {
+    languageServer = new CForgeLanguageServer(diagnostics);
+    context.subscriptions.push({ dispose: () => languageServer?.stop() });
+    for (const document of vscode.workspace.textDocuments) {
+      if (document.languageId === "cforgev") languageServer.open(document);
+    }
+    context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(document => {
+      if (document.languageId === "cforgev") languageServer.open(document);
+    }));
+    context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
+      if (event.document.languageId === "cforgev") languageServer.change(event.document);
+    }));
+  } catch (error) {
+    languageServer = undefined;
+    console.error(`[C-Forge] No se pudo iniciar LSP: ${error}`);
+  }
 
   function check(document) {
     if (document.languageId !== "cforgev" || document.isUntitled) return;
@@ -4953,8 +8962,64 @@ function activate(context) {
   context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(check));
   if (vscode.window.activeTextEditor) check(vscode.window.activeTextEditor.document);
   context.subscriptions.push(vscode.languages.registerCompletionItemProvider("cforgev", {
-    provideCompletionItems() {
+    async provideCompletionItems(document, position) {
+      if (languageServer) {
+        try { return await languageServer.initializedRequest("textDocument/completion", textParams(document, position)); }
+        catch (_) {}
+      }
       return words.map(word => new vscode.CompletionItem(word, vscode.CompletionItemKind.Keyword));
+    }
+  }));
+  context.subscriptions.push(vscode.languages.registerHoverProvider("cforgev", {
+    async provideHover(document, position) {
+      if (!languageServer) return undefined;
+      const result = await languageServer.initializedRequest("textDocument/hover", textParams(document, position));
+      if (!result) return undefined;
+      const value = typeof result.contents === "string" ? result.contents : result.contents.value;
+      return new vscode.Hover(new vscode.MarkdownString(value));
+    }
+  }));
+  context.subscriptions.push(vscode.languages.registerDefinitionProvider("cforgev", {
+    async provideDefinition(document, position) {
+      if (!languageServer) return [];
+      const result = await languageServer.initializedRequest("textDocument/definition", textParams(document, position));
+      return (result || []).map(asLocation);
+    }
+  }));
+  context.subscriptions.push(vscode.languages.registerReferenceProvider("cforgev", {
+    async provideReferences(document, position, contextValue) {
+      if (!languageServer) return [];
+      const result = await languageServer.initializedRequest("textDocument/references", {
+        ...textParams(document, position), context: { includeDeclaration: contextValue.includeDeclaration }
+      });
+      return (result || []).map(asLocation);
+    }
+  }));
+  context.subscriptions.push(vscode.languages.registerRenameProvider("cforgev", {
+    async provideRenameEdits(document, position, newName) {
+      if (!languageServer) return undefined;
+      const result = await languageServer.initializedRequest("textDocument/rename", {
+        ...textParams(document, position), newName
+      });
+      const edit = new vscode.WorkspaceEdit();
+      for (const [uri, edits] of Object.entries(result?.changes || {})) {
+        for (const item of edits) edit.replace(vscode.Uri.parse(uri), asRange(item.range), item.newText);
+      }
+      return edit;
+    }
+  }));
+  context.subscriptions.push(vscode.languages.registerDocumentFormattingEditProvider("cforgev", {
+    async provideDocumentFormattingEdits(document, options) {
+      if (!languageServer) return [];
+      const result = await languageServer.initializedRequest("textDocument/formatting", {
+        textDocument: { uri: document.uri.toString() }, options
+      });
+      return (result || []).map(item => vscode.TextEdit.replace(asRange(item.range), item.newText));
+    }
+  }));
+  context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory("cforge", {
+    createDebugAdapterDescriptor() {
+      return new vscode.DebugAdapterExecutable("cforge", ["dap"]);
     }
   }));
   context.subscriptions.push(vscode.commands.registerCommand("cforge.checkFile", () => {
@@ -4971,19 +9036,18 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("cforge.debugBreakpoint", async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.isUntitled) return;
-    const offset = await vscode.window.showInputBox({ prompt: "Offset de bytecode", value: "0", validateInput: value => /^\d+$/.test(value) ? undefined : "Escribe un número" });
-    if (offset === undefined) return;
-    const terminal = vscode.window.createTerminal("C-Forge Debug");
-    terminal.show();
-    terminal.sendText(`cforge debug ${JSON.stringify(editor.document.uri.fsPath)} --break ${offset}`);
+    await vscode.debug.startDebugging(undefined, {
+      type: "cforge", request: "launch", name: "Depurar C-Forge",
+      program: editor.document.uri.fsPath
+    });
   }));
 }
 
-function deactivate() {}
+async function deactivate() { if (languageServer) await languageServer.stop(); }
 
 module.exports = { activate, deactivate };
-)CFV29DATA"},
-        {R"CFV30DATA(herramientas/vscode-cforgev/language-configuration.json)CFV30DATA", R"CFV31DATA({
+)CFV37DATA"},
+        {R"CFV38DATA(herramientas/vscode-cforgev/language-configuration.json)CFV38DATA", R"CFV39DATA({
   "comments": { "lineComment": "//" },
   "brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
   "autoClosingPairs": [
@@ -4993,8 +9057,8 @@ module.exports = { activate, deactivate };
     { "open": "\"", "close": "\"" }
   ]
 }
-)CFV31DATA"},
-        {R"CFV32DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV32DATA", R"CFV33DATA({
+)CFV39DATA"},
+        {R"CFV40DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV40DATA", R"CFV41DATA({
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "C-Forge",
   "scopeName": "source.cforgev",
@@ -5015,7 +9079,7 @@ module.exports = { activate, deactivate };
     "comments": { "patterns": [{ "name": "comment.line.double-slash.cforgev", "match": "//.*$" }] },
     "strings": { "patterns": [{ "name": "string.quoted.double.cforgev", "begin": "\"", "end": "\"", "patterns": [{ "name": "constant.character.escape.cforgev", "match": "\\\\." }] }] },
     "numbers": { "patterns": [{ "name": "constant.numeric.cforgev", "match": "\\b\\d+(?:\\.\\d+)?\\b" }] },
-    "types": { "patterns": [{ "name": "storage.type.cforgev", "match": "\\b(numero|texto|booleano|lista|mapa|nulo|cualquiera)\\b" }] },
+    "types": { "patterns": [{ "name": "storage.type.cforgev", "match": "\\b(numero|texto|booleano|lista|mapa|tupla|conjunto|opcion|nulo|cualquiera)\\b" }] },
     "externPython": { "patterns": [{ "name": "meta.embedded.block.python.cforgev", "begin": "\\bextern\\s*\\(\\s*\"python\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.python" }] },
     "externCpp": { "patterns": [{ "name": "meta.embedded.block.cpp.cforgev", "begin": "\\bextern\\s*\\(\\s*\"cpp\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.cpp" }] },
     "externJavaScript": { "patterns": [{ "name": "meta.embedded.block.javascript.cforgev", "begin": "\\bextern\\s*\\(\\s*\"(?:javascript|typescript)\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.js" }] },
@@ -5024,7 +9088,9 @@ module.exports = { activate, deactivate };
       { "name": "keyword.control.test.cforgev", "match": "\\b(test|afirmar)\\b" },
       { "name": "keyword.control.gpu.cforgev", "match": "\\bgpu\\b" },
       { "name": "storage.modifier.cluster.cforgev", "match": "\\bcluster\\b" },
-      { "name": "keyword.control.cforgev", "match": "\\b(sea|si|sino|mientras|funcion|retornar|estructura|clase|campo|metodo|este|usar|import|pip|nuget|npm|maven|extern|intentar|capturar|verdadero|falso|y|o|no)\\b" }
+      { "name": "storage.modifier.unsafe.cforgev", "match": "\\b(unsafe|region)\\b" },
+      { "name": "storage.modifier.async.cforgev", "match": "\\b(async|await)\\b" },
+      { "name": "keyword.control.cforgev", "match": "\\b(sea|si|sino|mientras|funcion|retornar|estructura|clase|interfaz|implementa|campo|metodo|este|usar|import|pip|nuget|npm|maven|extern|extern_c|segura|intentar|capturar|verdadero|falso|y|o|no)\\b" }
     ] },
     "compatibility": { "patterns": [
       { "name": "meta.function-call.compatibility.javascript.cforgev", "match": "\\b(console)(\\.)(log)(?=\\s*\\()", "captures": { "1": { "name": "support.class.console.cforgev" }, "2": { "name": "punctuation.accessor.cforgev" }, "3": { "name": "support.function.log.cforgev" } } },
@@ -5034,11 +9100,11 @@ module.exports = { activate, deactivate };
     ] },
     "functions": { "patterns": [
       { "name": "entity.name.function.connector.cforgev", "match": "\\b(?:ia_|ui_|web_)[A-Za-z_][A-Za-z0-9_]*\\b" },
-      { "name": "support.function.cforgev", "match": "\\b(mostrar|print|leer|leer_archivo|escribir_archivo|existe_archivo|file_read|file_write|file_append|sys_run|sys_info|net_listen|net_send|matrix|array_fast|longitud|agregar|a_numero|a_texto|raiz|potencia|absoluto|redondear|tiempo_actual|argumentos|forge_hash|forge_bench|forge_catalogo|forge_arena_estado|json_parse|sys_fetch|use_python|use_csharp|use_native|use_cpp|use_javascript|use_typescript|use_java|cluster_estado|jit_estado|jit_caliente|paralelo)\\b" }
+      { "name": "support.function.cforgev", "match": "\\b(mostrar|print|leer|leer_archivo|escribir_archivo|existe_archivo|file_read|file_write|file_append|sys_run|sys_info|net_listen|net_send|matrix|array_fast|conjunto|longitud|agregar|a_numero|a_texto|raiz|potencia|absoluto|redondear|tiempo_actual|argumentos|forge_hash|forge_bench|forge_catalogo|forge_arena_estado|json_parse|sys_fetch|use_python|use_csharp|use_native|use_cpp|use_javascript|use_typescript|use_java|cluster_estado|jit_estado|jit_caliente|paralelo|mover|prestar|prestar_mut|soltar_prestamo|destruir|algunos|ninguno|es_algunos|desenvolver|tarea|esperar|cancelar|canal|enviar|recibir|cerrar_canal)\\b" }
     ] }
   }
 }
-)CFV33DATA"}
+)CFV41DATA"}
     };
     return resources;
 }
@@ -5163,7 +9229,7 @@ bool command_available(const std::string& command) {
 }
 
 int setup_environment() {
-    std::cout << "C-Forge Setup 1.5.0 Developer Preview\n";
+    std::cout << "C-Forge Setup 1.6.0 Developer Preview\n";
     const bool clang = command_available("clang++");
     const bool python = command_available("python3");
 #ifdef __APPLE__
@@ -5172,8 +9238,11 @@ int setup_environment() {
     const bool java = command_available("java") && command_available("javac");
 #endif
     const bool node = command_available("node");
+    const bool signatures = std::system("python3 -c 'import cryptography' >/dev/null 2>&1") == 0;
     std::cout << (clang ? "[OK] C++: clang++ disponible\n" : "[FALTA] C++: instala las herramientas de desarrollo\n");
     std::cout << (python ? "[OK] Python 3 disponible\n" : "[FALTA] Python 3\n");
+    std::cout << (signatures ? "[OK] Paquetes: firmas Ed25519 disponibles\n" :
+                               "[FALTA] Paquetes firmados: instala el componente cryptography\n");
     std::cout << (node ? "[OK] JavaScript/TypeScript: Node.js disponible\n" : "[OPCIONAL] Node.js no instalado\n");
     if (java) {
         std::cout << "[OK] Java: JDK y JVM disponibles\n";

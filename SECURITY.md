@@ -2,7 +2,7 @@
 
 ## Versiones
 
-`1.5.0-developer-preview` recibe correcciones durante su desarrollo, pero no posee
+`1.6.0-developer-preview` recibe correcciones durante su desarrollo, pero no posee
 todavía certificación para entornos críticos. No ejecute scripts `.cfv` desconocidos:
 los puentes `extern`, procesos y red pueden acceder a capacidades del sistema.
 

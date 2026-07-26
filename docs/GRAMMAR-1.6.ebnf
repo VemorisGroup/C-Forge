@@ -1,0 +1,150 @@
+(* C-Forge 1.6 Developer Preview — gramática sintáctica normativa.
+   UTF-8. Los saltos de línea separan visualmente sentencias, pero no son tokens.
+   El punto y coma final es opcional. Los comentarios comienzan con //.
+   Las restricciones de tipos, ámbitos y backends son semánticas. *)
+
+programa          = { sentencia }, EOF ;
+
+sentencia         = declaracion_variable
+                  | declaracion_funcion
+                  | declaracion_externa_c
+                  | declaracion_interfaz
+                  | declaracion_clase
+                  | declaracion_estructura
+                  | declaracion_cluster
+                  | declaracion_region
+                  | bloque_unsafe
+                  | bloque_extern
+                  | bloque_gpu
+                  | bloque_prueba
+                  | bloque_intentar
+                  | importacion_modulo
+                  | importacion_universal
+                  | sentencia_si
+                  | sentencia_mientras
+                  | sentencia_retorno
+                  | sentencia_impresion
+                  | asignacion
+                  | expresion, [ ";" ] ;
+
+declaracion_variable
+                  = [ "cluster" ], "sea", identificador,
+                    [ ":", tipo ], [ "=", expresion ], [ ";" ] ;
+
+declaracion_funcion
+                  = [ "async" ], "funcion", identificador,
+                    [ parametros_tipo ], "(", [ parametros ], ")",
+                    [ ":", tipo ], bloque ;
+
+declaracion_externa_c
+                  = "extern_c", [ "segura" ], "funcion", identificador,
+                    "(", [ parametros ], ")", ":", tipo, [ ";" ] ;
+
+parametros_tipo   = "<", identificador, { ",", identificador }, ">" ;
+parametros        = parametro, { ",", parametro } ;
+parametro         = identificador, [ ":", tipo ] ;
+
+declaracion_interfaz
+                  = "interfaz", identificador, "{",
+                    { firma_metodo }, "}", [ ";" ] ;
+firma_metodo      = "metodo", identificador,
+                    "(", [ parametros ], ")", [ ":", tipo ], [ ";" ] ;
+
+declaracion_clase = "clase", identificador,
+                    [ "implementa", lista_identificadores ],
+                    "{", { miembro_clase }, "}", [ ";" ] ;
+miembro_clase     = "campo", identificador, ":", tipo, [ ";" ]
+                  | "metodo", identificador, "(", [ parametros ], ")",
+                    [ ":", tipo ], bloque ;
+
+declaracion_estructura
+                  = "estructura", identificador, "{",
+                    { campo_estructura }, "}", [ ";" ] ;
+campo_estructura  = identificador, ":", tipo, [ ";" ] ;
+
+declaracion_cluster
+                  = "cluster", ( declaracion_variable | declaracion_funcion ) ;
+declaracion_region
+                  = "region", bloque ;
+bloque_unsafe     = "unsafe", bloque ;
+
+bloque_extern     = "extern", "(", cadena, ")", bloque_literal_externo ;
+(* bloque_literal_externo conserva sus bytes hasta la llave balanceada final.
+   Lenguajes admitidos: python, cpp, javascript, typescript y java. *)
+
+bloque_gpu        = "gpu", bloque ;
+bloque_prueba     = "test", [ cadena | identificador ], bloque ;
+bloque_intentar   = "intentar", bloque,
+                    "capturar", [ "(", identificador, ")" ], bloque ;
+
+importacion_modulo
+                  = "usar", cadena, [ ";" ] ;
+importacion_universal
+                  = "import", ecosistema, ":", nombre_paquete, [ ";" ] ;
+ecosistema        = "pip" | "nuget" | "npm" | "maven" ;
+
+sentencia_si      = "si", "(", expresion, ")", bloque,
+                    [ "sino", bloque ] ;
+sentencia_mientras
+                  = "mientras", "(", expresion, ")", bloque ;
+sentencia_retorno = "retornar", expresion, [ ";" ] ;
+
+sentencia_impresion
+                  = ( "mostrar" | "print" | "console.log"
+                    | "System.out.println" ),
+                    "(", expresion, ")", [ ";" ]
+                  | [ "std::" ], "cout", "<<", expresion,
+                    [ "<<", [ "std::" ], "endl" ], [ ";" ] ;
+
+asignacion        = designador, "=", expresion, [ ";" ] ;
+designador        = identificador,
+                    { "[" , expresion, "]" | ".", identificador } ;
+
+bloque            = "{", { sentencia }, "}" ;
+
+expresion         = disyuncion ;
+disyuncion        = conjuncion, { "o", conjuncion } ;
+conjuncion        = igualdad, { "y", igualdad } ;
+igualdad          = comparacion, { ( "==" | "!=" ), comparacion } ;
+comparacion       = suma, { ( "<" | "<=" | ">" | ">=" ), suma } ;
+suma              = producto, { ( "+" | "-" ), producto } ;
+producto          = unaria, { ( "*" | "/" | "%" ), unaria } ;
+unaria            = ( "no" | "-" | "await" ), unaria | postfija ;
+
+postfija          = primaria,
+                    { llamada | indice | acceso_miembro } ;
+llamada           = "(", [ argumentos ], ")" ;
+argumentos        = expresion, { ",", expresion } ;
+indice            = "[", expresion, "]" ;
+acceso_miembro    = ".", identificador, [ llamada ] ;
+
+primaria          = numero
+                  | cadena
+                  | "verdadero"
+                  | "falso"
+                  | "nulo"
+                  | identificador
+                  | lista
+                  | mapa
+                  | tupla
+                  | conjunto
+                  | "(", expresion, ")" ;
+
+lista             = "[", [ argumentos ], "]" ;
+mapa              = "{", [ entrada_mapa, { ",", entrada_mapa } ], "}" ;
+entrada_mapa      = cadena, ":", expresion ;
+tupla             = "(", expresion, ",", [ argumentos ], ")" ;
+conjunto          = "conjunto", "(", [ argumentos ], ")" ;
+
+tipo              = identificador, [ "<", tipo, { ",", tipo }, ">" ] ;
+lista_identificadores
+                  = identificador, { ",", identificador } ;
+
+identificador     = letra_o_guion, { letra_o_guion | digito } ;
+numero            = digito, { digito }, [ ".", digito, { digito } ] ;
+cadena            = '"', { caracter_json }, '"' ;
+nombre_paquete    = caracter_paquete, { caracter_paquete } ;
+
+letra_o_guion     = "A"…"Z" | "a"…"z" | "_" ;
+digito            = "0"…"9" ;
+caracter_paquete  = letra_o_guion | digito | "-" | "." | "/" | "@" ;
