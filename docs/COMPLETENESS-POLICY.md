@@ -53,6 +53,11 @@ C++/LLVM está planeado y se migrará incrementalmente. No se declarará autóno
 hasta que el ejecutable compile y ejecute el núcleo del lenguaje sin depender de
 Python y pase el contrato de paridad correspondiente.
 
+El contrato de Stage 0/1/2/3 y el subconjunto congelado están definidos en
+[`BOOTSTRAP.md`](BOOTSTRAP.md). Un componente escrito en `.cfv` no convierte por
+sí solo al lenguaje en autoalojado: la afirmación exige recompilación Stage 2/3
+reproducible. Los adaptadores extranjeros quedan fuera del núcleo.
+
 ## Producción crítica
 
 C-Forge no está certificado para bancos ni producción crítica. Esa clasificación

@@ -31,7 +31,7 @@ FILES = (
     "INTEROPERABILIDAD.md",
     "SECURITY.md",
 )
-DIRECTORIES = ("include", "ejemplos", "registry", "docs")
+DIRECTORIES = ("include", "ejemplos", "registry", "docs", "bootstrap")
 IGNORED = shutil.ignore_patterns("build", "bin", "obj", "__pycache__", "*.pyc", ".DS_Store")
 
 

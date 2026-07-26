@@ -97,7 +97,9 @@ print(datos.len())
 - **[Parcial]** WebAssembly emite WAT para un subconjunto, no para todo C-Forge.
 - **[Parcial]** Empaquetado para macOS, Linux y Windows; la validación física y
   los catálogos públicos aún no están completos.
-- **[Planeado]** Núcleo autónomo C++/LLVM que no necesite Python para existir.
+- **[Planeado]** Compilador autoalojado y núcleo autónomo. El bootstrap B0 ya
+  posee un lexer escrito en C-Forge, pero parser, emisor, Stage 1/2/3 y runtime
+  independiente siguen pendientes; consulta [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md).
 - **[No certificado]** Uso bancario o crítico; requiere auditoría profesional,
   LTS, cumplimiento y evidencia externa.
 
@@ -105,6 +107,21 @@ La fuente de verdad legible por máquinas es
 [`capabilities.json`](capabilities.json). La
 [`política de completitud`](docs/COMPLETENESS-POLICY.md) prohíbe presentar una
 capacidad parcial o planeada como terminada.
+
+## C-Forge Core Bootstrap
+
+El desarrollo de funciones nuevas queda congelado mientras se construye el
+compilador autoalojado. El primer componente está escrito en C-Forge:
+
+```bash
+cforge test bootstrap/core_lexer.cfv
+cforge vm bootstrap/core_lexer.cfv
+```
+
+Ambos motores deben aceptar las mismas pruebas del lexer. Esto todavía es B0:
+no significa que C-Forge sea autoalojado. La condición de éxito definitiva será
+que Stage 2 y Stage 3 recompilen las mismas fuentes `.cfv` y produzcan artefactos
+reproducibles equivalentes.
 
 ## Herramientas profesionales (base 1.0)
 

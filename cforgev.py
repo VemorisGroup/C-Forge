@@ -1018,7 +1018,7 @@ class Interpreter:
             key = self.expression()
             bracket = self.consume_value("]", "Se esperaba ']' después del índice")
             try:
-                if isinstance(value, (list, tuple)):
+                if isinstance(value, (str, list, tuple)):
                     if not isinstance(key, int) or isinstance(key, bool):
                         raise CForgevError(f"Línea {bracket.line}: el índice de colección debe ser entero")
                     value = value[key]

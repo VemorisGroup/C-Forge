@@ -18,11 +18,24 @@ from cforge_packages import (add, build_package, generate_keypair, init,
 from cforge_parity import compare_file, reports_json
 from cforge_vm import (BYTECODE_HEADER, VirtualMachine, compile_file, compile_source,
                        deserialize, disassemble, serialize)
-from cforgev import CForgevError
+from cforgev import CForgevError, run_test_file
 from compilador_llvm import compile_file as compile_llvm_file, compile_source as compile_llvm_source
 
 
 class ProfessionalToolingTests(unittest.TestCase):
+    def test_bootstrap_lexer_is_written_in_cforge_and_runs_in_both_engines(self):
+        source = Path("bootstrap/core_lexer.cfv")
+        contract = Path("docs/BOOTSTRAP.md")
+        self.assertTrue(source.is_file())
+        self.assertIn("Stage 2", contract.read_text(encoding="utf-8"))
+        interpreter_output = io.StringIO()
+        import contextlib
+        with contextlib.redirect_stdout(interpreter_output):
+            passed = run_test_file(source)
+        self.assertEqual(passed, 1)
+        self.assertIn("1 aprobados, 0 fallidos", interpreter_output.getvalue())
+        VirtualMachine(compile_file(source)).run()
+
     def test_public_capability_manifest_and_readme_are_consistent(self):
         result = subprocess.run(
             [sys.executable, "herramientas/verificar_capacidades.py"],

@@ -1,3 +1,5 @@
 include LICENSE README.md CHANGELOG.md ESPECIFICACION.md INTEROPERABILIDAD.md
 recursive-include include *.h
 recursive-include ejemplos *.cfv *.cpp *.cs *.csproj *.js *.txt
+recursive-include bootstrap *.cfv
+recursive-include docs *.md *.ebnf

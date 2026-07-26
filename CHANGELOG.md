@@ -2,6 +2,12 @@
 
 ## 1.6.0-developer-preview — en desarrollo
 
+- Comienza C-Forge Core Bootstrap B0: contrato Stage 0/1/2/3, subconjunto
+  congelado y primer lexer del compilador escrito íntegramente en `.cfv`.
+- La indexación segura de textos, necesaria para el lexer autoalojado, mantiene
+  paridad comprobada entre intérprete, VM y backend nativo.
+- Las funciones nuevas quedan congeladas hasta completar el camino de bootstrap;
+  el estado sigue siendo planeado y no se afirma autoalojamiento prematuro.
 - `extern("cpp")` detecta `clang++` ausente y emite un diagnóstico C-Forge
   limpio; la demostración maestra captura esa condición y puede continuar.
 - CI, README y el manifiesto de capacidades fijan una única orden reproducible

@@ -1093,7 +1093,7 @@ class Interpreter:
             key = self.expression()
             bracket = self.consume_value("]", "Se esperaba ']' después del índice")
             try:
-                if isinstance(value, (list, tuple)):
+                if isinstance(value, (str, list, tuple)):
                     if not isinstance(key, int) or isinstance(key, bool):
                         raise CForgevError(f"Línea {bracket.line}: el índice de colección debe ser entero")
                     value = value[key]
@@ -3730,7 +3730,7 @@ struct CfvChannel{size_t capacity=0;bool closed=false;std::deque<Value>values;st
 static std::shared_ptr<CfvChannel>cfv_channel(const Value&handle){auto id=(long long)numero(handle);std::lock_guard<std::mutex>lock(cfv_channel_mutex);auto found=cfv_channels.find(id);if(found==cfv_channels.end())throw std::runtime_error("canal desconocido");return found->second;}
 static Value cfv_canal(const Value&size){auto capacity=(long long)numero(size);if(capacity<0)throw std::runtime_error("capacidad de canal inválida");auto id=cfv_next_channel.fetch_add(1);auto channel=std::make_shared<CfvChannel>();channel->capacity=(size_t)capacity;{std::lock_guard<std::mutex>lock(cfv_channel_mutex);cfv_channels[id]=channel;}return (double)id;}static Value cfv_canal(){return cfv_canal(Value{0.0});}
 static Value cfv_enviar(const Value&handle,Value value){auto channel=cfv_channel(handle);std::unique_lock<std::mutex>lock(channel->mutex);channel->writable.wait(lock,[&]{return channel->closed||channel->capacity==0||channel->values.size()<channel->capacity;});if(channel->closed)throw std::runtime_error("canal cerrado");channel->values.push_back(std::move(value));lock.unlock();channel->readable.notify_one();return Value{};}static Value cfv_recibir(const Value&handle){auto channel=cfv_channel(handle);std::unique_lock<std::mutex>lock(channel->mutex);channel->readable.wait(lock,[&]{return channel->closed||!channel->values.empty();});if(channel->values.empty())throw std::runtime_error("canal cerrado y vacío");Value result=std::move(channel->values.front());channel->values.pop_front();lock.unlock();channel->writable.notify_one();return result;}static Value cfv_cerrar_canal(const Value&handle){auto channel=cfv_channel(handle);{std::lock_guard<std::mutex>lock(channel->mutex);channel->closed=true;}channel->readable.notify_all();channel->writable.notify_all();return Value{};}
-static Value indice(const Value&v,const Value&k){double n=0;if(auto p=std::get_if<Lista>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de lista inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<Mapa>(&v.data)){if(k.index()!=2)throw std::runtime_error("la clave debe ser texto");auto it=(*p)->find(std::get<std::string>(k.data));if(it==(*p)->end())throw std::runtime_error("clave inexistente");return it->second;}if(auto p=std::get_if<Tupla>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->values.size())throw std::runtime_error("índice de tupla inválido");return (*p)->values.at((size_t)n);}if(auto p=std::get_if<FastArray>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de array_fast inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<DenseMatrix>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->rows)throw std::runtime_error("fila de matrix inválida");auto row=std::make_shared<std::vector<double>>((*p)->values.begin()+(size_t)n*(*p)->columns,(*p)->values.begin()+((size_t)n+1)*(*p)->columns);return row;}throw std::runtime_error("el valor no admite índices");}
+static Value indice(const Value&v,const Value&k){double n=0;if(auto p=std::get_if<std::string>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=p->size())throw std::runtime_error("índice de texto inválido");return std::string(1,p->at((size_t)n));}if(auto p=std::get_if<Lista>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de lista inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<Mapa>(&v.data)){if(k.index()!=2)throw std::runtime_error("la clave debe ser texto");auto it=(*p)->find(std::get<std::string>(k.data));if(it==(*p)->end())throw std::runtime_error("clave inexistente");return it->second;}if(auto p=std::get_if<Tupla>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->values.size())throw std::runtime_error("índice de tupla inválido");return (*p)->values.at((size_t)n);}if(auto p=std::get_if<FastArray>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de array_fast inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<DenseMatrix>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->rows)throw std::runtime_error("fila de matrix inválida");auto row=std::make_shared<std::vector<double>>((*p)->values.begin()+(size_t)n*(*p)->columns,(*p)->values.begin()+((size_t)n+1)*(*p)->columns);return row;}throw std::runtime_error("el valor no admite índices");}
 static void asignar_campo(Value&obj,const std::string&campo,Value valor,size_t tipo){auto p=std::get_if<Mapa>(&obj.data);if(!p||(*p)->find(campo)==(*p)->end())throw std::runtime_error("campo desconocido '"+campo+"'");if(tipo!=99&&valor.index()!=tipo)throw std::runtime_error("tipo incompatible para campo '"+campo+"'");(**p)[campo]=std::move(valor);}
 static void asignar(Value&destino,size_t tipo,Value valor,const std::string&nombre){if(tipo!=99&&valor.index()!=tipo)throw std::runtime_error("tipo incompatible al asignar '"+nombre+"'");destino=std::move(valor);}
 '''
@@ -8366,8 +8366,8 @@ def reports_json(reports: list[ParityReport]) -> str:
       "id": "autonomous-native-core",
       "name": "Núcleo autónomo C++/LLVM",
       "status": "planned",
-      "scope": "Migración futura; el frontend principal todavía usa la implementación Python",
-      "evidence": ["docs/COMPLETENESS-POLICY.md"]
+      "scope": "Bootstrap B0 iniciado con lexer escrito en C-Forge; parser, emisor, Stage 1/2/3 y runtime autónomo siguen pendientes",
+      "evidence": ["docs/COMPLETENESS-POLICY.md", "docs/BOOTSTRAP.md", "bootstrap/core_lexer.cfv"]
     },
     {
       "id": "critical-production",
@@ -8379,15 +8379,203 @@ def reports_json(reports: list[ParityReport]) -> str:
   ]
 }
 )CFV23DATA"},
-        {R"CFV24DATA(registry/index.json)CFV24DATA", R"CFV25DATA({
+        {R"CFV24DATA(docs/BOOTSTRAP.md)CFV24DATA", R"CFV25DATA(# C-Forge Core Bootstrap
+
+## Objetivo
+
+C-Forge será autoalojado cuando un compilador escrito íntegramente en `.cfv`
+pueda compilar su propio código fuente y las generaciones consecutivas sean
+reproducibles. Los puentes políglotas no forman parte de este núcleo.
+
+## Definiciones verificables
+
+- **Stage 0:** implementación histórica alojada. Solo se usa para construir la
+  primera generación y no cuenta como autonomía.
+- **Stage 1:** compilador escrito en C-Forge y construido por Stage 0.
+- **Stage 2:** Stage 1 compila exactamente las mismas fuentes `.cfv`.
+- **Stage 3:** Stage 2 vuelve a compilar esas fuentes.
+- **Autoalojado:** Stage 2 y Stage 3 producen artefactos equivalentes mediante
+  una comparación reproducible.
+- **Autónomo:** el compilador autoalojado, runtime, biblioteca estándar,
+  ensamblador/enlazador y gestor básico funcionan en una instalación limpia sin
+  Python, C++, JVM, .NET, Node ni LLVM.
+
+No se usará la palabra “autoalojado” antes de superar Stage 2/3. No se usará la
+palabra “autónomo” mientras el funcionamiento normal requiera otro runtime.
+
+## C-Forge Core congelado
+
+El compilador se implementará inicialmente con este subconjunto:
+
+1. textos UTF-8, booleanos, enteros, listas y estructuras;
+2. variables locales y asignación;
+3. funciones con retornos explícitos;
+4. `si/sino` y `mientras`;
+5. indexación, comparación y concatenación;
+6. lectura y escritura de archivos;
+7. errores comprobados mediante `afirmar`;
+8. ownership determinista para los valores del compilador.
+
+Quedan fuera del bootstrap inicial: FFI, `extern`, GPU, cluster, red, paquetes,
+interfaces gráficas y adaptadores extranjeros.
+
+## Orden de migración
+
+| Hito | Implementación `.cfv` | Criterio de salida |
+|---|---|---|
+| B0 | Lexer | Tokens iguales en intérprete y VM |
+| B1 | Parser | AST canónico igual para la suite Core |
+| B2 | Tipos y ownership | Diagnósticos iguales para casos positivos y negativos |
+| B3 | Emisor CFBC | Bytecode válido aceptado por la VM |
+| B4 | Compilador Stage 1 | Compila todas sus fuentes `.cfv` |
+| B5 | Stage 2/3 | Artefactos reproducibles equivalentes |
+| B6 | Runtime autónomo | Funciona sin runtimes externos instalados |
+
+## Estado actual
+
+**B0 en progreso.** `bootstrap/core_lexer.cfv` es el primer componente real del
+compilador escrito en C-Forge. Todavía se ejecuta con la implementación alojada,
+por lo que C-Forge continúa clasificado como Developer Preview no autoalojado.
+)CFV25DATA"},
+        {R"CFV26DATA(bootstrap/core_lexer.cfv)CFV26DATA", R"CFV27DATA(// Primer componente del compilador de C-Forge escrito en C-Forge.
+// Alcance congelado: lexer de C-Forge Core Bootstrap 0.1.
+
+estructura TokenCore {
+    tipo: texto
+    lexema: texto
+    linea: numero
+}
+
+funcion es_espacio(caracter: texto): booleano {
+    retornar caracter == " " o caracter == "\t" o caracter == "\r"
+}
+
+funcion es_digito(caracter: texto): booleano {
+    retornar caracter >= "0" y caracter <= "9"
+}
+
+funcion es_letra(caracter: texto): booleano {
+    retornar (caracter >= "a" y caracter <= "z") o
+        (caracter >= "A" y caracter <= "Z") o caracter == "_"
+}
+
+funcion es_identificador(caracter: texto): booleano {
+    retornar es_letra(caracter) o es_digito(caracter)
+}
+
+funcion tokenizar_core(fuente: texto): cualquiera {
+    sea tokens: lista = []
+    sea posicion: numero = 0
+    sea linea: numero = 1
+
+    mientras (posicion < longitud(fuente)) {
+        sea actual: texto = fuente[posicion]
+
+        si (actual == "\n") {
+            linea = linea + 1
+            posicion = posicion + 1
+        } sino {
+            si (es_espacio(actual)) {
+                posicion = posicion + 1
+            } sino {
+                si (actual == "/" y posicion + 1 < longitud(fuente) y fuente[posicion + 1] == "/") {
+                    mientras (posicion < longitud(fuente) y fuente[posicion] != "\n") {
+                        posicion = posicion + 1
+                    }
+                } sino {
+                    si (es_letra(actual)) {
+                        sea inicio: numero = posicion
+                        mientras (posicion < longitud(fuente) y es_identificador(fuente[posicion])) {
+                            posicion = posicion + 1
+                        }
+                        sea lexema: texto = ""
+                        sea cursor: numero = inicio
+                        mientras (cursor < posicion) {
+                            lexema = lexema + fuente[cursor]
+                            cursor = cursor + 1
+                        }
+                        agregar(tokens, TokenCore("IDENT", lexema, linea))
+                    } sino {
+                        si (es_digito(actual)) {
+                            sea inicio_numero: numero = posicion
+                            mientras (posicion < longitud(fuente) y es_digito(fuente[posicion])) {
+                                posicion = posicion + 1
+                            }
+                            sea numero_texto: texto = ""
+                            sea cursor_numero: numero = inicio_numero
+                            mientras (cursor_numero < posicion) {
+                                numero_texto = numero_texto + fuente[cursor_numero]
+                                cursor_numero = cursor_numero + 1
+                            }
+                            agregar(tokens, TokenCore("NUMBER", numero_texto, linea))
+                        } sino {
+                            si (actual == "\"") {
+                                sea linea_texto: numero = linea
+                                sea literal: texto = "\""
+                                posicion = posicion + 1
+                                sea cerrado: booleano = falso
+                                mientras (posicion < longitud(fuente) y no cerrado) {
+                                    sea parte: texto = fuente[posicion]
+                                    literal = literal + parte
+                                    posicion = posicion + 1
+                                    si (parte == "\\" y posicion < longitud(fuente)) {
+                                        literal = literal + fuente[posicion]
+                                        posicion = posicion + 1
+                                    } sino {
+                                        si (parte == "\"") {
+                                            cerrado = verdadero
+                                        } sino {
+                                            si (parte == "\n") {
+                                                linea = linea + 1
+                                            }
+                                        }
+                                    }
+                                }
+                                afirmar(cerrado, "texto sin cerrar en línea " + a_texto(linea_texto))
+                                agregar(tokens, TokenCore("STRING", literal, linea_texto))
+                            } sino {
+                                sea simbolo: texto = actual
+                                posicion = posicion + 1
+                                si (posicion < longitud(fuente)) {
+                                    sea par: texto = simbolo + fuente[posicion]
+                                    si (par == "==" o par == "!=" o par == ">=" o par == "<=") {
+                                        simbolo = par
+                                        posicion = posicion + 1
+                                    }
+                                }
+                                agregar(tokens, TokenCore("SYMBOL", simbolo, linea))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    agregar(tokens, TokenCore("EOF", "", linea))
+    retornar tokens
+}
+
+sea muestra: texto = "sea respuesta: numero = 40 + 2\nmostrar(respuesta)\n"
+sea resultado: lista = tokenizar_core(muestra)
+
+test "lexer core reconoce el programa mínimo" {
+    afirmar(longitud(resultado) == 13, "cantidad inesperada de tokens")
+    afirmar(resultado[0].tipo == "IDENT", "sea debe ser identificador")
+    afirmar(resultado[0].lexema == "sea", "primer lexema incorrecto")
+    afirmar(resultado[4].tipo == "SYMBOL", "asignación no reconocida")
+    afirmar(resultado[12].tipo == "EOF", "falta token EOF")
+}
+)CFV27DATA"},
+        {R"CFV28DATA(registry/index.json)CFV28DATA", R"CFV29DATA({
   "format": 2,
   "registry": "C-Forge Community Registry",
   "publishers": {},
   "revocations": [],
   "packages": {}
 }
-)CFV25DATA"},
-        {R"CFV26DATA(registry/README.md)CFV26DATA", R"CFV27DATA(# Registro público de paquetes C-Forge
+)CFV29DATA"},
+        {R"CFV30DATA(registry/README.md)CFV30DATA", R"CFV31DATA(# Registro público de paquetes C-Forge
 
 Este directorio define el índice público, auditable y versionado del gestor `cforge pkg`.
 Cada versión del formato 2 debe publicar una URL HTTPS, el SHA-256 exacto del
@@ -8414,8 +8602,8 @@ que cada paquete señale un publicador `active` y que su `key_id` esté autoriza
 por esa cuenta. Esta fase usa
 identidades de GitHub y revisión por pull request; todavía no existe un servicio
 central de inicio de sesión, recuperación de cuenta ni publicación automática.
-)CFV27DATA"},
-        {R"CFV28DATA(include/cforgev_ffi.h)CFV28DATA", R"CFV29DATA(#ifndef CFORGEV_FFI_H
+)CFV31DATA"},
+        {R"CFV32DATA(include/cforgev_ffi.h)CFV32DATA", R"CFV33DATA(#ifndef CFORGEV_FFI_H
 #define CFORGEV_FFI_H
 
 #include <stddef.h>
@@ -8560,8 +8748,8 @@ CFV_EXPORT int cfv_register_function_v2(const char* name, CfvForeignFunctionV2 f
 #endif
 
 #endif
-)CFV29DATA"},
-        {R"CFV30DATA(include/cforge_shared_arena.h)CFV30DATA", R"CFV31DATA(#ifndef CFORGE_SHARED_ARENA_H
+)CFV33DATA"},
+        {R"CFV34DATA(include/cforge_shared_arena.h)CFV34DATA", R"CFV35DATA(#ifndef CFORGE_SHARED_ARENA_H
 #define CFORGE_SHARED_ARENA_H
 
 #include <atomic>
@@ -8911,8 +9099,8 @@ private:
 }  // namespace cforge::arena
 
 #endif
-)CFV31DATA"},
-        {R"CFV32DATA(herramientas/cforgev_ffi_runner.cpp)CFV32DATA", R"CFV33DATA(#include "cforgev_ffi.h"
+)CFV35DATA"},
+        {R"CFV36DATA(herramientas/cforgev_ffi_runner.cpp)CFV36DATA", R"CFV37DATA(#include "cforgev_ffi.h"
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -8960,8 +9148,8 @@ int main(int argc, char** argv) {
     if (result.release) result.release(result.owner);
     return 0;
 }
-)CFV33DATA"},
-        {R"CFV34DATA(herramientas/cforge_cli.cpp)CFV34DATA", R"CFV35DATA(#include <cerrno>
+)CFV37DATA"},
+        {R"CFV38DATA(herramientas/cforge_cli.cpp)CFV38DATA", R"CFV39DATA(#include <cerrno>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -9032,8 +9220,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-)CFV35DATA"},
-        {R"CFV36DATA(herramientas/vscode-cforgev/package.json)CFV36DATA", R"CFV37DATA({
+)CFV39DATA"},
+        {R"CFV40DATA(herramientas/vscode-cforgev/package.json)CFV40DATA", R"CFV41DATA({
   "name": "cforgev-language",
   "displayName": "C-Forge Language Support",
   "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
@@ -9133,8 +9321,8 @@ int main(int argc, char** argv) {
     ]
   }
 }
-)CFV37DATA"},
-        {R"CFV38DATA(herramientas/vscode-cforgev/extension.js)CFV38DATA", R"CFV39DATA("use strict";
+)CFV41DATA"},
+        {R"CFV42DATA(herramientas/vscode-cforgev/extension.js)CFV42DATA", R"CFV43DATA("use strict";
 
 const vscode = require("vscode");
 const { execFile, spawn } = require("child_process");
@@ -9380,8 +9568,8 @@ function activate(context) {
 async function deactivate() { if (languageServer) await languageServer.stop(); }
 
 module.exports = { activate, deactivate };
-)CFV39DATA"},
-        {R"CFV40DATA(herramientas/vscode-cforgev/language-configuration.json)CFV40DATA", R"CFV41DATA({
+)CFV43DATA"},
+        {R"CFV44DATA(herramientas/vscode-cforgev/language-configuration.json)CFV44DATA", R"CFV45DATA({
   "comments": { "lineComment": "//" },
   "brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
   "autoClosingPairs": [
@@ -9391,8 +9579,8 @@ module.exports = { activate, deactivate };
     { "open": "\"", "close": "\"" }
   ]
 }
-)CFV41DATA"},
-        {R"CFV42DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV42DATA", R"CFV43DATA({
+)CFV45DATA"},
+        {R"CFV46DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV46DATA", R"CFV47DATA({
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "C-Forge",
   "scopeName": "source.cforgev",
@@ -9438,7 +9626,7 @@ module.exports = { activate, deactivate };
     ] }
   }
 }
-)CFV43DATA"}
+)CFV47DATA"}
     };
     return resources;
 }

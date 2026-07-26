@@ -106,8 +106,8 @@
       "id": "autonomous-native-core",
       "name": "Núcleo autónomo C++/LLVM",
       "status": "planned",
-      "scope": "Migración futura; el frontend principal todavía usa la implementación Python",
-      "evidence": ["docs/COMPLETENESS-POLICY.md"]
+      "scope": "Bootstrap B0 iniciado con lexer escrito en C-Forge; parser, emisor, Stage 1/2/3 y runtime autónomo siguen pendientes",
+      "evidence": ["docs/COMPLETENESS-POLICY.md", "docs/BOOTSTRAP.md", "bootstrap/core_lexer.cfv"]
     },
     {
       "id": "critical-production",

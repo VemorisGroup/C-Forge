@@ -22,6 +22,8 @@ RESOURCES = {
     "cforge_memory.py": ROOT / "cforge_memory.py",
     "cforge_parity.py": ROOT / "cforge_parity.py",
     "capabilities.json": ROOT / "capabilities.json",
+    "docs/BOOTSTRAP.md": ROOT / "docs" / "BOOTSTRAP.md",
+    "bootstrap/core_lexer.cfv": ROOT / "bootstrap" / "core_lexer.cfv",
     "registry/index.json": ROOT / "registry" / "index.json",
     "registry/README.md": ROOT / "registry" / "README.md",
     "include/cforgev_ffi.h": ROOT / "include" / "cforgev_ffi.h",

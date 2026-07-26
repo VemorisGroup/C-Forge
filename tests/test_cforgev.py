@@ -493,6 +493,24 @@ std::cout << value << std::endl;
         """
         self.assertEqual(self.output(source), "30\nJavier\n3\n")
 
+    def test_text_indexing_is_identical_in_interpreter_vm_and_native(self) -> None:
+        source = 'sea lenguaje = "C-Forge"; mostrar(lenguaje[0]); mostrar(lenguaje[2]);'
+        expected = "C\nF\n"
+        self.assertEqual(self.output(source), expected)
+        from cforge_vm import VirtualMachine, compile_source
+        vm_output = []
+        VirtualMachine(compile_source(source), output=vm_output.append).run()
+        self.assertEqual("\n".join(vm_output) + "\n", expected)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, executable = root / "texto.cfv", root / "texto"
+            path.write_text(source, encoding="utf-8")
+            compile_native(path, executable)
+            result = subprocess.run(
+                [str(executable)], capture_output=True, text=True, check=True
+            )
+            self.assertEqual(result.stdout, expected)
+
     def test_tuples_and_sets_have_distinct_semantics(self) -> None:
         source = '''
         sea version: tupla = ("C-Forge", 2, verdadero)
