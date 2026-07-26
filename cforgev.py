@@ -58,7 +58,8 @@ class ExternExecutionPolicy:
             return
         warning = (
             f'[C-Forge Security] extern("{language}") ejecutará código extranjero '
-            "con los permisos de tu usuario."
+            "con los permisos de tu usuario, incluyendo acceso a archivos, red y "
+            "procesos del sistema."
         )
         if not sys.stdin.isatty():
             raise CForgevError(

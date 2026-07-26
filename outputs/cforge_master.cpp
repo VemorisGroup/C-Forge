@@ -133,7 +133,8 @@ class ExternExecutionPolicy:
             return
         warning = (
             f'[C-Forge Security] extern("{language}") ejecutará código extranjero '
-            "con los permisos de tu usuario."
+            "con los permisos de tu usuario, incluyendo acceso a archivos, red y "
+            "procesos del sistema."
         )
         if not sys.stdin.isatty():
             raise CForgevError(
@@ -4042,7 +4043,7 @@ def compile_native(
     except OSError as error:
         raise CForgevError(f"No se pudo abrir {source_path}: {error}") from error
     program = resolve_imports(Parser(tokenize(source)).program(), source_path.resolve().parent, set())
-    if "'extern'," in repr(program) and not allow_extern:
+    if _ast_contains(program, lambda node: node[0] == "extern") and not allow_extern:
         raise CForgevError(
             "el programa contiene bloques extern; vuelve a compilar con "
             "--allow-extern únicamente si confías en todo su código extranjero"
@@ -4102,6 +4103,19 @@ def compile_native(
     if result.returncode != 0:
         raise CForgevError("El compilador C++ rechazó el programa:\n" + result.stderr)
     return output_path
+
+
+def _ast_contains(node: object, predicate) -> bool:
+    """Recorre el AST estructuralmente sin depender de su representación textual."""
+    if isinstance(node, Program):
+        return _ast_contains(node.functions, predicate) or _ast_contains(node.statements, predicate)
+    if isinstance(node, tuple):
+        if node and isinstance(node[0], str) and predicate(node):
+            return True
+        return any(_ast_contains(child, predicate) for child in node)
+    if isinstance(node, list):
+        return any(_ast_contains(child, predicate) for child in node)
+    return False
 
 
 def _cpp_symbols(node: object) -> set[str]:
@@ -7690,7 +7704,13 @@ class MemorySafetyAnalyzer:
 
     def summarize_function(self, function, summaries):
         parameters = {name: index for index, name in enumerate(function[2])}
-        consumed: set[int] = set()
+        parameter_types = function[4] if len(function) > 4 else []
+        # Los valores nominales se pasan por valor. Las colecciones mantienen la
+        # semántica histórica de vista prestada; moverlas exige `mover(...)`.
+        consumed: set[int] = {
+            index for index, type_name in enumerate(parameter_types)
+            if type_name in self.constructor_names
+        }
         returned: tuple[int, str] | None = None
 
         def visit_expression(expression, is_return=False):
@@ -7847,6 +7867,23 @@ class MemorySafetyAnalyzer:
         if not self.copy_type(effective_type):
             self.consume(source_name, states)
 
+    def transfer_aggregate_values(self, expression, states):
+        """Transfiere, en orden, valores no copiables almacenados en colecciones."""
+        kind = expression[0]
+        if kind in {"list", "tuple", "set"}:
+            values = expression[1]
+        elif kind == "map":
+            values = [item for pair in expression[1] for item in pair]
+        else:
+            return
+        for value in values:
+            if value[0] == "variable":
+                state = self.state(value[1], states)
+                if not self.copy_type(state.type_name):
+                    self.consume(value[1], states)
+            else:
+                self.transfer_aggregate_values(value, states)
+
     def reaches(self, source, target, states, visited=None):
         if source == target: return True
         visited = set() if visited is None else visited
@@ -7886,6 +7923,7 @@ class MemorySafetyAnalyzer:
                 declared_type = statement[2]
                 inferred_type = declared_type or self.expression_type(expression, states)
                 self.transfer_variable_initializer(expression, inferred_type, states)
+                self.transfer_aggregate_values(expression, states)
                 alias = MemoryState(type_name=inferred_type)
                 borrowed = self.returned_alias(expression)
                 if borrowed:
@@ -7902,7 +7940,14 @@ class MemorySafetyAnalyzer:
                 states[statement[1]] = alias
                 self.attach_ownership(
                     statement[1], alias.owns, states,
-                    transferred=expression[0] == "call" and expression[1] in self.constructor_names,
+                    transferred=(
+                        (expression[0] == "call" and expression[1] in self.constructor_names)
+                        or (
+                            expression[0] == "variable"
+                            and not self.copy_type(inferred_type)
+                        )
+                        or expression[0] in {"list", "map", "tuple", "set"}
+                    ),
                 )
             elif kind == "assign":
                 state = self.state(statement[1], states)
@@ -7912,6 +7957,7 @@ class MemorySafetyAnalyzer:
                     self.error(f"no se puede reasignar '{statement[1]}' mientras está prestada")
                 self.expression(statement[2], states)
                 self.transfer_variable_initializer(statement[2], state.type_name, states)
+                self.transfer_aggregate_values(statement[2], states)
                 state.moved = False; state.destroyed = False
                 state.owns.clear()
                 self.attach_ownership(statement[1], self.owned_references(statement[2]), states)

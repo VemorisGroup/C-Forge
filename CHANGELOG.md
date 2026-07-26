@@ -7,6 +7,10 @@
   explícita; la compilación nativa aplica la misma barrera.
 - El ownership trata la asignación de estructuras y colecciones no copiables
   como un movimiento implícito y rechaza doble movimiento/use-after-move.
+- El ownership cubre argumentos por valor, duplicados dentro de colecciones y
+  restaura correctamente una variable después de reasignarla.
+- La detección de `extern` en compilación nativa recorre el AST y ya no depende
+  de su representación textual.
 - La EBNF documenta `este` como autorreferencia exclusiva de métodos.
 - El lenguaje queda definido independientemente de su implementación mediante
   una gramática EBNF normativa, un contrato de tipos/`ForgeValue`/ownership y

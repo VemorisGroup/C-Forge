@@ -1179,6 +1179,38 @@ sea c: Recurso = a
         self.assertEqual(diagnostics[0].code, "CF3001")
         self.assertIn("uso después de mover", diagnostics[0].message)
 
+    def test_ownership_rejects_double_move_through_function_arguments(self):
+        source = """
+estructura Recurso { id: numero }
+funcion consumir(recurso: Recurso) { mostrar(recurso.id) }
+sea valor: Recurso = Recurso(1)
+consumir(valor)
+consumir(valor)
+"""
+        diagnostics = analyze_source(source)
+        self.assertEqual(diagnostics[0].code, "CF3001")
+        self.assertIn("uso después de mover", diagnostics[0].message)
+
+    def test_ownership_rejects_duplicate_noncopy_value_in_collection(self):
+        source = """
+estructura Recurso { id: numero }
+sea valor: Recurso = Recurso(1)
+sea valores = [valor, valor]
+"""
+        diagnostics = analyze_source(source)
+        self.assertEqual(diagnostics[0].code, "CF3001")
+        self.assertIn("uso después de mover", diagnostics[0].message)
+
+    def test_ownership_reassignment_restores_a_moved_variable(self):
+        source = """
+estructura Recurso { id: numero }
+sea valor: Recurso = Recurso(1)
+sea anterior: Recurso = valor
+valor = Recurso(99)
+sea identificador: numero = valor.id
+"""
+        self.assertEqual(analyze_source(source), [])
+
 
 if __name__ == "__main__":
     unittest.main()

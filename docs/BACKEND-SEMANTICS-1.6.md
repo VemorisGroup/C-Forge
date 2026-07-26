@@ -61,9 +61,10 @@ no forma parte de una prueba de paridad pura salvo que todos los entornos,
 permisos y adaptadores sean idénticos.
 
 El intérprete pide confirmación en una terminal interactiva y bloquea `extern`
-en ejecuciones no interactivas. `--allow-extern` concede autorización explícita
-para un archivo confiable. La compilación nativa también rechaza esos bloques
-si el autor no entrega esa opción.
+en ejecuciones no interactivas. La advertencia especifica que el código puede
+acceder a archivos, red y procesos con los permisos del usuario.
+`--allow-extern` concede autorización explícita para un archivo confiable. La
+compilación nativa también rechaza esos bloques si el autor no entrega esa opción.
 
 ## Capacidades y seguridad
 

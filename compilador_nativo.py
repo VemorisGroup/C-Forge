@@ -1467,7 +1467,7 @@ def compile_native(
     except OSError as error:
         raise CForgevError(f"No se pudo abrir {source_path}: {error}") from error
     program = resolve_imports(Parser(tokenize(source)).program(), source_path.resolve().parent, set())
-    if "'extern'," in repr(program) and not allow_extern:
+    if _ast_contains(program, lambda node: node[0] == "extern") and not allow_extern:
         raise CForgevError(
             "el programa contiene bloques extern; vuelve a compilar con "
             "--allow-extern únicamente si confías en todo su código extranjero"
@@ -1527,6 +1527,19 @@ def compile_native(
     if result.returncode != 0:
         raise CForgevError("El compilador C++ rechazó el programa:\n" + result.stderr)
     return output_path
+
+
+def _ast_contains(node: object, predicate) -> bool:
+    """Recorre el AST estructuralmente sin depender de su representación textual."""
+    if isinstance(node, Program):
+        return _ast_contains(node.functions, predicate) or _ast_contains(node.statements, predicate)
+    if isinstance(node, tuple):
+        if node and isinstance(node[0], str) and predicate(node):
+            return True
+        return any(_ast_contains(child, predicate) for child in node)
+    if isinstance(node, list):
+        return any(_ast_contains(child, predicate) for child in node)
+    return False
 
 
 def _cpp_symbols(node: object) -> set[str]:
