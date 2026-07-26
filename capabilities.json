@@ -104,10 +104,10 @@
     },
     {
       "id": "autonomous-native-core",
-      "name": "Núcleo autónomo C++/LLVM",
+      "name": "Compilador autoalojado y núcleo autónomo",
       "status": "planned",
-      "scope": "Bootstrap B0 iniciado con lexer escrito en C-Forge; parser, emisor, Stage 1/2/3 y runtime autónomo siguen pendientes",
-      "evidence": ["docs/COMPLETENESS-POLICY.md", "docs/BOOTSTRAP.md", "bootstrap/core_lexer.cfv"]
+      "scope": "Stage 0 C++ mínimo produce ejecutables y el lexer Stage 1 está escrito en C-Forge; parser, emisor, Stage 1/2/3 y runtime autónomo siguen pendientes",
+      "evidence": ["docs/COMPLETENESS-POLICY.md", "docs/BOOTSTRAP.md", "docs/CORE-DIRECTION.md", "bootstrap/stage0/cforge_bootstrap.cpp", "bootstrap/core_lexer.cfv", "tests/test_bootstrap_stage0.py"]
     },
     {
       "id": "critical-production",

@@ -48,10 +48,11 @@ oficial. Un cambio de umbral debe actualizar los tres en el mismo commit.
 
 ## Núcleo autónomo
 
-La implementación Python es el oráculo de referencia actual. El núcleo autónomo
-C++/LLVM está planeado y se migrará incrementalmente. No se declarará autónomo
-hasta que el ejecutable compile y ejecute el núcleo del lenguaje sin depender de
-Python y pase el contrato de paridad correspondiente.
+La implementación Python es el oráculo histórico de referencia actual. Stage 0
+es un compilador mínimo C++17 usado únicamente para arrancar Stage 1. No se
+declarará autónomo hasta que el compilador escrito en C-Forge compile y ejecute
+el núcleo sin depender de Python, C++, JVM, .NET, Node ni LLVM y pase el contrato
+Stage 2/3.
 
 El contrato de Stage 0/1/2/3 y el subconjunto congelado están definidos en
 [`BOOTSTRAP.md`](BOOTSTRAP.md). Un componente escrito en `.cfv` no convierte por

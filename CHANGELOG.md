@@ -4,6 +4,10 @@
 
 - Comienza C-Forge Core Bootstrap B0: contrato Stage 0/1/2/3, subconjunto
   congelado y primer lexer del compilador escrito íntegramente en `.cfv`.
+- Stage 0 incorpora un compilador C++17 independiente de Python que lee el
+  subconjunto Core mínimo y produce un ejecutable nativo mediante `clang++`.
+- La dirección del Core exige memoria, objetos, scripting, concurrencia y web
+  implementados nativamente; los puentes históricos quedan fuera del núcleo.
 - La indexación segura de textos, necesaria para el lexer autoalojado, mantiene
   paridad comprobada entre intérprete, VM y backend nativo.
 - Las funciones nuevas quedan congeladas hasta completar el camino de bootstrap;

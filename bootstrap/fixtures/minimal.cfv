@@ -1,0 +1,6 @@
+// Programa aceptado por C-Forge Stage 0.
+sea proyecto: texto = "C-Forge"
+sea base: numero = 40
+sea resultado: numero = base + 2
+mostrar(proyecto + " Core Bootstrap")
+mostrar(resultado)

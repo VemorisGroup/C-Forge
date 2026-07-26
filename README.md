@@ -111,17 +111,25 @@ capacidad parcial o planeada como terminada.
 ## C-Forge Core Bootstrap
 
 El desarrollo de funciones nuevas queda congelado mientras se construye el
-compilador autoalojado. El primer componente está escrito en C-Forge:
+compilador autoalojado. Stage 0 es un compilador mínimo C++17 que no carga
+Python ni runtimes extranjeros:
 
 ```bash
+clang++ -std=c++17 -O2 bootstrap/stage0/cforge_bootstrap.cpp \
+  -o build/cforge-bootstrap
+./build/cforge-bootstrap bootstrap/fixtures/minimal.cfv -o build/minimal
+./build/minimal
+
 cforge test bootstrap/core_lexer.cfv
 cforge vm bootstrap/core_lexer.cfv
 ```
 
-Ambos motores deben aceptar las mismas pruebas del lexer. Esto todavía es B0:
-no significa que C-Forge sea autoalojado. La condición de éxito definitiva será
-que Stage 2 y Stage 3 recompilen las mismas fuentes `.cfv` y produzcan artefactos
-reproducibles equivalentes.
+El primer bloque verifica que Stage 0 produzca código máquina; los dos últimos
+comprueban el lexer que formará parte de Stage 1. Esto todavía es B0 y no
+significa que C-Forge sea autoalojado. La condición definitiva será que Stage 2
+y Stage 3 recompilen las mismas fuentes `.cfv` y produzcan artefactos
+reproducibles equivalentes. La dirección nativa completa está en
+[`docs/CORE-DIRECTION.md`](docs/CORE-DIRECTION.md).
 
 ## Herramientas profesionales (base 1.0)
 
