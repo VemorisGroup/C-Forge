@@ -1498,6 +1498,7 @@ def compile_source(source: str) -> str:
     program = Parser(tokenize(source)).program(); StaticTypeAnalyzer().analyze(program)
     from cforge_memory import MemorySafetyAnalyzer
     MemorySafetyAnalyzer().analyze(program)
+    validate_llvm_signatures(program)
     return LLVMGenerator().generate(program)
 
 
@@ -1508,7 +1509,27 @@ def compile_file(source: Path) -> str:
     StaticTypeAnalyzer().analyze(program)
     from cforge_memory import MemorySafetyAnalyzer
     MemorySafetyAnalyzer().analyze(program)
+    validate_llvm_signatures(program)
     return LLVMGenerator().generate(program)
+
+
+def validate_llvm_signatures(program: Program) -> None:
+    """LLVM exige una ABI inequívoca aunque otros backends sean graduales."""
+    for function in program.functions:
+        parameters = function[2]
+        parameter_types = function[4] if len(function) > 4 else []
+        missing = [
+            name for index, name in enumerate(parameters)
+            if index >= len(parameter_types) or parameter_types[index] == "cualquiera"
+        ]
+        if missing:
+            rendered = ", ".join(missing)
+            example = ", ".join(f"{name}: numero" for name in parameters)
+            raise CForgevError(
+                f"LLVM: la función '{function[1]}' requiere tipos explícitos en "
+                f"todos sus parámetros; faltan: {rendered}. "
+                f"Usa funcion {function[1]}({example}): numero"
+            )
 
 
 def emit_file(source: Path, output: Path) -> Path:

@@ -284,7 +284,7 @@ mostrar(capturado)
 
     def test_real_llvm_ir_is_accepted_by_clang(self):
         source = """
-funcion doble(x) { retornar x * 2 }
+funcion doble(x: numero): numero { retornar x * 2 }
 sea valor: numero = 21
 mostrar(doble(valor))
 """
@@ -299,6 +299,25 @@ mostrar(doble(valor))
                 subprocess.run([clang, module, "-o", binary], check=True, capture_output=True)
                 result = subprocess.run([binary], check=True, capture_output=True, text=True)
                 self.assertEqual(result.stdout.strip(), "42")
+
+    def test_llvm_reports_untyped_parameters_without_python_traceback(self):
+        source = 'funcion presentar(nombre) { mostrar("Hola " + nombre) }\npresentar("Javier")\n'
+        with self.assertRaisesRegex(
+            CForgevError,
+            "función 'presentar' requiere tipos explícitos.*faltan: nombre",
+        ):
+            compile_llvm_source(source)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sin_tipos.cfv"
+            path.write_text(source, encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, "cforgev.py", "--llvm", str(path)],
+                capture_output=True,
+                text=True,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("[C-Forge Runtime Exception] LLVM:", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_llvm_text_functions_concat_and_comparison(self):
         source = '''

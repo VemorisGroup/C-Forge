@@ -26,6 +26,11 @@ import urllib.request
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
+# Los backends cargados bajo demanda deben reutilizar esta misma instancia del
+# módulo cuando el CLI se ejecuta como script. Así comparten CForgevError.
+if __name__ == "__main__":
+    sys.modules.setdefault("cforgev", sys.modules[__name__])
+
 VERSION = "1.6.0-developer-preview"
 
 CONNECTOR_CATALOG = {

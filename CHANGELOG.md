@@ -11,6 +11,8 @@
   restaura correctamente una variable después de reasignarla.
 - La detección de `extern` en compilación nativa recorre el AST y ya no depende
   de su representación textual.
+- LLVM diagnostica firmas sin tipos explícitos mediante un error C-Forge limpio,
+  sin filtrar tracebacks internos del implementador.
 - La EBNF documenta `este` como autorreferencia exclusiva de métodos.
 - El lenguaje queda definido independientemente de su implementación mediante
   una gramática EBNF normativa, un contrato de tipos/`ForgeValue`/ownership y

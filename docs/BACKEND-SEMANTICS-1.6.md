@@ -39,6 +39,14 @@ saltos fuera de rango y constantes mal tipadas antes de ejecutar.
 Mientras el formato no tenga garantía de compatibilidad publicada, se considera
 Developer Preview y no debe almacenarse como artefacto de larga duración.
 
+### Firmas del backend LLVM
+
+Las funciones compiladas por LLVM deben declarar explícitamente el tipo de cada
+parámetro. El intérprete y la VM conservan inferencia gradual, pero LLVM necesita
+una firma inequívoca para fijar su ABI. Si falta una anotación, el compilador
+emite un diagnóstico C-Forge con el nombre de la función y los parámetros
+pendientes, sin exponer un traceback interno.
+
 ## Excepciones
 
 Los errores internos se normalizan como una excepción C-Forge con origen,
