@@ -126,9 +126,17 @@ sea KEYWORDS: lista = [
 ]
 
 funcion es_keyword(s: texto): booleano {
+    sea kws: lista = [
+        "sea", "funcion", "si", "sino", "mientras", "para",
+        "retornar", "romper", "continuar", "verdadero", "falso", "nulo",
+        "estructura", "clase", "intentar", "capturar", "lanzar",
+        "importar", "usar", "exportar", "gpu", "y", "o", "no",
+        "cualquiera", "numero", "texto", "booleano", "lista", "mapa",
+        "afirmar", "mostrar", "en"
+    ]
     sea i: numero = 0
-    mientras (i < longitud(KEYWORDS)) {
-        si (KEYWORDS[i] == s) { retornar verdadero }
+    mientras (i < longitud(kws)) {
+        si (kws[i] == s) { retornar verdadero }
         i = i + 1
     }
     retornar falso
@@ -291,86 +299,86 @@ sea G_STATE: cualquiera = {}
 G_STATE["toks"] = []
 G_STATE["pos"] = 0
 
-funcion tok_actual(): cualquiera {
-    retornar G_STATE["toks"][G_STATE["pos"]]
+funcion tok_actual(st: cualquiera): cualquiera {
+    retornar st["toks"][st["pos"]]
 }
 
-funcion tok_peek(offset: numero): cualquiera {
-    sea idx: numero = G_STATE["pos"] + offset
-    si (idx < longitud(G_STATE["toks"])) {
-        retornar G_STATE["toks"][idx]
+funcion tok_peek(st: cualquiera, offset: numero): cualquiera {
+    sea idx: numero = st["pos"] + offset
+    si (idx < longitud(st["toks"])) {
+        retornar st["toks"][idx]
     }
-    retornar G_STATE["toks"][longitud(G_STATE["toks"]) - 1]
+    retornar st["toks"][longitud(st["toks"]) - 1]
 }
 
-funcion tok_es(tipo: texto, valor: texto): booleano {
-    sea t: cualquiera = tok_actual()
+funcion tok_es(st: cualquiera, tipo: texto, valor: texto): booleano {
+    sea t: cualquiera = tok_actual(st)
     retornar t["k"] == tipo y t["v"] == valor
 }
 
-funcion tok_es_tipo(tipo: texto): booleano {
-    retornar tok_actual()["k"] == tipo
+funcion tok_es_tipo(st: cualquiera, tipo: texto): booleano {
+    retornar tok_actual(st)["k"] == tipo
 }
 
-funcion tok_es_key(v: texto): booleano {
-    sea t: cualquiera = tok_actual()
+funcion tok_es_key(st: cualquiera, v: texto): booleano {
+    sea t: cualquiera = tok_actual(st)
     retornar t["k"] == "KEY" y t["v"] == v
 }
 
-funcion tok_es_delim(v: texto): booleano {
-    sea t: cualquiera = tok_actual()
+funcion tok_es_delim(st: cualquiera, v: texto): booleano {
+    sea t: cualquiera = tok_actual(st)
     retornar t["k"] == "DELIM" y t["v"] == v
 }
 
-funcion tok_es_op(v: texto): booleano {
-    sea t: cualquiera = tok_actual()
+funcion tok_es_op(st: cualquiera, v: texto): booleano {
+    sea t: cualquiera = tok_actual(st)
     retornar t["k"] == "OP" y t["v"] == v
 }
 
-funcion avanzar(): cualquiera {
-    sea t: cualquiera = G_STATE["toks"][G_STATE["pos"]]
-    si (G_STATE["pos"] + 1 < longitud(G_STATE["toks"])) {
-        G_STATE["pos"] = G_STATE["pos"] + 1
+funcion avanzar(st: cualquiera): cualquiera {
+    sea t: cualquiera = st["toks"][st["pos"]]
+    si (st["pos"] + 1 < longitud(st["toks"])) {
+        st["pos"] = st["pos"] + 1
     }
     retornar t
 }
 
-funcion consumir(tipo: texto, valor: texto): cualquiera {
-    sea t: cualquiera = tok_actual()
+funcion consumir(st: cualquiera, tipo: texto, valor: texto): cualquiera {
+    sea t: cualquiera = tok_actual(st)
     si (t["k"] != tipo o t["v"] != valor) {
         afirmar(falso, "Error línea " + num_a_txt(t["l"]) + ": se esperaba '" + valor + "' pero se encontró '" + t["v"] + "'")
     }
-    retornar avanzar()
+    retornar avanzar(st)
 }
 
-funcion consumir_tipo(tipo: texto): cualquiera {
-    sea t: cualquiera = tok_actual()
+funcion consumir_tipo(st: cualquiera, tipo: texto): cualquiera {
+    sea t: cualquiera = tok_actual(st)
     // Permitir KEY como ID (tipos como lista/texto/numero pueden ser nombres de variable)
     si (tipo == "ID" y t["k"] == "KEY") {
-        retornar avanzar()
+        retornar avanzar(st)
     }
     si (t["k"] != tipo) {
         afirmar(falso, "Error línea " + num_a_txt(t["l"]) + ": se esperaba " + tipo + " pero se encontró '" + t["v"] + "'")
     }
-    retornar avanzar()
+    retornar avanzar(st)
 }
 
 // ============================================================
 // PARSER — tipos
 // ============================================================
 
-funcion parse_tipo(): texto {
-    sea t: cualquiera = tok_actual()
+funcion parse_tipo(st: cualquiera): texto {
+    sea t: cualquiera = tok_actual(st)
     sea tipos_base: lista = ["cualquiera", "numero", "texto", "booleano", "lista", "mapa", "nulo"]
     sea i: numero = 0
     mientras (i < longitud(tipos_base)) {
         si (t["k"] == "KEY" y t["v"] == tipos_base[i]) {
-            avanzar()
+            avanzar(st)
             // Tipo genérico lista<X> o mapa<X>
-            si (tok_es_op("<")) {
-                avanzar()
-                parse_tipo()  // consumir el tipo interno
-                consumir("OP", ">")
+            si (tok_es_op(st, "<")) {
+                avanzar(st)
+                parse_tipo(st)  // consumir el tipo interno
+                consumir(st, "OP", ">")
             }
             retornar tipos_base[i]
         }
@@ -379,7 +387,7 @@ funcion parse_tipo(): texto {
     // Tipo personalizado (nombre de estructura)
     si (t["k"] == "ID") {
         sea nombre: texto = t["v"]
-        avanzar()
+        avanzar(st)
         retornar nombre
     }
     retornar "cualquiera"
@@ -389,19 +397,19 @@ funcion parse_tipo(): texto {
 // PARSER — expresiones
 // ============================================================
 
-funcion parse_expr(): cualquiera {
-    retornar parse_asignacion()
+funcion parse_expr(st: cualquiera): cualquiera {
+    retornar parse_asignacion(st)
 }
 
-funcion parse_asignacion(): cualquiera {
-    sea izq: cualquiera = parse_or()
-    sea t: cualquiera = tok_actual()
+funcion parse_asignacion(st: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_or(st)
+    sea t: cualquiera = tok_actual(st)
 
     si (t["k"] == "OP" y (t["v"] == "=" o t["v"] == "+=" o t["v"] == "-=" o
         t["v"] == "*=" o t["v"] == "/=" o t["v"] == "%=")) {
         sea op: texto = t["v"]
-        avanzar()
-        sea der: cualquiera = parse_asignacion()
+        avanzar(st)
+        sea der: cualquiera = parse_asignacion(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "asgn"
         nodo["op"] = op
@@ -412,11 +420,11 @@ funcion parse_asignacion(): cualquiera {
     retornar izq
 }
 
-funcion parse_or(): cualquiera {
-    sea izq: cualquiera = parse_and()
-    mientras (tok_es_key("o") o tok_es_op("||")) {
-        avanzar()
-        sea der: cualquiera = parse_and()
+funcion parse_or(st: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_and(st)
+    mientras (tok_es_key(st, "o") o tok_es_op(st, "||")) {
+        avanzar(st)
+        sea der: cualquiera = parse_and(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "bin"
         nodo["op"] = "||"
@@ -427,11 +435,11 @@ funcion parse_or(): cualquiera {
     retornar izq
 }
 
-funcion parse_and(): cualquiera {
-    sea izq: cualquiera = parse_igual()
-    mientras (tok_es_key("y") o tok_es_op("&&")) {
-        avanzar()
-        sea der: cualquiera = parse_igual()
+funcion parse_and(st: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_igual(st)
+    mientras (tok_es_key(st, "y") o tok_es_op(st, "&&")) {
+        avanzar(st)
+        sea der: cualquiera = parse_igual(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "bin"
         nodo["op"] = "&&"
@@ -442,12 +450,12 @@ funcion parse_and(): cualquiera {
     retornar izq
 }
 
-funcion parse_igual(): cualquiera {
-    sea izq: cualquiera = parse_cmp()
-    mientras (tok_es_op("==") o tok_es_op("!=")) {
-        sea op: texto = tok_actual()["v"]
-        avanzar()
-        sea der: cualquiera = parse_cmp()
+funcion parse_igual(st: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_cmp(st)
+    mientras (tok_es_op(st, "==") o tok_es_op(st, "!=")) {
+        sea op: texto = tok_actual(st)["v"]
+        avanzar(st)
+        sea der: cualquiera = parse_cmp(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "bin"
         nodo["op"] = op
@@ -458,12 +466,12 @@ funcion parse_igual(): cualquiera {
     retornar izq
 }
 
-funcion parse_cmp(): cualquiera {
-    sea izq: cualquiera = parse_suma()
-    mientras (tok_es_op("<") o tok_es_op(">") o tok_es_op("<=") o tok_es_op(">=")) {
-        sea op: texto = tok_actual()["v"]
-        avanzar()
-        sea der: cualquiera = parse_suma()
+funcion parse_cmp(st: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_suma(st)
+    mientras (tok_es_op(st, "<") o tok_es_op(st, ">") o tok_es_op(st, "<=") o tok_es_op(st, ">=")) {
+        sea op: texto = tok_actual(st)["v"]
+        avanzar(st)
+        sea der: cualquiera = parse_suma(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "bin"
         nodo["op"] = op
@@ -474,12 +482,12 @@ funcion parse_cmp(): cualquiera {
     retornar izq
 }
 
-funcion parse_suma(): cualquiera {
-    sea izq: cualquiera = parse_mul()
-    mientras (tok_es_op("+") o tok_es_op("-")) {
-        sea op: texto = tok_actual()["v"]
-        avanzar()
-        sea der: cualquiera = parse_mul()
+funcion parse_suma(st: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_mul(st)
+    mientras (tok_es_op(st, "+") o tok_es_op(st, "-")) {
+        sea op: texto = tok_actual(st)["v"]
+        avanzar(st)
+        sea der: cualquiera = parse_mul(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "bin"
         nodo["op"] = op
@@ -490,12 +498,12 @@ funcion parse_suma(): cualquiera {
     retornar izq
 }
 
-funcion parse_mul(): cualquiera {
-    sea izq: cualquiera = parse_unario()
-    mientras (tok_es_op("*") o tok_es_op("/") o tok_es_op("%")) {
-        sea op: texto = tok_actual()["v"]
-        avanzar()
-        sea der: cualquiera = parse_unario()
+funcion parse_mul(st: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_unario(st)
+    mientras (tok_es_op(st, "*") o tok_es_op(st, "/") o tok_es_op(st, "%")) {
+        sea op: texto = tok_actual(st)["v"]
+        avanzar(st)
+        sea der: cualquiera = parse_unario(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "bin"
         nodo["op"] = op
@@ -506,57 +514,57 @@ funcion parse_mul(): cualquiera {
     retornar izq
 }
 
-funcion parse_unario(): cualquiera {
-    si (tok_es_key("no") o tok_es_op("!")) {
-        avanzar()
-        sea v: cualquiera = parse_unario()
+funcion parse_unario(st: cualquiera): cualquiera {
+    si (tok_es_key(st, "no") o tok_es_op(st, "!")) {
+        avanzar(st)
+        sea v: cualquiera = parse_unario(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "un"
         nodo["op"] = "!"
         nodo["v"] = v
         retornar nodo
     }
-    si (tok_es_op("-")) {
-        avanzar()
-        sea v: cualquiera = parse_unario()
+    si (tok_es_op(st, "-")) {
+        avanzar(st)
+        sea v: cualquiera = parse_unario(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "un"
         nodo["op"] = "-"
         nodo["v"] = v
         retornar nodo
     }
-    retornar parse_postfijo()
+    retornar parse_postfijo(st)
 }
 
-funcion parse_postfijo(): cualquiera {
-    sea base: cualquiera = parse_primario()
+funcion parse_postfijo(st: cualquiera): cualquiera {
+    sea base: cualquiera = parse_primario(st)
 
     sea _pf_cont: numero = 1
     mientras (_pf_cont > 0) {
-        si (tok_es_delim("[")) {
-            avanzar()
-            sea idx: cualquiera = parse_expr()
-            consumir("DELIM", "]")
+        si (tok_es_delim(st, "[")) {
+            avanzar(st)
+            sea idx: cualquiera = parse_expr(st)
+            consumir(st, "DELIM", "]")
             sea nodo: cualquiera = {}
             nodo["k"] = "idx"
             nodo["o"] = base
             nodo["i"] = idx
             base = nodo
-        } sino si (tok_es_delim(".")) {
-            avanzar()
-            sea campo: cualquiera = consumir_tipo("ID")
+        } sino si (tok_es_delim(st, ".")) {
+            avanzar(st)
+            sea campo: cualquiera = consumir_tipo(st, "ID")
             // Llamada a método: obj.metodo(args)
-            si (tok_es_delim("(")) {
-                avanzar()
+            si (tok_es_delim(st, "(")) {
+                avanzar(st)
                 sea args: lista = []
-                si (no tok_es_delim(")")) {
-                    agregar(args, parse_expr())
-                    mientras (tok_es_delim(",")) {
-                        avanzar()
-                        agregar(args, parse_expr())
+                si (no tok_es_delim(st, ")")) {
+                    agregar(args, parse_expr(st))
+                    mientras (tok_es_delim(st, ",")) {
+                        avanzar(st)
+                        agregar(args, parse_expr(st))
                     }
                 }
-                consumir("DELIM", ")")
+                consumir(st, "DELIM", ")")
                 sea nodo: cualquiera = {}
                 nodo["k"] = "metodo"
                 nodo["o"] = base
@@ -577,28 +585,28 @@ funcion parse_postfijo(): cualquiera {
     retornar base
 }
 
-funcion parse_args(): lista {
+funcion parse_args(st: cualquiera): lista {
     sea args: lista = []
-    si (no tok_es_delim(")")) {
-        agregar(args, parse_expr())
-        sea _args_sigue: booleano = tok_es_delim(",") y no tok_es_delim(")")
+    si (no tok_es_delim(st, ")")) {
+        agregar(args, parse_expr(st))
+        sea _args_sigue: booleano = tok_es_delim(st, ",") y no tok_es_delim(st, ")")
         mientras (_args_sigue) {
-            avanzar()
-            si (no tok_es_delim(")")) {
-                agregar(args, parse_expr())
+            avanzar(st)
+            si (no tok_es_delim(st, ")")) {
+                agregar(args, parse_expr(st))
             }
-            _args_sigue = tok_es_delim(",") y no tok_es_delim(")")
+            _args_sigue = tok_es_delim(st, ",") y no tok_es_delim(st, ")")
         }
     }
     retornar args
 }
 
-funcion parse_primario(): cualquiera {
-    sea t: cualquiera = tok_actual()
+funcion parse_primario(st: cualquiera): cualquiera {
+    sea t: cualquiera = tok_actual(st)
 
     // Número
     si (t["k"] == "NUM") {
-        avanzar()
+        avanzar(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "num"
         nodo["v"] = a_numero(t["v"])
@@ -607,7 +615,7 @@ funcion parse_primario(): cualquiera {
 
     // Texto
     si (t["k"] == "TEXT") {
-        avanzar()
+        avanzar(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "txt"
         nodo["v"] = t["v"]
@@ -616,14 +624,14 @@ funcion parse_primario(): cualquiera {
 
     // verdadero / falso
     si (t["k"] == "KEY" y t["v"] == "verdadero") {
-        avanzar()
+        avanzar(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "bool"
         nodo["v"] = verdadero
         retornar nodo
     }
     si (t["k"] == "KEY" y t["v"] == "falso") {
-        avanzar()
+        avanzar(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "bool"
         nodo["v"] = falso
@@ -632,7 +640,7 @@ funcion parse_primario(): cualquiera {
 
     // nulo
     si (t["k"] == "KEY" y t["v"] == "nulo") {
-        avanzar()
+        avanzar(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "nul"
         retornar nodo
@@ -640,18 +648,18 @@ funcion parse_primario(): cualquiera {
 
     // Lista literal [...]
     si (t["k"] == "DELIM" y t["v"] == "[") {
-        avanzar()
+        avanzar(st)
         sea items: lista = []
-        si (no tok_es_delim("]")) {
-            agregar(items, parse_expr())
-            sea _lst_sigue: booleano = tok_es_delim(",") y no tok_es_delim("]")
+        si (no tok_es_delim(st, "]")) {
+            agregar(items, parse_expr(st))
+            sea _lst_sigue: booleano = tok_es_delim(st, ",") y no tok_es_delim(st, "]")
             mientras (_lst_sigue) {
-                avanzar()
-                si (no tok_es_delim("]")) { agregar(items, parse_expr()) }
-                _lst_sigue = tok_es_delim(",") y no tok_es_delim("]")
+                avanzar(st)
+                si (no tok_es_delim(st, "]")) { agregar(items, parse_expr(st)) }
+                _lst_sigue = tok_es_delim(st, ",") y no tok_es_delim(st, "]")
             }
         }
-        consumir("DELIM", "]")
+        consumir(st, "DELIM", "]")
         sea nodo: cualquiera = {}
         nodo["k"] = "lst"
         nodo["v"] = items
@@ -662,18 +670,18 @@ funcion parse_primario(): cualquiera {
     si (t["k"] == "DELIM" y t["v"] == "{") {
         // Intentar detectar si es mapa o bloque
         // Si el siguiente token es KEY:valor o ID:valor o "texto":valor es mapa
-        sea siguiente: cualquiera = tok_peek(1)
+        sea siguiente: cualquiera = tok_peek(st, 1)
         sea es_mapa: booleano = falso
         si (siguiente["k"] == "TEXT" o siguiente["k"] == "ID") {
-            sea despues: cualquiera = tok_peek(2)
+            sea despues: cualquiera = tok_peek(st, 2)
             si (despues["k"] == "DELIM" y despues["v"] == ":") {
                 es_mapa = verdadero
             }
         }
-        si (tok_peek(1)["k"] == "DELIM" y tok_peek(1)["v"] == "}") {
+        si (tok_peek(st, 1)["k"] == "DELIM" y tok_peek(st, 1)["v"] == "}") {
             // Mapa vacío {}
-            avanzar()
-            avanzar()
+            avanzar(st)
+            avanzar(st)
             sea nodo: cualquiera = {}
             nodo["k"] = "mapa_lit"
             nodo["claves"] = []
@@ -681,19 +689,19 @@ funcion parse_primario(): cualquiera {
             retornar nodo
         }
         si (es_mapa) {
-            avanzar()
+            avanzar(st)
             sea claves: lista = []
             sea vals: lista = []
-            mientras (no tok_es_delim("}")) {
-                sea clave: cualquiera = tok_actual()
-                avanzar()
-                consumir("DELIM", ":")
-                sea val: cualquiera = parse_expr()
+            mientras (no tok_es_delim(st, "}")) {
+                sea clave: cualquiera = tok_actual(st)
+                avanzar(st)
+                consumir(st, "DELIM", ":")
+                sea val: cualquiera = parse_expr(st)
                 agregar(claves, clave["v"])
                 agregar(vals, val)
-                si (tok_es_delim(",")) { avanzar() }
+                si (tok_es_delim(st, ",")) { avanzar(st) }
             }
-            consumir("DELIM", "}")
+            consumir(st, "DELIM", "}")
             sea nodo: cualquiera = {}
             nodo["k"] = "mapa_lit"
             nodo["claves"] = claves
@@ -704,22 +712,22 @@ funcion parse_primario(): cualquiera {
 
     // Paréntesis
     si (t["k"] == "DELIM" y t["v"] == "(") {
-        avanzar()
-        sea e: cualquiera = parse_expr()
-        consumir("DELIM", ")")
+        avanzar(st)
+        sea e: cualquiera = parse_expr(st)
+        consumir(st, "DELIM", ")")
         retornar e
     }
 
     // Identificador o llamada a función
     si (t["k"] == "ID" o t["k"] == "KEY") {
         sea nombre: texto = t["v"]
-        avanzar()
+        avanzar(st)
 
         // Llamada a función
-        si (tok_es_delim("(")) {
-            avanzar()
-            sea args: lista = parse_args()
-            consumir("DELIM", ")")
+        si (tok_es_delim(st, "(")) {
+            avanzar(st)
+            sea args: lista = parse_args(st)
+            consumir(st, "DELIM", ")")
             sea nodo: cualquiera = {}
             nodo["k"] = "call"
             nodo["n"] = nombre
@@ -744,34 +752,34 @@ funcion parse_primario(): cualquiera {
 // PARSER — sentencias
 // ============================================================
 
-funcion parse_bloque(): lista {
-    consumir("DELIM", "{")
+funcion parse_bloque(st: cualquiera): lista {
+    consumir(st, "DELIM", "{")
     sea stmts: lista = []
-    mientras (no tok_es_delim("}") y tok_actual()["k"] != "EOF") {
-        agregar(stmts, parse_stmt())
+    mientras (no tok_es_delim(st, "}") y tok_actual(st)["k"] != "EOF") {
+        agregar(stmts, parse_stmt(st))
     }
-    consumir("DELIM", "}")
+    consumir(st, "DELIM", "}")
     retornar stmts
 }
 
-funcion parse_stmt(): cualquiera {
-    sea t: cualquiera = tok_actual()
+funcion parse_stmt(st: cualquiera): cualquiera {
+    sea t: cualquiera = tok_actual(st)
 
     // Declaración: sea x: tipo = expr
     si (t["k"] == "KEY" y t["v"] == "sea") {
-        avanzar()
-        sea nombre: cualquiera = consumir_tipo("ID")
+        avanzar(st)
+        sea nombre: cualquiera = consumir_tipo(st, "ID")
         sea tipo_dato: texto = "cualquiera"
-        si (tok_es_delim(":")) {
-            avanzar()
-            tipo_dato = parse_tipo()
+        si (tok_es_delim(st, ":")) {
+            avanzar(st)
+            tipo_dato = parse_tipo(st)
         }
         sea val: cualquiera = nulo
-        si (tok_es_op("=")) {
-            avanzar()
-            val = parse_expr()
+        si (tok_es_op(st, "=")) {
+            avanzar(st)
+            val = parse_expr(st)
         }
-        si (tok_es_delim(";")) { avanzar() }
+        si (tok_es_delim(st, ";")) { avanzar(st) }
         sea nodo: cualquiera = {}
         nodo["k"] = "var"
         nodo["n"] = nombre["v"]
@@ -782,29 +790,29 @@ funcion parse_stmt(): cualquiera {
 
     // Función
     si (t["k"] == "KEY" y t["v"] == "funcion") {
-        avanzar()
-        sea nombre: cualquiera = consumir_tipo("ID")
-        consumir("DELIM", "(")
+        avanzar(st)
+        sea nombre: cualquiera = consumir_tipo(st, "ID")
+        consumir(st, "DELIM", "(")
         sea params: lista = []
         sea param_tipos: lista = []
-        mientras (no tok_es_delim(")")) {
-            sea pnombre: cualquiera = consumir_tipo("ID")
+        mientras (no tok_es_delim(st, ")")) {
+            sea pnombre: cualquiera = consumir_tipo(st, "ID")
             sea ptipo: texto = "cualquiera"
-            si (tok_es_delim(":")) {
-                avanzar()
-                ptipo = parse_tipo()
+            si (tok_es_delim(st, ":")) {
+                avanzar(st)
+                ptipo = parse_tipo(st)
             }
             agregar(params, pnombre["v"])
             agregar(param_tipos, ptipo)
-            si (tok_es_delim(",")) { avanzar() }
+            si (tok_es_delim(st, ",")) { avanzar(st) }
         }
-        consumir("DELIM", ")")
+        consumir(st, "DELIM", ")")
         sea ret_tipo: texto = "cualquiera"
-        si (tok_es_delim(":")) {
-            avanzar()
-            ret_tipo = parse_tipo()
+        si (tok_es_delim(st, ":")) {
+            avanzar(st)
+            ret_tipo = parse_tipo(st)
         }
-        sea cuerpo: lista = parse_bloque()
+        sea cuerpo: lista = parse_bloque(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "fun"
         nodo["n"] = nombre["v"]
@@ -817,12 +825,12 @@ funcion parse_stmt(): cualquiera {
 
     // retornar
     si (t["k"] == "KEY" y t["v"] == "retornar") {
-        avanzar()
+        avanzar(st)
         sea val: cualquiera = nulo
-        si (no tok_es_delim(";") y no tok_es_delim("}") y tok_actual()["k"] != "EOF") {
-            val = parse_expr()
+        si (no tok_es_delim(st, ";") y no tok_es_delim(st, "}") y tok_actual(st)["k"] != "EOF") {
+            val = parse_expr(st)
         }
-        si (tok_es_delim(";")) { avanzar() }
+        si (tok_es_delim(st, ";")) { avanzar(st) }
         sea nodo: cualquiera = {}
         nodo["k"] = "ret"
         nodo["v"] = val
@@ -831,8 +839,8 @@ funcion parse_stmt(): cualquiera {
 
     // romper
     si (t["k"] == "KEY" y t["v"] == "romper") {
-        avanzar()
-        si (tok_es_delim(";")) { avanzar() }
+        avanzar(st)
+        si (tok_es_delim(st, ";")) { avanzar(st) }
         sea nodo: cualquiera = {}
         nodo["k"] = "rom"
         retornar nodo
@@ -840,8 +848,8 @@ funcion parse_stmt(): cualquiera {
 
     // continuar
     si (t["k"] == "KEY" y t["v"] == "continuar") {
-        avanzar()
-        si (tok_es_delim(";")) { avanzar() }
+        avanzar(st)
+        si (tok_es_delim(st, ";")) { avanzar(st) }
         sea nodo: cualquiera = {}
         nodo["k"] = "cont"
         retornar nodo
@@ -849,9 +857,9 @@ funcion parse_stmt(): cualquiera {
 
     // lanzar
     si (t["k"] == "KEY" y t["v"] == "lanzar") {
-        avanzar()
-        sea val: cualquiera = parse_expr()
-        si (tok_es_delim(";")) { avanzar() }
+        avanzar(st)
+        sea val: cualquiera = parse_expr(st)
+        si (tok_es_delim(st, ";")) { avanzar(st) }
         sea nodo: cualquiera = {}
         nodo["k"] = "throw"
         nodo["v"] = val
@@ -861,11 +869,11 @@ funcion parse_stmt(): cualquiera {
     // mostrar / afirmar (built-ins como sentencias)
     si (t["k"] == "KEY" y (t["v"] == "mostrar" o t["v"] == "afirmar")) {
         sea nombre: texto = t["v"]
-        avanzar()
-        consumir("DELIM", "(")
-        sea args: lista = parse_args()
-        consumir("DELIM", ")")
-        si (tok_es_delim(";")) { avanzar() }
+        avanzar(st)
+        consumir(st, "DELIM", "(")
+        sea args: lista = parse_args(st)
+        consumir(st, "DELIM", ")")
+        si (tok_es_delim(st, ";")) { avanzar(st) }
         sea nodo: cualquiera = {}
         nodo["k"] = "call_stmt"
         nodo["n"] = nombre
@@ -875,29 +883,29 @@ funcion parse_stmt(): cualquiera {
 
     // si / sino
     si (t["k"] == "KEY" y t["v"] == "si") {
-        avanzar()
-        consumir("DELIM", "(")
-        sea cond: cualquiera = parse_expr()
-        consumir("DELIM", ")")
-        sea entonces: lista = parse_bloque()
+        avanzar(st)
+        consumir(st, "DELIM", "(")
+        sea cond: cualquiera = parse_expr(st)
+        consumir(st, "DELIM", ")")
+        sea entonces: lista = parse_bloque(st)
         sea sino_ramas: lista = []
 
-        sea _sino_sigue: booleano = tok_es_key("sino")
+        sea _sino_sigue: booleano = tok_es_key(st, "sino")
         mientras (_sino_sigue) {
-            avanzar()
-            si (tok_es_key("si")) {
-                avanzar()
-                consumir("DELIM", "(")
-                sea cond2: cualquiera = parse_expr()
-                consumir("DELIM", ")")
-                sea bloque2: lista = parse_bloque()
+            avanzar(st)
+            si (tok_es_key(st, "si")) {
+                avanzar(st)
+                consumir(st, "DELIM", "(")
+                sea cond2: cualquiera = parse_expr(st)
+                consumir(st, "DELIM", ")")
+                sea bloque2: lista = parse_bloque(st)
                 sea rama: cualquiera = {}
                 rama["c"] = cond2
                 rama["b"] = bloque2
                 agregar(sino_ramas, rama)
-                _sino_sigue = tok_es_key("sino")
+                _sino_sigue = tok_es_key(st, "sino")
             } sino {
-                sea bloque_sino: lista = parse_bloque()
+                sea bloque_sino: lista = parse_bloque(st)
                 sea rama: cualquiera = {}
                 rama["c"] = nulo
                 rama["b"] = bloque_sino
@@ -916,11 +924,11 @@ funcion parse_stmt(): cualquiera {
 
     // mientras
     si (t["k"] == "KEY" y t["v"] == "mientras") {
-        avanzar()
-        consumir("DELIM", "(")
-        sea cond: cualquiera = parse_expr()
-        consumir("DELIM", ")")
-        sea cuerpo: lista = parse_bloque()
+        avanzar(st)
+        consumir(st, "DELIM", "(")
+        sea cond: cualquiera = parse_expr(st)
+        consumir(st, "DELIM", ")")
+        sea cuerpo: lista = parse_bloque(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "mien"
         nodo["c"] = cond
@@ -930,13 +938,13 @@ funcion parse_stmt(): cualquiera {
 
     // para x en colección
     si (t["k"] == "KEY" y t["v"] == "para") {
-        avanzar()
-        consumir("DELIM", "(")
-        sea var_nombre: cualquiera = consumir_tipo("ID")
-        consumir("KEY", "en")
-        sea iterable: cualquiera = parse_expr()
-        consumir("DELIM", ")")
-        sea cuerpo: lista = parse_bloque()
+        avanzar(st)
+        consumir(st, "DELIM", "(")
+        sea var_nombre: cualquiera = consumir_tipo(st, "ID")
+        consumir(st, "KEY", "en")
+        sea iterable: cualquiera = parse_expr(st)
+        consumir(st, "DELIM", ")")
+        sea cuerpo: lista = parse_bloque(st)
         sea nodo: cualquiera = {}
         nodo["k"] = "para"
         nodo["v"] = var_nombre["v"]
@@ -947,21 +955,21 @@ funcion parse_stmt(): cualquiera {
 
     // intentar / capturar
     si (t["k"] == "KEY" y t["v"] == "intentar") {
-        avanzar()
-        sea cuerpo: lista = parse_bloque()
+        avanzar(st)
+        sea cuerpo: lista = parse_bloque(st)
         sea err_nombre: texto = "e"
         sea cuerpo_cap: lista = []
-        si (tok_es_key("capturar")) {
-            avanzar()
-            consumir("DELIM", "(")
-            sea en: cualquiera = consumir_tipo("ID")
+        si (tok_es_key(st, "capturar")) {
+            avanzar(st)
+            consumir(st, "DELIM", "(")
+            sea en: cualquiera = consumir_tipo(st, "ID")
             err_nombre = en["v"]
-            si (tok_es_delim(":")) {
-                avanzar()
-                parse_tipo()
+            si (tok_es_delim(st, ":")) {
+                avanzar(st)
+                parse_tipo(st)
             }
-            consumir("DELIM", ")")
-            cuerpo_cap = parse_bloque()
+            consumir(st, "DELIM", ")")
+            cuerpo_cap = parse_bloque(st)
         }
         sea nodo: cualquiera = {}
         nodo["k"] = "try"
@@ -973,27 +981,27 @@ funcion parse_stmt(): cualquiera {
 
     // estructura
     si (t["k"] == "KEY" y t["v"] == "estructura") {
-        avanzar()
-        sea nombre: cualquiera = consumir_tipo("ID")
-        consumir("DELIM", "{")
+        avanzar(st)
+        sea nombre: cualquiera = consumir_tipo(st, "ID")
+        consumir(st, "DELIM", "{")
         sea campos: lista = []
         sea campo_tipos: lista = []
-        mientras (no tok_es_delim("}")) {
-            si (tok_es_key("funcion")) {
-                parse_stmt()
+        mientras (no tok_es_delim(st, "}")) {
+            si (tok_es_key(st, "funcion")) {
+                parse_stmt(st)
             } sino {
-                sea campo: cualquiera = consumir_tipo("ID")
+                sea campo: cualquiera = consumir_tipo(st, "ID")
                 sea ctipo: texto = "cualquiera"
-                si (tok_es_delim(":")) {
-                    avanzar()
-                    ctipo = parse_tipo()
+                si (tok_es_delim(st, ":")) {
+                    avanzar(st)
+                    ctipo = parse_tipo(st)
                 }
-                si (tok_es_delim(";")) { avanzar() }
+                si (tok_es_delim(st, ";")) { avanzar(st) }
                 agregar(campos, campo["v"])
                 agregar(campo_tipos, ctipo)
             }
         }
-        consumir("DELIM", "}")
+        consumir(st, "DELIM", "}")
         sea nodo: cualquiera = {}
         nodo["k"] = "struct"
         nodo["n"] = nombre["v"]
@@ -1004,9 +1012,9 @@ funcion parse_stmt(): cualquiera {
 
     // importar
     si (t["k"] == "KEY" y t["v"] == "importar") {
-        avanzar()
-        sea ruta: cualquiera = consumir_tipo("TEXT")
-        si (tok_es_delim(";")) { avanzar() }
+        avanzar(st)
+        sea ruta: cualquiera = consumir_tipo(st, "TEXT")
+        si (tok_es_delim(st, ";")) { avanzar(st) }
         sea nodo: cualquiera = {}
         nodo["k"] = "import"
         nodo["r"] = ruta["v"]
@@ -1014,18 +1022,18 @@ funcion parse_stmt(): cualquiera {
     }
 
     // Sentencia de expresión (asignación, llamada, etc.)
-    sea expr: cualquiera = parse_expr()
-    si (tok_es_delim(";")) { avanzar() }
+    sea expr: cualquiera = parse_expr(st)
+    si (tok_es_delim(st, ";")) { avanzar(st) }
     sea nodo: cualquiera = {}
     nodo["k"] = "expr_stmt"
     nodo["v"] = expr
     retornar nodo
 }
 
-funcion parse_programa(): lista {
+funcion parse_programa(st: cualquiera): lista {
     sea stmts: lista = []
-    mientras (tok_actual()["k"] != "EOF") {
-        agregar(stmts, parse_stmt())
+    mientras (tok_actual(st)["k"] != "EOF") {
+        agregar(stmts, parse_stmt(st))
     }
     retornar stmts
 }
@@ -1036,17 +1044,17 @@ funcion parse_programa(): lista {
 
 G_STATE["indent"] = 0
 
-funcion pad(): texto {
+funcion pad(st: cualquiera): texto {
     sea r: texto = ""
     sea i: numero = 0
-    mientras (i < G_STATE["indent"]) {
+    mientras (i < st["indent"]) {
         r = r + "  "
         i = i + 1
     }
     retornar r
 }
 
-funcion gen_expr(nodo: cualquiera): texto {
+funcion gen_expr(st: cualquiera, nodo: cualquiera): texto {
     si (tipo_de(nodo) == "nulo") { retornar "Value{}" }
 
     sea k: texto = nodo["k"]
@@ -1072,8 +1080,8 @@ funcion gen_expr(nodo: cualquiera): texto {
     }
 
     si (k == "bin") {
-        sea l: texto = gen_expr(nodo["l"])
-        sea r: texto = gen_expr(nodo["r"])
+        sea l: texto = gen_expr(st, nodo["l"])
+        sea r: texto = gen_expr(st, nodo["r"])
         sea op: texto = nodo["op"]
         si (op == "+") { retornar "_add(" + l + "," + r + ")" }
         si (op == "-") { retornar "_sub(" + l + "," + r + ")" }
@@ -1092,7 +1100,7 @@ funcion gen_expr(nodo: cualquiera): texto {
     }
 
     si (k == "un") {
-        sea v: texto = gen_expr(nodo["v"])
+        sea v: texto = gen_expr(st, nodo["v"])
         sea op: texto = nodo["op"]
         si (op == "!") { retornar "Value{!booleano(" + v + ")}" }
         si (op == "-") { retornar "Value{-numero(" + v + ")}" }
@@ -1105,7 +1113,7 @@ funcion gen_expr(nodo: cualquiera): texto {
         sea args_cpp: lista = []
         sea i: numero = 0
         mientras (i < longitud(args)) {
-            agregar(args_cpp, gen_expr(args[i]))
+            agregar(args_cpp, gen_expr(st, args[i]))
             i = i + 1
         }
         sea args_str: texto = juntar(args_cpp, ",")
@@ -1136,25 +1144,25 @@ funcion gen_expr(nodo: cualquiera): texto {
     }
 
     si (k == "idx") {
-        sea obj: texto = gen_expr(nodo["o"])
-        sea idx: texto = gen_expr(nodo["i"])
+        sea obj: texto = gen_expr(st, nodo["o"])
+        sea idx: texto = gen_expr(st, nodo["i"])
         retornar "_idx(" + obj + "," + idx + ")"
     }
 
     si (k == "dot") {
-        sea obj: texto = gen_expr(nodo["o"])
+        sea obj: texto = gen_expr(st, nodo["o"])
         sea campo: texto = nodo["f"]
         retornar "_campo(" + obj + ",\"" + campo + "\")"
     }
 
     si (k == "metodo") {
-        sea obj: texto = gen_expr(nodo["o"])
+        sea obj: texto = gen_expr(st, nodo["o"])
         sea metodo: texto = nodo["m"]
         sea args: lista = nodo["a"]
         sea args_cpp: lista = []
         sea i: numero = 0
         mientras (i < longitud(args)) {
-            agregar(args_cpp, gen_expr(args[i]))
+            agregar(args_cpp, gen_expr(st, args[i]))
             i = i + 1
         }
         sea args_str: texto = juntar(args_cpp, ",")
@@ -1169,7 +1177,7 @@ funcion gen_expr(nodo: cualquiera): texto {
         sea items_cpp: lista = []
         sea i: numero = 0
         mientras (i < longitud(items)) {
-            agregar(items_cpp, gen_expr(items[i]))
+            agregar(items_cpp, gen_expr(st, items[i]))
             i = i + 1
         }
         sea items_str: texto = juntar(items_cpp, ",")
@@ -1185,7 +1193,7 @@ funcion gen_expr(nodo: cualquiera): texto {
         sea pares: lista = []
         sea i: numero = 0
         mientras (i < longitud(claves)) {
-            agregar(pares, "{\"" + escapar_cpp(claves[i]) + "\"," + gen_expr(vals[i]) + "}")
+            agregar(pares, "{\"" + escapar_cpp(claves[i]) + "\"," + gen_expr(st, vals[i]) + "}")
             i = i + 1
         }
         retornar "_mk_mapa({" + juntar(pares, ",") + "})"
@@ -1194,11 +1202,11 @@ funcion gen_expr(nodo: cualquiera): texto {
     si (k == "asgn") {
         sea op: texto = nodo["op"]
         sea izq: cualquiera = nodo["l"]
-        sea der: texto = gen_expr(nodo["r"])
+        sea der: texto = gen_expr(st, nodo["r"])
 
         si (izq["k"] == "idx") {
-            sea obj: texto = gen_expr(izq["o"])
-            sea idx: texto = gen_expr(izq["i"])
+            sea obj: texto = gen_expr(st, izq["o"])
+            sea idx: texto = gen_expr(st, izq["i"])
             si (op == "=") {
                 retornar "asignar_indice(" + obj + "," + idx + "," + der + ")"
             }
@@ -1209,7 +1217,7 @@ funcion gen_expr(nodo: cualquiera): texto {
         }
 
         si (izq["k"] == "dot") {
-            sea obj: texto = gen_expr(izq["o"])
+            sea obj: texto = gen_expr(st, izq["o"])
             sea campo: texto = izq["f"]
             si (op == "=") {
                 retornar "_set_campo(" + obj + ",\"" + campo + "\"," + der + ")"
@@ -1217,7 +1225,7 @@ funcion gen_expr(nodo: cualquiera): texto {
         }
 
         // Variable simple
-        sea var_cpp: texto = gen_expr(izq)
+        sea var_cpp: texto = gen_expr(st, izq)
         si (op == "=") { retornar var_cpp + "=" + der }
         si (op == "+=") { retornar var_cpp + "=cfv_add(" + var_cpp + "," + der + ")" }
         si (op == "-=") { retornar var_cpp + "=Value{numero(" + var_cpp + ")-numero(" + der + ")}" }
@@ -1229,15 +1237,15 @@ funcion gen_expr(nodo: cualquiera): texto {
     retornar "Value{}"
 }
 
-funcion gen_stmt(nodo: cualquiera): texto {
+funcion gen_stmt(st: cualquiera, nodo: cualquiera): texto {
     sea k: texto = nodo["k"]
-    sea p: texto = pad()
+    sea p: texto = pad(st)
 
     si (k == "var") {
         sea nombre_cpp: texto = safe(nodo["n"])
         sea val_str: texto = "Value{}"
         si (nodo["v"] != nulo) {
-            val_str = gen_expr(nodo["v"])
+            val_str = gen_expr(st, nodo["v"])
         }
         retornar p + "Value " + nombre_cpp + "=" + val_str + ";\n"
     }
@@ -1253,13 +1261,13 @@ funcion gen_stmt(nodo: cualquiera): texto {
         }
         sea params_str: texto = juntar(params_cpp, ",")
         sea r: texto = p + "Value " + nombre_cpp + "(" + params_str + "){\n"
-        G_STATE["indent"] = G_STATE["indent"] + 1
+        st["indent"] = st["indent"] + 1
         sea i2: numero = 0
         mientras (i2 < longitud(nodo["b"])) {
-            r = r + gen_stmt(nodo["b"][i2])
+            r = r + gen_stmt(st, nodo["b"][i2])
             i2 = i2 + 1
         }
-        G_STATE["indent"] = G_STATE["indent"] - 1
+        st["indent"] = st["indent"] - 1
         r = r + p + "return Value{};}\n"
         retornar r
     }
@@ -1268,7 +1276,7 @@ funcion gen_stmt(nodo: cualquiera): texto {
         si (nodo["v"] == nulo) {
             retornar p + "return Value{};\n"
         }
-        retornar p + "return " + gen_expr(nodo["v"]) + ";\n"
+        retornar p + "return " + gen_expr(st, nodo["v"]) + ";\n"
     }
 
     si (k == "rom") {
@@ -1280,35 +1288,35 @@ funcion gen_stmt(nodo: cualquiera): texto {
     }
 
     si (k == "throw") {
-        retornar p + "throw std::runtime_error(texto(" + gen_expr(nodo["v"]) + "));\n"
+        retornar p + "throw std::runtime_error(texto(" + gen_expr(st, nodo["v"]) + "));\n"
     }
 
     si (k == "si") {
-        sea r: texto = p + "if(booleano(" + gen_expr(nodo["c"]) + ")){\n"
-        G_STATE["indent"] = G_STATE["indent"] + 1
+        sea r: texto = p + "if(booleano(" + gen_expr(st, nodo["c"]) + ")){\n"
+        st["indent"] = st["indent"] + 1
         sea i: numero = 0
         mientras (i < longitud(nodo["t"])) {
-            r = r + gen_stmt(nodo["t"][i])
+            r = r + gen_stmt(st, nodo["t"][i])
             i = i + 1
         }
-        G_STATE["indent"] = G_STATE["indent"] - 1
+        st["indent"] = st["indent"] - 1
         r = r + p + "}"
         sea ramas: lista = nodo["e"]
         sea j: numero = 0
         mientras (j < longitud(ramas)) {
             sea rama: cualquiera = ramas[j]
             si (rama["c"] != nulo) {
-                r = r + " else if(booleano(" + gen_expr(rama["c"]) + ")){\n"
+                r = r + " else if(booleano(" + gen_expr(st, rama["c"]) + ")){\n"
             } sino {
                 r = r + " else{\n"
             }
-            G_STATE["indent"] = G_STATE["indent"] + 1
+            st["indent"] = st["indent"] + 1
             sea i2: numero = 0
             mientras (i2 < longitud(rama["b"])) {
-                r = r + gen_stmt(rama["b"][i2])
+                r = r + gen_stmt(st, rama["b"][i2])
                 i2 = i2 + 1
             }
-            G_STATE["indent"] = G_STATE["indent"] - 1
+            st["indent"] = st["indent"] - 1
             r = r + p + "}"
             j = j + 1
         }
@@ -1317,32 +1325,32 @@ funcion gen_stmt(nodo: cualquiera): texto {
     }
 
     si (k == "mien") {
-        sea r: texto = p + "while(booleano(" + gen_expr(nodo["c"]) + ")){\n"
-        G_STATE["indent"] = G_STATE["indent"] + 1
+        sea r: texto = p + "while(booleano(" + gen_expr(st, nodo["c"]) + ")){\n"
+        st["indent"] = st["indent"] + 1
         sea i: numero = 0
         mientras (i < longitud(nodo["b"])) {
-            r = r + gen_stmt(nodo["b"][i])
+            r = r + gen_stmt(st, nodo["b"][i])
             i = i + 1
         }
-        G_STATE["indent"] = G_STATE["indent"] - 1
+        st["indent"] = st["indent"] - 1
         r = r + p + "}\n"
         retornar r
     }
 
     si (k == "para") {
         sea var_cpp: texto = safe(nodo["v"])
-        sea iter: texto = gen_expr(nodo["i"])
+        sea iter: texto = gen_expr(st, nodo["i"])
         sea tmp: texto = var_cpp + "_iter"
         sea r: texto = p + "{\nValue " + tmp + "=" + iter + ";\n"
         r = r + p + "auto " + var_cpp + "_lst=std::get_if<Lista>(&" + tmp + ".data);\n"
         r = r + p + "if(" + var_cpp + "_lst){for(Value " + var_cpp + ":*(*" + var_cpp + "_lst)){\n"
-        G_STATE["indent"] = G_STATE["indent"] + 1
+        st["indent"] = st["indent"] + 1
         sea i: numero = 0
         mientras (i < longitud(nodo["b"])) {
-            r = r + gen_stmt(nodo["b"][i])
+            r = r + gen_stmt(st, nodo["b"][i])
             i = i + 1
         }
-        G_STATE["indent"] = G_STATE["indent"] - 1
+        st["indent"] = st["indent"] - 1
         r = r + p + "}}\n"
         r = r + p + "}\n"
         retornar r
@@ -1350,31 +1358,31 @@ funcion gen_stmt(nodo: cualquiera): texto {
 
     si (k == "try") {
         sea r: texto = p + "try{\n"
-        G_STATE["indent"] = G_STATE["indent"] + 1
+        st["indent"] = st["indent"] + 1
         sea i: numero = 0
         mientras (i < longitud(nodo["b"])) {
-            r = r + gen_stmt(nodo["b"][i])
+            r = r + gen_stmt(st, nodo["b"][i])
             i = i + 1
         }
-        G_STATE["indent"] = G_STATE["indent"] - 1
+        st["indent"] = st["indent"] - 1
         r = r + p + "} catch(const std::exception& " + safe(nodo["en"]) + "_ex){\n"
         r = r + p + "  Value " + safe(nodo["en"]) + "=Value{std::string(" + safe(nodo["en"]) + "_ex.what())};\n"
-        G_STATE["indent"] = G_STATE["indent"] + 1
+        st["indent"] = st["indent"] + 1
         sea j: numero = 0
         mientras (j < longitud(nodo["eb"])) {
-            r = r + gen_stmt(nodo["eb"][j])
+            r = r + gen_stmt(st, nodo["eb"][j])
             j = j + 1
         }
-        G_STATE["indent"] = G_STATE["indent"] - 1
+        st["indent"] = st["indent"] - 1
         r = r + p + "} catch(const Value& " + safe(nodo["en"]) + "_v){\n"
         r = r + p + "  Value " + safe(nodo["en"]) + "=" + safe(nodo["en"]) + "_v;\n"
-        G_STATE["indent"] = G_STATE["indent"] + 1
+        st["indent"] = st["indent"] + 1
         sea j2: numero = 0
         mientras (j2 < longitud(nodo["eb"])) {
-            r = r + gen_stmt(nodo["eb"][j2])
+            r = r + gen_stmt(st, nodo["eb"][j2])
             j2 = j2 + 1
         }
-        G_STATE["indent"] = G_STATE["indent"] - 1
+        st["indent"] = st["indent"] - 1
         r = r + p + "}\n"
         retornar r
     }
@@ -1412,7 +1420,7 @@ funcion gen_stmt(nodo: cualquiera): texto {
         sea args_cpp: lista = []
         sea i: numero = 0
         mientras (i < longitud(args)) {
-            agregar(args_cpp, gen_expr(args[i]))
+            agregar(args_cpp, gen_expr(st, args[i]))
             i = i + 1
         }
         sea args_str: texto = juntar(args_cpp, ",")
@@ -1428,12 +1436,12 @@ funcion gen_stmt(nodo: cualquiera): texto {
     si (k == "expr_stmt") {
         sea e: cualquiera = nodo["v"]
         si (e["k"] == "asgn") {
-            retornar p + gen_expr(e) + ";\n"
+            retornar p + gen_expr(st, e) + ";\n"
         }
         si (e["k"] == "call") {
-            retornar p + gen_expr(e) + ";\n"
+            retornar p + gen_expr(st, e) + ";\n"
         }
-        retornar p + gen_expr(e) + ";\n"
+        retornar p + gen_expr(st, e) + ";\n"
     }
 
     retornar ""
@@ -1472,7 +1480,7 @@ G_STATE["toks"] = tokenizar(fuente)
 G_STATE["pos"] = 0
 
 // Parsear
-sea programa: lista = parse_programa()
+sea programa: lista = parse_programa(G_STATE)
 
 // Leer RUNTIME
 sea runtime_path: texto = "runtime.cpp"
@@ -1501,10 +1509,10 @@ mientras (i < longitud(programa)) {
         agregar(prototipos, "Value " + nombre_cpp + "(" + juntar(params_cpp, ",") + ");")
         // Función completa
         G_STATE["indent"] = 0
-        agregar(funciones, gen_stmt(stmt))
+        agregar(funciones, gen_stmt(G_STATE, stmt))
     } sino {
         G_STATE["indent"] = 1
-        main_code = main_code + gen_stmt(stmt)
+        main_code = main_code + gen_stmt(G_STATE, stmt)
     }
     i = i + 1
 }
