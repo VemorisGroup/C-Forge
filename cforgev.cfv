@@ -767,6 +767,19 @@ funcion eval_builtin(nombre: texto, args: lista, env: lista, fns: cualquiera): c
         afirmar(longitud(args) == 1, "leer_archivo requiere un argumento")
         retornar leer_archivo(args[0])
     }
+    si (nombre == "escribir_archivo") {
+        afirmar(longitud(args) == 2, "escribir_archivo requiere dos argumentos")
+        escribir_archivo(args[0], args[1])
+        retornar verdadero
+    }
+    si (nombre == "sys_run") {
+        afirmar(longitud(args) == 1, "sys_run requiere un argumento")
+        retornar sys_run(args[0])
+    }
+    si (nombre == "existe_archivo") {
+        afirmar(longitud(args) == 1, "existe_archivo requiere un argumento")
+        retornar existe_archivo(args[0])
+    }
     si (nombre == "afirmar") {
         si (longitud(args) == 2) {
             afirmar(args[0], args[1])
