@@ -1,32 +1,28 @@
 # Líneas de fin de archivo
-*.cfv text eol=lf
-*.py  text eol=lf
-*.cpp text eol=lf
-*.h   text eol=lf
+*.cfv  text eol=lf
+*.cpp  text eol=lf
+*.h    text eol=lf
 *.json text eol=lf
-*.md  text eol=lf
-*.svg text eol=lf
+*.md   text eol=lf
+*.sh   text eol=lf
+*.yml  text eol=lf
 
 # Binarios
 outputs/cforge-master binary
 *.png  binary
 *.vsix binary
+*.exe  binary
 
-# GitHub Linguist — estadísticas de lenguaje
-# Los .cfv son el lenguaje C-Forge
+# GitHub Linguist — C-Forge es el lenguaje del repo
 *.cfv linguist-language=C-Forge linguist-detectable=true
 
-# Código generado desde .cfv — no contar
+# Todo lo demás no cuenta en las estadísticas
 *.cpp linguist-generated=true
 *.h   linguist-generated=true
 *.ll  linguist-generated=true
 *.s   linguist-generated=true
-
-# Herramientas de soporte — no contar
 *.sh  linguist-vendored=true
 *.js  linguist-vendored=true
 *.cs  linguist-vendored=true
 *.c   linguist-vendored=true
 *.rb  linguist-vendored=true
-herramientas/vscode-cforgev/* linguist-vendored=true
-ejemplos/interop/CSharpNative/** linguist-vendored=true
