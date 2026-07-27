@@ -43,19 +43,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y clang
 
-      - name: Install clang++ (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Verify clang++ available (Windows)
+      - name: Add clang++ to PATH (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          # MSVC cl.exe disponible; crear wrapper clang++ → cl para compilador_nativo.py
-          which cl || true
-          # El compilador_nativo.py llama clang++ — instalamos LLVM en Windows
-          choco install llvm --no-progress -y
+          # Windows runners traen LLVM preinstalado en C:/Program Files/LLVM/bin
           echo "C:/Program Files/LLVM/bin" >> $GITHUB_PATH
+          clang++ --version || echo "clang++ no encontrado en ruta default"
 
       - name: Compile cforgev.cfv → native binary
         shell: bash
@@ -73,8 +67,8 @@ jobs:
       - name: Smoke test
         shell: bash
         run: |
-          echo 'mostrar("C-Forge native OK en ${{ matrix.platform }}")' > /tmp/smoke.cfv
-          ./${{ matrix.binary }} /tmp/smoke.cfv
+          echo 'mostrar("C-Forge native OK en ${{ matrix.platform }}")' > smoke.cfv
+          ./${{ matrix.binary }} smoke.cfv
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
