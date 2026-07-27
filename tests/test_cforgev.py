@@ -493,6 +493,20 @@ std::cout << value << std::endl;
         """
         self.assertEqual(self.output(source), "30\nJavier\n3\n")
 
+    def test_modulo_operator_works_in_interpreter_and_vm(self) -> None:
+        source = """
+        sea a: numero = 17
+        sea b: numero = 5
+        mostrar(a % b)
+        mostrar(100 % 7)
+        mostrar(256 % 256)
+        """
+        self.assertEqual(self.output(source), "2\n2\n0\n")
+        from cforge_vm import VirtualMachine, compile_source
+        vm_out: list[str] = []
+        VirtualMachine(compile_source(source), output=vm_out.append).run()
+        self.assertEqual("\n".join(vm_out) + "\n", "2\n2\n0\n")
+
     @unittest.skipUnless(shutil.which("clang++"), "clang++ no disponible")
     def test_text_indexing_is_identical_in_interpreter_vm_and_native(self) -> None:
         source = 'sea lenguaje = "C-Forge"; mostrar(lenguaje[0]); mostrar(lenguaje[2]);'

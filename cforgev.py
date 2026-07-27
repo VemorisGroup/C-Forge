@@ -239,7 +239,7 @@ def ensure_system_dependency(
 TOKEN_RE = re.compile(
     r"(?P<SPACE>[ \t\r]+)|(?P<COMMENT>//[^\n]*)|(?P<NEWLINE>\n)|"
     r'(?P<STRING>"(?:\\.|[^"\\])*")|(?P<NUMBER>\d+(?:\.\d+)?)|'
-    r"(?P<IDENT>[A-Za-z_][A-Za-z0-9_]*)|(?P<OP><<|==|!=|>=|<=|[+\-*/=(),;.:{}<>\[\]])|(?P<BAD>.)"
+    r"(?P<IDENT>[A-Za-z_][A-Za-z0-9_]*)|(?P<OP><<|==|!=|>=|<=|[+\-*/%=(),;.:{}<>\[\]])|(?P<BAD>.)"
 )
 
 
@@ -987,7 +987,7 @@ class Interpreter:
 
     def term(self) -> object:
         value = self.unary()
-        while self.match_value("*", "/"):
+        while self.match_value("*", "/", "%"):
             op = self.previous()
             right = self.unary()
             value = calculate(value, op, right)
@@ -1870,6 +1870,10 @@ def calculate(left: object, op: Token, right: object) -> object:
         return left - right
     if op.value == "*":
         return left * right
+    if op.value == "%":
+        if right == 0:
+            raise CForgevError(f"Línea {op.line}: no se puede dividir por cero en módulo")
+        return int(left) % int(right)
     if right == 0:
         raise CForgevError(f"Línea {op.line}: no se puede dividir por cero")
     return left / right

@@ -521,6 +521,9 @@ class VirtualMachine:
         if op == "/":
             if right == 0: raise CForgevError("VM: no se puede dividir por cero")
             return left / right
+        if op == "%":
+            if right == 0: raise CForgevError("VM: no se puede dividir por cero en módulo")
+            return int(left) % int(right)
         if op == "==": return left == right
         if op == "!=": return left != right
         if op == ">": return left > right
