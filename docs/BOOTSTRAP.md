@@ -113,6 +113,13 @@ documentan en [`RUNTIME-AUTONOMY.md`](RUNTIME-AUTONOMY.md). Esta fase demuestra
 autonomía de ejecución del runtime Core; todavía no elimina `clang++` del flujo
 de compilación.
 
+B6.2 inicia esa eliminación con un backend escrito en C-Forge que emite
+directamente ELF64 y opcodes x86-64 para el programa mínimo
+`mostrar("texto")`. Su prueba bloquea compilador, ensamblador y enlazador
+externos durante la emisión. Sigue siendo un corte inicial: la compilación
+general conserva el backend C++ mientras se implementan los objetivos Mach-O,
+PE y el resto de la semántica Core.
+
 Construcción manual:
 
 ```bash

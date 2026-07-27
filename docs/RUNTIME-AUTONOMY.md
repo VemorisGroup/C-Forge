@@ -32,3 +32,23 @@ paquetes ejecutable sin runtimes externos.
 
 Por tanto, superar B6.1 demuestra **autonomía de ejecución del runtime Core**,
 pero no autonomía completa de la toolchain.
+
+## B6.2: primer backend de código máquina directo
+
+`bootstrap/direct/cforge_elf_x64.cfv` implementa en C-Forge un emisor ELF64 para
+x86-64. Construye directamente:
+
+- la cabecera ELF;
+- una tabla de un segmento ejecutable;
+- opcodes x86-64 para `write` y `exit`;
+- los datos del literal de `mostrar`;
+- los permisos ejecutables del archivo final.
+
+Durante la emisión, la prueba bloquea `clang++`, `clang`, GCC, `cc`, `ld`, `as`
+y Python. El resultado se valida byte por byte y se ejecuta cuando la prueba
+corre sobre Linux x86-64.
+
+Este es el primer corte vertical de compilación directa. Todavía no sustituye
+el backend general: solo acepta el programa mínimo `mostrar("texto")` y el
+formato inicial es ELF64/x86-64. Mach-O ARM64, PE x64, expresiones, variables,
+control de flujo y el runtime completo permanecen pendientes.

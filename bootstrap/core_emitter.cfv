@@ -170,6 +170,19 @@ funcion emitir_llamada_core(
         retornar "cfv_remove_file(" +
             emitir_expresion_core(argumentos[0], contexto) + ")"
     }
+    si (nombre == "bytes_texto") {
+        retornar "cfv_text_bytes(" +
+            emitir_expresion_core(argumentos[0], contexto) + ")"
+    }
+    si (nombre == "escribir_bytes") {
+        retornar "cfv_write_bytes(" +
+            emitir_expresion_core(argumentos[0], contexto) + ", " +
+            emitir_expresion_core(argumentos[1], contexto) + ")"
+    }
+    si (nombre == "hacer_ejecutable") {
+        retornar "cfv_make_executable(" +
+            emitir_expresion_core(argumentos[0], contexto) + ")"
+    }
     si (nombre == "compilar_cpp_nativo") {
         retornar "cfv_compile_cpp(" +
             emitir_expresion_core(argumentos[0], contexto) + ", " +

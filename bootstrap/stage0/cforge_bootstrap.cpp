@@ -800,6 +800,16 @@ private:
         if (name.text == "eliminar_archivo") {
             return "cfv_remove_file(" + one(name, args) + ")";
         }
+        if (name.text == "bytes_texto") {
+            return "cfv_text_bytes(" + one(name, args) + ")";
+        }
+        if (name.text == "escribir_bytes") {
+            if (args.size() != 2) fail(name, "escribir_bytes requiere dos argumentos");
+            return "cfv_write_bytes(" + args[0] + ", " + args[1] + ")";
+        }
+        if (name.text == "hacer_ejecutable") {
+            return "cfv_make_executable(" + one(name, args) + ")";
+        }
         if (name.text == "compilar_cpp_nativo") {
             if (args.size() != 2) fail(name, "compilar_cpp_nativo requiere dos argumentos");
             return "cfv_compile_cpp(" + args[0] + ", " + args[1] + ")";
@@ -867,6 +877,7 @@ private:
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <sys/stat.h>
 #include <variant>
 #include <vector>
 
@@ -1038,6 +1049,32 @@ static Value cfv_write_file(const Value& path_value, const Value& content_value)
 static Value cfv_remove_file(const Value& path_value) {
     const std::string path = cfv_required_text(path_value, "eliminar_archivo");
     return Value(std::remove(path.c_str()) == 0);
+}
+static Value cfv_text_bytes(const Value& text_value) {
+    const std::string text = cfv_required_text(text_value, "bytes_texto");
+    std::vector<Value> bytes;
+    bytes.reserve(text.size());
+    for (const unsigned char byte : text)
+        bytes.emplace_back(static_cast<double>(byte));
+    return cfv_list(bytes);
+}
+static Value cfv_write_bytes(const Value& path_value, const Value& bytes_value) {
+    const std::string path = cfv_required_text(path_value, "escribir_bytes");
+    const auto* bytes = std::get_if<std::shared_ptr<List>>(&bytes_value.data);
+    if (!bytes) throw std::runtime_error("escribir_bytes requiere una lista");
+    std::ofstream stream(path, std::ios::binary);
+    if (!stream) throw std::runtime_error("no se pudo escribir " + path);
+    for (const Value& value : **bytes) {
+        const double number = cfv_num(value);
+        if (number < 0 || number > 255 || std::floor(number) != number)
+            throw std::runtime_error("byte fuera de rango");
+        stream.put(static_cast<char>(static_cast<unsigned char>(number)));
+    }
+    return Value(static_cast<bool>(stream));
+}
+static Value cfv_make_executable(const Value& path_value) {
+    const std::string path = cfv_required_text(path_value, "hacer_ejecutable");
+    return Value(::chmod(path.c_str(), 0755) == 0);
 }
 static std::string cfv_shell_quote(const std::string& value) {
     std::string quoted = "'";
