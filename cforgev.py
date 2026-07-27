@@ -2178,7 +2178,7 @@ def repair_source(source: str) -> tuple[str, list[str]]:
     for damaged, replacement in smart.items():
         if damaged in repaired:
             repaired = repaired.replace(damaged, replacement)
-            changes.append(f"comilla tipográfica {damaged!r} → {replacement!r}")
+            changes.append(f"comilla tipografica {damaged!r} -> {replacement!r}")
     keywords = [
         "mostrar", "funcion", "retornar", "mientras", "estructura", "clase",
         "intentar", "capturar", "import", "usar", "gpu", "sea", "si", "sino",
@@ -2192,7 +2192,7 @@ def repair_source(source: str) -> tuple[str, list[str]]:
         if nearest:
             old, new = match.group(2), nearest[0]
             lines[index] = line[:match.start(2)] + new + line[match.end(2):]
-            changes.append(f"línea {index + 1}: {old!r} → {new!r}")
+            changes.append(f"linea {index + 1}: {old!r} -> {new!r}")
     repaired = "".join(lines)
     pairs = [("{", "}"), ("(", ")"), ("[", "]")]
     suffix = ""

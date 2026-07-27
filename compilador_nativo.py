@@ -802,7 +802,7 @@ class StaticTypeAnalyzer:
                     f"Inferencia estática: '{expression[1]}' requiere números, recibió {left} y {right}"
                 )
             if expression[1] == "+" and left != "cualquiera" and right != "cualquiera" and left != right:
-                # Allow combining generic list types (lista<X> + lista<Y> → lista)
+                # Allow combining generic list types (lista<X> + lista<Y> -> lista)
                 left_base = left.split("<")[0]
                 right_base = right.split("<")[0]
                 if left_base != right_base:

@@ -53,7 +53,9 @@ jobs:
 
       - name: Compile cforgev.cfv to native binary
         shell: bash
-        run: python3 tools/build_native.py cforgev.cfv ${{ matrix.binary }}
+        env:
+          PYTHONUTF8: "1"
+        run: python3 -X utf8 tools/build_native.py cforgev.cfv ${{ matrix.binary }}
 
       - name: Smoke test
         shell: bash

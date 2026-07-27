@@ -2,6 +2,11 @@
 import sys
 import io
 import os
+from pathlib import Path
+
+# Añadir el directorio raíz del repo a sys.path (este script vive en tools/)
+repo_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(repo_root))
 
 # Forzar UTF-8 en stdout/stderr antes de cualquier import
 if hasattr(sys.stdout, 'buffer'):
@@ -11,7 +16,6 @@ if hasattr(sys.stderr, 'buffer'):
 
 os.environ.setdefault('PYTHONUTF8', '1')
 
-from pathlib import Path
 from compilador_nativo import compile_native
 
 if len(sys.argv) < 3:
