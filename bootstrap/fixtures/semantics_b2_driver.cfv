@@ -1,0 +1,29 @@
+// Corpus normativo B2. Se concatena tras lexer, AST, parser y semántica.
+
+sea fuente_valida_b2: texto =
+    "sea titulo: texto = \"C-Forge\"\n" +
+    "sea copia: texto = mover(titulo)\n" +
+    "sea base: numero = 40\n" +
+    "sea copia_base: numero = mover(base)\n" +
+    "mostrar(base + 2)\n"
+sea resultado_valido_b2: cualquiera =
+    analizar_semantica_core(parsear_fuente_core(fuente_valida_b2))
+mostrar(resultado_valido_b2.valido)
+
+sea fuente_tipo_b2: texto = "sea edad: numero = \"veinte\"\n"
+sea resultado_tipo_b2: cualquiera =
+    analizar_semantica_core(parsear_fuente_core(fuente_tipo_b2))
+mostrar(diagnosticos_semanticos_core(resultado_tipo_b2))
+
+sea fuente_desconocida_b2: texto = "mostrar(fantasma)\n"
+sea resultado_desconocida_b2: cualquiera =
+    analizar_semantica_core(parsear_fuente_core(fuente_desconocida_b2))
+mostrar(diagnosticos_semanticos_core(resultado_desconocida_b2))
+
+sea fuente_movida_b2: texto =
+    "sea nombre: texto = \"Javier\"\n" +
+    "sea destino: texto = mover(nombre)\n" +
+    "mostrar(nombre)\n"
+sea resultado_movida_b2: cualquiera =
+    analizar_semantica_core(parsear_fuente_core(fuente_movida_b2))
+mostrar(diagnosticos_semanticos_core(resultado_movida_b2))

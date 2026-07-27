@@ -1,0 +1,42 @@
+(* C-Forge Core Bootstrap 0.4 — gramática congelada para B3.
+   Esta no es la gramática completa de C-Forge 2.0. Es el subconjunto que
+   Stage 0 compila para construir las primeras etapas autoalojadas. *)
+
+programa          = { sentencia }, EOF ;
+
+sentencia         = declaracion | impresion ;
+
+declaracion       = "sea", identificador, [ ":", tipo_core ],
+                    "=", expresion, [ ";" ] ;
+
+impresion         = ( "mostrar" | "print" ), "(",
+                    expresion, ")", [ ";" ] ;
+
+expresion         = producto, { ( "+" | "-" ), producto } ;
+producto          = primaria, { ( "*" | "/" ), primaria } ;
+primaria          = numero | texto | identificador |
+                    "mover", "(", expresion, ")" |
+                    "(", expresion, ")" ;
+
+tipo_core         = "numero" | "texto" ;
+identificador     = letra_o_guion, { letra_o_guion | digito } ;
+numero            = digito, { digito }, [ ".", digito, { digito } ] ;
+texto             = '"', { caracter | escape }, '"' ;
+escape            = "\", ( "\" | '"' | "n" | "r" | "t" ) ;
+letra_o_guion     = "A"…"Z" | "a"…"z" | "_" ;
+digito            = "0"…"9" ;
+
+(* AST canónico Core AST 1:
+   nodo = tipo, ":", largo_decimal, ":", valor_escapado,
+          "@", linea_decimal, "[", [ nodo, { ",", nodo } ], "]" ;
+
+   Tipos de nodo:
+   Programa      valor="Core-0.4", hijos=sentencias
+   Declaracion   valor="nombre:tipo" (tipo vacío si fue inferido), hijos=[valor]
+   Mostrar       valor="mostrar"|"print", hijos=[expresión]
+   Binario       valor=operador, hijos=[izquierdo,derecho]
+   Numero        valor=lexema, hijos=[]
+   Texto         valor=lexema incluyendo comillas, hijos=[]
+   Identificador valor=nombre, hijos=[]
+   Mover         valor="mover", hijos=[expresión]
+*)

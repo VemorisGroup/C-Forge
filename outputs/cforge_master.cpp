@@ -8366,8 +8366,8 @@ def reports_json(reports: list[ParityReport]) -> str:
       "id": "autonomous-native-core",
       "name": "Compilador autoalojado y núcleo autónomo",
       "status": "planned",
-      "scope": "Stage 0 C++ mínimo produce ejecutables y el lexer Stage 1 está escrito en C-Forge; parser, emisor, Stage 1/2/3 y runtime autónomo siguen pendientes",
-      "evidence": ["docs/COMPLETENESS-POLICY.md", "docs/BOOTSTRAP.md", "docs/CORE-DIRECTION.md", "bootstrap/stage0/cforge_bootstrap.cpp", "bootstrap/core_lexer.cfv", "tests/test_bootstrap_stage0.py"]
+      "scope": "B3 verificado: Stage 0 compila lexer, AST, parser, tipos/ownership y emisor Core 0.4 escritos en C-Forge; Stage 1/2/3 y runtime autónomo siguen pendientes",
+      "evidence": ["docs/COMPLETENESS-POLICY.md", "docs/BOOTSTRAP.md", "docs/CORE-DIRECTION.md", "docs/CORE-GRAMMAR-0.4.ebnf", "docs/C-FORGE-2.0-DRAFT.md", "docs/GRAMMAR-2.0-DRAFT.ebnf", "bootstrap/stage0/cforge_bootstrap.cpp", "bootstrap/fixtures/minimal.cfv", "bootstrap/core_lexer.cfv", "bootstrap/core_ast.cfv", "bootstrap/core_parser.cfv", "bootstrap/core_semantics.cfv", "bootstrap/core_emitter.cfv", "bootstrap/fixtures/parser_b1_driver.cfv", "bootstrap/fixtures/semantics_b2_driver.cfv", "bootstrap/fixtures/emitter_b3_driver.cfv", "tests/test_bootstrap_stage0.py", "tests/test_bootstrap_b1.py", "tests/test_bootstrap_b2.py", "tests/test_bootstrap_b3.py", "tests/test_professional_tooling.py"]
     },
     {
       "id": "critical-production",
@@ -8386,6 +8386,11 @@ def reports_json(reports: list[ParityReport]) -> str:
 C-Forge será autoalojado cuando un compilador escrito íntegramente en `.cfv`
 pueda compilar su propio código fuente y las generaciones consecutivas sean
 reproducibles. Los puentes políglotas no forman parte de este núcleo.
+
+El lenguaje que deberá implementar el compilador autoalojado está definido por
+[`C-FORGE-2.0-DRAFT.md`](C-FORGE-2.0-DRAFT.md) y
+[`GRAMMAR-2.0-DRAFT.ebnf`](GRAMMAR-2.0-DRAFT.ebnf). Ambos son contratos
+candidatos; el subconjunto Core crece de forma controlada hasta cubrirlos.
 
 ## Definiciones verificables
 
@@ -8428,21 +8433,40 @@ compile y ejecute el artefacto nativo sin invocar Python.
 | Hito | Implementación `.cfv` | Criterio de salida |
 |---|---|---|
 | B0 | Stage 0 C++ + lexer Stage 1 | Stage 0 produce un ejecutable; lexer `.cfv` pasa intérprete y VM |
-| B1 | Parser escrito en C-Forge | AST canónico igual para la suite Core |
-| B2 | Tipos y ownership escritos en C-Forge | Diagnósticos iguales para casos positivos y negativos |
-| B3 | Emisor nativo escrito en C-Forge | Produce el artefacto que ejecutará Stage 1 |
+| B1 | Parser escrito en C-Forge | **Cumplido:** AST canónico igual en Stage 0, intérprete y VM para la suite Core 0.2 |
+| B2 | Tipos y ownership escritos en C-Forge | **Cumplido:** tipos, variable no declarada y uso después de mover producen diagnósticos iguales en los tres motores |
+| B3 | Emisor nativo escrito en C-Forge | **Cumplido:** Stage 0 compila el emisor `.cfv`, que produce C++17 y un ejecutable nativo verificado |
 | B4 | Compilador Stage 1 | Compila todas sus propias fuentes `.cfv` |
 | B5 | Stage 2/3 | Artefactos reproducibles equivalentes |
 | B6 | Runtime autónomo | Funciona sin runtimes externos instalados |
 
 ## Estado actual
 
-**B0 en progreso verificable.**
+**B3 completado de forma verificable; B4 es el siguiente hito.**
 
 - `bootstrap/stage0/cforge_bootstrap.cpp` es el compilador inicial C++.
 - `bootstrap/fixtures/minimal.cfv` se convierte en un ejecutable de máquina real.
 - `bootstrap/core_lexer.cfv` es el primer componente de Stage 1 escrito en
   C-Forge.
+- `bootstrap/core_ast.cfv` define el árbol independiente del runtime anfitrión.
+- `bootstrap/core_parser.cfv` implementa el parser recursivo descendente.
+- `bootstrap/core_semantics.cfv` implementa tipos y ownership Core.
+- `bootstrap/core_emitter.cfv` genera una unidad C++17 completa desde el AST
+  aprobado por B2.
+- `docs/CORE-GRAMMAR-0.4.ebnf` congela exactamente el subconjunto aceptado.
+- `tests/test_bootstrap_b1.py` compila la unidad B1 con Stage 0 y exige que
+  Stage 0, intérprete y VM emitan bytes idénticos para el AST canónico.
+
+B3 cubre toda la gramática **Core 0.4**, no la gramática general de C-Forge
+2.0. `numero` es copiable; `texto` tiene ownership y `mover(texto)` invalida el
+origen. El analizador detecta tipos incompatibles, variables no declaradas y uso
+después de mover. Préstamos, tiempos de vida, regiones, clases del usuario,
+módulos y el resto del lenguaje se añadirán solo cuando los hitos posteriores
+los necesiten y posean pruebas normativas.
+
+La prueba B3 compila el emisor con Stage 0, compara el C++ generado por Stage 0,
+intérprete y VM, compila ese C++ con el compilador del sistema y ejecuta el
+binario resultante. Un AST rechazado por B2 nunca se convierte en C++.
 
 Construcción manual:
 
@@ -8514,7 +8538,760 @@ Una instalación limpia debe poder:
 
 Hasta cumplirlo, el estado público seguirá siendo Developer Preview.
 )CFV27DATA"},
-        {R"CFV28DATA(bootstrap/core_lexer.cfv)CFV28DATA", R"CFV29DATA(// Primer componente del compilador de C-Forge escrito en C-Forge.
+        {R"CFV28DATA(docs/CORE-GRAMMAR-0.4.ebnf)CFV28DATA", R"CFV29DATA((* C-Forge Core Bootstrap 0.4 — gramática congelada para B3.
+   Esta no es la gramática completa de C-Forge 2.0. Es el subconjunto que
+   Stage 0 compila para construir las primeras etapas autoalojadas. *)
+
+programa          = { sentencia }, EOF ;
+
+sentencia         = declaracion | impresion ;
+
+declaracion       = "sea", identificador, [ ":", tipo_core ],
+                    "=", expresion, [ ";" ] ;
+
+impresion         = ( "mostrar" | "print" ), "(",
+                    expresion, ")", [ ";" ] ;
+
+expresion         = producto, { ( "+" | "-" ), producto } ;
+producto          = primaria, { ( "*" | "/" ), primaria } ;
+primaria          = numero | texto | identificador |
+                    "mover", "(", expresion, ")" |
+                    "(", expresion, ")" ;
+
+tipo_core         = "numero" | "texto" ;
+identificador     = letra_o_guion, { letra_o_guion | digito } ;
+numero            = digito, { digito }, [ ".", digito, { digito } ] ;
+texto             = '"', { caracter | escape }, '"' ;
+escape            = "\", ( "\" | '"' | "n" | "r" | "t" ) ;
+letra_o_guion     = "A"…"Z" | "a"…"z" | "_" ;
+digito            = "0"…"9" ;
+
+(* AST canónico Core AST 1:
+   nodo = tipo, ":", largo_decimal, ":", valor_escapado,
+          "@", linea_decimal, "[", [ nodo, { ",", nodo } ], "]" ;
+
+   Tipos de nodo:
+   Programa      valor="Core-0.4", hijos=sentencias
+   Declaracion   valor="nombre:tipo" (tipo vacío si fue inferido), hijos=[valor]
+   Mostrar       valor="mostrar"|"print", hijos=[expresión]
+   Binario       valor=operador, hijos=[izquierdo,derecho]
+   Numero        valor=lexema, hijos=[]
+   Texto         valor=lexema incluyendo comillas, hijos=[]
+   Identificador valor=nombre, hijos=[]
+   Mover         valor="mover", hijos=[expresión]
+*)
+)CFV29DATA"},
+        {R"CFV30DATA(docs/C-FORGE-2.0-DRAFT.md)CFV30DATA", R"CFV31DATA(# C-Forge 2.0 — especificación de diseño candidata
+
+Estado: **borrador normativo; no representa todavía funcionalidad implementada**.
+
+C-Forge es un lenguaje autónomo, compilado, seguro por defecto y de propósito
+general. Su identidad no consiste en ejecutar otros lenguajes. Toma ideas
+probadas de distintos paradigmas, las somete a un único modelo semántico y las
+expresa con una sintaxis propia.
+
+La meta de 2.0 es que una misma implementación sirva para software de sistemas,
+servicios, aplicaciones, herramientas, cálculo, juegos y WebAssembly. Ninguna
+carga de trabajo tiene garantizado superar a todos los demás lenguajes: el
+rendimiento se demostrará mediante mediciones reproducibles.
+
+## 1. Principios obligatorios
+
+1. **Seguro por defecto, poderoso de forma explícita.** Punteros crudos,
+   alias mutable sin comprobar y llamadas ABI inseguras solo existen dentro de
+   `unsafe`.
+2. **Un programa, una semántica.** Intérprete de desarrollo, VM, compilador
+   nativo y WebAssembly deben conservar el mismo resultado observable.
+3. **Inferencia sin ambigüedad.** El compilador infiere tipos cuando puede
+   probar uno único; nunca adivina una conversión con pérdida.
+4. **Coste visible.** Copias, asignaciones, conteo de referencias, despacho
+   dinámico y recolección opcional deben poder identificarse con herramientas.
+5. **Determinismo local.** Recursos con ownership se destruyen al abandonar su
+   alcance, incluso durante propagación de errores.
+6. **Concurrencia estructurada.** Una tarea no sobrevive accidentalmente al
+   alcance que la creó.
+7. **Compatibilidad verificable.** Toda evolución de la especificación declara
+   sus rupturas, migraciones y nivel de estabilidad.
+
+## 2. Identidad sintáctica
+
+- Los bloques usan `{}`. La indentación es visual, no semántica.
+- El salto de línea termina una sentencia cuando la expresión está completa;
+  `;` es válido, pero opcional.
+- `sea` crea un enlace inmutable e inferido; `var` crea uno mutable; `const`
+  exige evaluación en compilación.
+- Las funciones se declaran con `funcion`; los valores faltantes se modelan
+  con `T?`, no con referencias nulas.
+- Las palabras de control son propias y consistentes: `si`, `sino`, `segun`,
+  `para`, `mientras`, `intentar`, `capturar`, `retornar`.
+
+La gramática léxica y sintáctica candidata completa se encuentra en
+[`GRAMMAR-2.0-DRAFT.ebnf`](GRAMMAR-2.0-DRAFT.ebnf).
+
+```cfv
+modulo ejemplo
+
+publico registro Persona(nombre: texto, edad: u8)
+
+publico funcion saludo(persona: &Persona) -> texto {
+    retornar "Hola, " + persona.nombre
+}
+
+funcion principal() -> Resultado<unidad, Error> {
+    sea persona = Persona(nombre: "Javier", edad: 20)
+    mostrar(saludo(&persona))
+    retornar correcto(())
+}
+```
+
+## 3. Modelo unificado de características
+
+| Necesidad | Forma propia de C-Forge |
+|---|---|
+| Bajo nivel y RAII | ownership, préstamos, regiones, destructores y `unsafe` |
+| Objetos empresariales | clases, registros, estructuras, interfaces y propiedades |
+| Scripts productivos | inferencia, colecciones literales, comprensiones y `dinamico` explícito |
+| Programación funcional | lambdas, cierres, iteradores, tuberías y pattern matching |
+| Eventos | delegados tipados, eventos y flujos asíncronos |
+| Metaprogramación | genéricos, `comptime`, reflexión opt-in y atributos |
+| Web | compilación WebAssembly y biblioteca web nativa por capacidades |
+| Portabilidad | perfiles `nativo`, `portable` y `web`, sin cambiar la semántica |
+
+Esto no crea seis dialectos. Por ejemplo, solo existe una operación estándar
+para emitir valores, una jerarquía de colecciones y una forma de declarar
+funciones. Los alias de sintaxis de lenguajes ajenos quedan fuera del núcleo 2.0.
+
+## 4. Sistema de tipos
+
+### 4.1 Categorías
+
+- Escalares: `bool`, `caracter`, enteros con signo y sin signo de 8 a 64 bits,
+  `isize`, `usize`, `f32`, `f64`, `decimal`, `unidad` y `nunca`.
+- Valores compuestos: tuplas, arreglos de tamaño fijo, `estructura`, `registro`
+  y `enum`.
+- Referencias: `&T` y `&mut T`, siempre válidas durante su vida.
+- Punteros crudos: `*const T` y `*mut T`, utilizables solo en `unsafe`.
+- Objetos nominales: `clase` e `interfaz`.
+- Colecciones estándar: `Lista<T>`, `Mapa<K,V>`, `Conjunto<T>`,
+  `Vector<T,N>` y vistas prestadas.
+- Funciones: `funcion(A, B) -> R` y `async funcion(A) -> R`.
+- Ausencia: `T?`, equivalente semánticamente a `Opcion<T>`.
+- Resultado: `Resultado<T,E>`.
+- Gradualidad explícita: `dinamico`. El valor conserva una etiqueta de tipo y
+  toda operación no demostrable se comprueba en ejecución.
+
+`cualquiera` es el supertipo estático para abstracciones; no permite operar
+sobre un valor sin acotarlo mediante patrón, interfaz o conversión comprobada.
+`dinamico` sí permite despacho en ejecución y, por eso, hace visible ese coste.
+
+### 4.2 Inferencia y conversiones
+
+La inferencia es local con restricciones propagadas desde parámetros, retornos
+y genéricos. Las interfaces públicas deben declarar sus tipos. Los literales
+enteros se ajustan al tipo contextual si el valor cabe; sin contexto son `i64`.
+Los reales son `f64`.
+
+Solo son implícitas:
+
+- ampliaciones enteras sin pérdida;
+- coerción de `&mut T` a `&T`;
+- conversión de un tipo concreto a una interfaz implementada;
+- elevación de `T` a `T?`.
+
+Toda reducción, cambio de signo riesgoso, conversión texto-número o salida de
+`dinamico` exige `convertir<T>(valor)`, que retorna `Resultado<T, ErrorTipo>`.
+
+### 4.3 Genéricos y metaprogramación
+
+Los genéricos estáticos se monomorfizan por defecto. Las restricciones se
+expresan con interfaces y `donde`. El despacho por interfaz puede ser estático
+o dinámico según el tipo utilizado.
+
+`comptime` ejecuta código puro y limitado durante compilación. Puede producir
+constantes, tipos o AST higiénico, pero no acceder a red, reloj o sistema de
+archivos sin una capacidad declarada. Los tipos condicionales y mapeados se
+resuelven en compilación y nunca crean tipos parcialmente válidos en ejecución.
+
+### 4.4 Tipos nominales y estructurales
+
+Clases, estructuras, registros y enumeraciones son nominales. Las interfaces
+son nominales al implementarlas, pero pueden existir contratos estructurales
+locales marcados `interfaz estructural`. Una clase admite una sola clase base y
+múltiples interfaces. Los registros son inmutables por defecto y poseen
+igualdad por valor.
+
+Las clases no tienen una cadena de prototipos mutable. La flexibilidad de ese
+modelo se ofrece mediante `ObjetoDinamico`, extensiones y delegación explícita,
+sin alterar silenciosamente métodos de tipos estáticos.
+
+## 5. Modelo de memoria
+
+Cada valor propietario tiene un único dueño. Asignarlo mueve el valor salvo que
+el tipo implemente `Copiable`; `clonar()` hace una duplicación explícita.
+
+- `&T` permite múltiples préstamos de solo lectura.
+- `&mut T` es exclusivo.
+- Ningún préstamo puede sobrevivir al propietario.
+- Un valor movido no puede reutilizarse.
+- `destruir()` se ejecuta exactamente una vez y en orden inverso de
+  construcción.
+- `deferir` y `recurso` cooperan con el desenrollado de errores.
+
+Los objetos compartidos usan `Compartido<T>` con conteo atómico de referencias.
+`Debil<T>` rompe ciclos. La biblioteca puede incluir un heap trazado
+`Recolectado<T>` como perfil **opcional y aislado**; no cambia el modelo por
+defecto ni permite que una referencia prestada escape.
+
+Las regiones (`region`) agrupan asignaciones cuya vida se demuestra de forma
+conjunta. Un valor solo sale de la región si se mueve a un dueño externo válido.
+El compilador rechaza uso después de mover, doble destrucción, referencias
+colgantes y carreras de datos demostrables.
+
+`unsafe` permite desreferenciar punteros, construir una referencia desde una
+dirección, acceder a registros de hardware o cruzar una ABI. El bloque no
+desactiva el sistema de tipos: únicamente transfiere al programador cinco
+obligaciones verificables — validez, alineación, inicialización, alias y vida.
+
+## 6. Semántica de ejecución
+
+- El alcance es léxico.
+- Los argumentos y operandos se evalúan de izquierda a derecha.
+- Una asignación devuelve `unidad`.
+- Los enteros comprueban overflow de forma predeterminada en todos los perfiles.
+  `sumar_envuelto`, `sumar_saturado` y `sumar_comprobado` expresan alternativas.
+- `==` es igualdad de valor; `identico` compara identidad donde exista.
+- Los `enum` y opcionales deben cubrirse exhaustivamente en `segun`.
+- El despacho virtual solo ocurre al usar una referencia de interfaz o clase
+  virtual; el resto se resuelve estáticamente.
+- Los cierres capturan por préstamo cuando es seguro y por movimiento cuando
+  se escribe `mover |...|`.
+- Los iteradores son perezosos. Una comprensión crea una colección; una tubería
+  no lo hace hasta una operación terminal.
+
+La reflexión es de compilación por defecto. La reflexión en ejecución requiere
+`@reflejable` y conserva únicamente los metadatos solicitados.
+
+## 7. Módulos, paquetes y capacidades
+
+Cada archivo pertenece a un módulo. Un paquete contiene un manifiesto
+`CForge.pkg`, módulos fuente y un archivo de bloqueo reproducible.
+
+```cfv
+modulo tienda.pagos
+
+usar std.red::{Cliente, Solicitud}
+usar tienda.modelo::Orden
+
+publico funcion cobrar(orden: &Orden) -> async Resultado<Recibo, ErrorPago>
+    efectos { red, reloj }
+{
+    // ...
+}
+```
+
+Los símbolos son privados salvo `publico`. Las dependencias forman un grafo
+acíclico entre módulos durante inicialización. No existe ejecución implícita al
+importar: la inicialización se declara en `funcion iniciar_modulo`.
+
+Los efectos sensibles (`archivos`, `red`, `procesos`, `entropia`, `reloj`,
+`hardware`, `ffi`) aparecen en firmas públicas y en el manifiesto. El ejecutor
+puede denegar capacidades antes de iniciar el programa.
+
+Los paquetes se identifican por nombre, versión semántica, hash de contenido y
+firma. El archivo de bloqueo fija el grafo completo. Una versión revocada no se
+selecciona en instalaciones nuevas y genera un diagnóstico verificable.
+
+## 8. Errores
+
+Los fallos recuperables usan `Resultado<T,E>` y el operador `?`. `T?` modela
+ausencia, no error. Las excepciones tipadas se reservan para límites donde la
+propagación estructurada es más clara y se declaran como efecto `lanza<E>`.
+
+```cfv
+funcion cargar(ruta: &Ruta) -> Resultado<Config, ErrorCarga>
+    efectos { archivos }
+{
+    sea texto = Archivo.leer_texto(ruta)?
+    retornar Json.decodificar<Config>(texto)
+}
+```
+
+`intentar/capturar/finalmente` solo captura errores declarados. Un `panic`
+representa una violación de contrato o corrupción interna; no debe usarse para
+flujo normal. Los diagnósticos contienen código estable, archivo, rango,
+explicación, contexto y corrección sugerida. Ningún backend debe filtrar un
+traceback de su implementación anfitriona.
+
+## 9. Concurrencia y asincronía
+
+`async funcion` devuelve `Tarea<T>`. `esperar` suspende la tarea, no el hilo.
+`grupo` crea concurrencia estructurada: al salir, todas sus tareas terminaron o
+fueron canceladas y esperadas.
+
+```cfv
+async funcion descargar_todo(urls: &Lista<Url>)
+    -> Resultado<Lista<Bytes>, ErrorRed>
+    efectos { red }
+{
+    grupo trabajos {
+        sea tareas = [lanzar_tarea descargar(url) para url en urls]
+        retornar esperar todas(tareas)
+    }
+}
+```
+
+- `Canal<T>` transfiere mensajes con backpressure.
+- `Actor<S,M>` serializa el acceso a su estado.
+- `Mutex<T>` y `RwLock<T>` protegen memoria compartida.
+- `Atomico<T>` especifica orden de memoria.
+- `TokenCancelacion` propaga cancelación cooperativa.
+- `seleccionar` espera canales, tareas o tiempo límite.
+
+Solo valores `Transferible` cruzan ejecutores o hilos; solo valores
+`Compartible` pueden referenciarse concurrentemente. Estas interfaces son
+especiales del compilador y no pueden implementarse de forma insegura fuera de
+`unsafe`. El código seguro no contiene carreras de datos. El orden de tareas no
+se promete salvo sincronización explícita.
+
+## 10. Modelo de compilación
+
+La cadena autónoma objetivo es:
+
+```text
+fuente .cfv
+  → lexer y parser
+  → AST tipado
+  → C-FIR (IR de alto nivel)
+  → C-MIR (ownership, efectos y control de flujo)
+  → backend nativo / WebAssembly / bytecode
+```
+
+C-FIR conserva tipos, genéricos y efectos. C-MIR materializa movimientos,
+préstamos, destrucción y representación de datos. El formato de objeto y la ABI
+de C-Forge se versionan independientemente de la sintaxis.
+
+El compilador Stage 0 en C++ solo sirve para arrancar. La condición de
+autonomía es que el compilador Stage 1 escrito en C-Forge compile Stage 2 y que
+Stage 1 y Stage 2 produzcan resultados reproducibles para el conjunto
+bootstrap. El sistema operativo y el enlazador son plataforma, no lenguajes
+anfitriones.
+
+## 11. Perfiles
+
+- `nativo`: acceso controlado a sistema, SIMD, hardware y ABI de plataforma.
+- `portable`: API estable común a sistemas soportados.
+- `web`: WebAssembly, DOM y red mediante capacidades del host.
+- `embebido`: sin asignador global ni sistema operativo, con biblioteca mínima.
+
+Una API no disponible en un perfil falla en compilación. La biblioteca estándar
+se divide por capacidades, no por detección tardía del sistema.
+
+## 12. Conformidad
+
+Una implementación solo puede declararse “C-Forge 2.0 conforme” si:
+
+1. acepta la gramática publicada y rechaza construcciones inválidas;
+2. supera las pruebas normativas de tipos, memoria, efectos y concurrencia;
+3. conserva la semántica observable entre backends declarados;
+4. documenta extensiones y no las confunde con el estándar;
+5. publica arquitectura, ABI, versión de biblioteca y limitaciones;
+6. pasa el bootstrap reproducible;
+7. no anuncia como terminada una capacidad marcada experimental o planeada.
+
+Hasta cumplir esas condiciones, el nombre correcto es **C-Forge 2.0 Draft**.
+)CFV31DATA"},
+        {R"CFV32DATA(docs/GRAMMAR-2.0-DRAFT.ebnf)CFV32DATA", R"CFV33DATA((* C-Forge 2.0 — gramática normativa candidata.
+   Los saltos de línea separan sentencias cuando no hay ambigüedad.
+   El punto y coma es opcional. Los bloques siempre usan llaves. *)
+
+programa          = { item_modulo } ;
+item_modulo       = anotaciones ,
+                    [ visibilidad ] ,
+                    [ modificadores ] ,
+                    ( modulo | usar | tipo_alias | declaracion_tipo |
+                      declaracion_funcion | declaracion_delegado |
+                      declaracion_evento | declaracion_variable |
+                      impl | prueba ) ;
+
+visibilidad       = "publico" | "interno" | "privado" | "protegido" ;
+modificadores     = modificador , { modificador } ;
+modificador       = "async" | "unsafe" | "comptime" | "inline" |
+                    "sellado" | "abstracto" | "estatico" | "parcial" ;
+anotaciones       = { anotacion } ;
+anotacion         = "@" , nombre_calificado ,
+                    [ "(" , [ lista_argumentos ] , ")" ] ;
+
+modulo            = "modulo" , ruta_modulo , bloque_modulo ;
+bloque_modulo     = "{" , { item_modulo } , "}" ;
+usar              = "usar" , ruta_modulo ,
+                    [ "::" , ( "*" | "{" , lista_importados , "}" ) ] ,
+                    [ "como" , identificador ] , fin ;
+lista_importados  = importado , { "," , importado } , [ "," ] ;
+importado         = identificador , [ "como" , identificador ] ;
+ruta_modulo       = identificador , { "." , identificador } ;
+
+tipo_alias        = "tipo" , identificador , [ parametros_genericos ] ,
+                    "=" , tipo , fin ;
+declaracion_tipo  = estructura | registro | clase | interfaz | enumeracion ;
+
+estructura        = "estructura" , identificador , [ parametros_genericos ] ,
+                    [ clausula_donde ] , cuerpo_tipo ;
+registro          = "registro" , identificador , [ parametros_genericos ] ,
+                    [ parametros_registro ] , [ clausula_donde ] , cuerpo_tipo ;
+parametros_registro = "(" , [ parametro_registro ,
+                      { "," , parametro_registro } , [ "," ] ] , ")" ;
+parametro_registro = identificador , ":" , tipo , [ "=" , expresion ] ;
+
+clase             = "clase" , identificador , [ parametros_genericos ] ,
+                    [ ":" , tipo_nominal , { "," , tipo_nominal } ] ,
+                    [ clausula_donde ] , cuerpo_tipo ;
+interfaz          = "interfaz" , identificador , [ parametros_genericos ] ,
+                    [ ":" , tipo_nominal , { "," , tipo_nominal } ] ,
+                    [ clausula_donde ] , cuerpo_interfaz ;
+enumeracion       = "enum" , identificador , [ parametros_genericos ] ,
+                    [ clausula_donde ] , "{" ,
+                    [ variante_enum , { "," , variante_enum } , [ "," ] ] ,
+                    "}" ;
+variante_enum     = identificador ,
+                    [ "(" , lista_tipos , ")" |
+                      "{" , lista_campos_tipo , "}" ] ;
+
+cuerpo_tipo       = "{" , { miembro_tipo } , "}" ;
+cuerpo_interfaz   = "{" , { miembro_interfaz } , "}" ;
+miembro_tipo      = anotaciones , [ visibilidad ] , [ modificadores ] ,
+                    ( campo | propiedad | constructor | destructor |
+                      declaracion_funcion | declaracion_evento |
+                      declaracion_delegado | tipo_alias ) ;
+miembro_interfaz  = anotaciones , [ modificadores ] ,
+                    ( firma_funcion | firma_propiedad |
+                      declaracion_evento | tipo_asociado ) ;
+campo             = ( "sea" | "var" | "const" ) , patron_nombre ,
+                    [ ":" , tipo ] , [ "=" , expresion ] , fin ;
+propiedad         = "propiedad" , identificador , ":" , tipo ,
+                    ( fin | "{" , accesor_obtener ,
+                      [ accesor_establecer ] , "}" ) ;
+firma_propiedad   = "propiedad" , identificador , ":" , tipo ,
+                    "{" , "obtener" , fin ,
+                    [ "establecer" , fin ] , "}" ;
+accesor_obtener   = "obtener" , ( fin | bloque ) ;
+accesor_establecer = "establecer" , [ "(" , identificador , ")" ],
+                     ( fin | bloque ) ;
+constructor       = "iniciar" , "(" , [ parametros ] , ")" ,
+                    [ efectos ] , bloque ;
+destructor        = "destruir" , "(" , ")" , bloque ;
+tipo_asociado     = "tipo" , identificador , [ ":" , limites_tipo ] , fin ;
+
+declaracion_delegado = "delegado" , identificador ,
+                       [ parametros_genericos ] ,
+                       "(" , [ parametros_tipo ] , ")" ,
+                       [ "->" , tipo ] , [ efectos ] , fin ;
+declaracion_evento = "evento" , identificador , ":" , tipo , fin ;
+
+declaracion_funcion = "funcion" , identificador ,
+                      [ parametros_genericos ] ,
+                      "(" , [ parametros ] , ")" ,
+                      [ "->" , tipo ] , [ efectos ] ,
+                      [ clausula_donde ] , ( bloque | fin ) ;
+firma_funcion     = "funcion" , identificador ,
+                    [ parametros_genericos ] ,
+                    "(" , [ parametros_tipo ] , ")" ,
+                    [ "->" , tipo ] , [ efectos ] ,
+                    [ clausula_donde ] , fin ;
+parametros        = parametro , { "," , parametro } , [ "," ] ;
+parametro         = [ modo_parametro ] , patron_nombre , [ ":" , tipo ] ,
+                    [ "=" , expresion ] ;
+modo_parametro    = "mover" | "prestado" | "prestado_mut" ;
+parametros_tipo   = parametro_tipo , { "," , parametro_tipo } , [ "," ] ;
+parametro_tipo    = [ modo_parametro ] , identificador , ":" , tipo ;
+efectos           = "efectos" , "{" , identificador ,
+                    { "," , identificador } , [ "," ] , "}" ;
+
+parametros_genericos = "<" , parametro_generico ,
+                       { "," , parametro_generico } , [ "," ] , ">" ;
+parametro_generico = identificador ,
+                    [ ":" , limites_tipo ] , [ "=" , tipo ] ;
+limites_tipo      = tipo , { "+" , tipo } ;
+clausula_donde    = "donde" , restriccion ,
+                    { "," , restriccion } , [ "," ] ;
+restriccion       = tipo , ":" , limites_tipo ;
+
+impl              = [ "unsafe" ] , "impl" , [ parametros_genericos ] ,
+                    [ tipo_nominal , "para" ] , tipo_nominal ,
+                    [ clausula_donde ] , "{" , { miembro_tipo } , "}" ;
+
+declaracion_variable = ( "sea" | "var" | "const" ) , patron ,
+                       [ ":" , tipo ] , "=" , expresion , fin ;
+
+prueba            = "prueba" , texto , bloque ;
+
+bloque            = "{" , { sentencia } , [ expresion_final ] , "}" ;
+sentencia         = declaracion_variable | declaracion_funcion |
+                    sentencia_expresion | sentencia_si |
+                    sentencia_segun | sentencia_mientras |
+                    sentencia_para | sentencia_bucle |
+                    sentencia_retorno | sentencia_romper |
+                    sentencia_continuar | sentencia_lanzar |
+                    sentencia_deferir | sentencia_usar_recurso |
+                    sentencia_grupo | sentencia_seleccionar |
+                    sentencia_unsafe ;
+sentencia_expresion = expresion , fin ;
+expresion_final   = expresion , [ ";" ] ;
+
+sentencia_si      = "si" , expresion , bloque ,
+                    { "sino" , "si" , expresion , bloque } ,
+                    [ "sino" , bloque ] ;
+sentencia_segun   = "segun" , expresion , "{" ,
+                    { brazo_patron } , "}" ;
+brazo_patron      = patron , [ "si" , expresion ] , "=>" ,
+                    ( expresion | bloque ) , [ "," ] ;
+sentencia_mientras = "mientras" , expresion , bloque ;
+sentencia_para    = "para" , patron , "en" , expresion , bloque ;
+sentencia_bucle   = "bucle" , bloque ;
+sentencia_retorno = "retornar" , [ expresion ] , fin ;
+sentencia_romper  = "romper" , [ expresion ] , fin ;
+sentencia_continuar = "continuar" , fin ;
+sentencia_lanzar  = "lanzar" , expresion , fin ;
+sentencia_deferir = "deferir" , ( expresion , fin | bloque ) ;
+sentencia_usar_recurso = "recurso" , patron , "=" , expresion , bloque ;
+sentencia_unsafe  = "unsafe" , bloque ;
+
+sentencia_grupo   = "grupo" , [ identificador ] , bloque ;
+sentencia_seleccionar = "seleccionar" , "{" ,
+                        brazo_seleccion , { brazo_seleccion } , "}" ;
+brazo_seleccion   = ( "caso" , patron , "=" , "recibir" ,
+                      expresion | "timeout" , expresion |
+                      "sino" ) , "=>" , ( expresion | bloque ) , [ "," ] ;
+
+expresion         = asignacion ;
+asignacion        = condicional ,
+                    [ operador_asignacion , asignacion ] ;
+operador_asignacion = "=" | "+=" | "-=" | "*=" | "/=" | "%=" |
+                      "??=" | "&=" | "|=" | "^=" ;
+condicional       = coalescencia ,
+                    [ "si" , coalescencia , "sino" , condicional ] ;
+coalescencia      = disyuncion , { "??" , disyuncion } ;
+disyuncion        = conjuncion , { "o" , conjuncion } ;
+conjuncion        = comparacion , { "y" , comparacion } ;
+comparacion       = rango , { ( "==" | "!=" | "<" | "<=" | ">" | ">=" |
+                    "es" | "no" , "es" | "en" | "no" , "en" ) , rango } ;
+rango             = tuberia , [ ( ".." | "..=" ) , tuberia ] ;
+tuberia           = bit_o , { "|>" , bit_o } ;
+bit_o             = bit_xor , { "|" , bit_xor } ;
+bit_xor           = bit_y , { "^" , bit_y } ;
+bit_y             = desplazamiento , { "&" , desplazamiento } ;
+desplazamiento    = suma , { ( "<<" | ">>" ) , suma } ;
+suma              = producto , { ( "+" | "-" ) , producto } ;
+producto          = potencia , { ( "*" | "/" | "%" ) , potencia } ;
+potencia          = unaria , [ "**" , potencia ] ;
+unaria            = ( "no" | "-" | "+" | "~" | "mover" | "prestar" |
+                    "prestar_mut" | "*" | "&" ) , unaria | postfix ;
+
+postfix           = primaria , { sufijo } ;
+sufijo            = llamada | indice | miembro | miembro_seguro |
+                    argumento_generico | operador_postfijo ;
+llamada           = "(" , [ lista_argumentos ] , ")" ;
+indice            = "[" , expresion , "]" ;
+miembro           = "." , identificador ;
+miembro_seguro    = "?." , identificador ;
+argumento_generico = "::<" , lista_tipos , ">" ;
+operador_postfijo = "?" | "!" ;
+
+primaria          = literal | identificador | "esto" | "super" |
+                    agrupada | lista | mapa | conjunto | tupla |
+                    lambda | comprension | construir | expresion_si |
+                    expresion_segun | expresion_intentar |
+                    expresion_async | expresion_await |
+                    expresion_spawn | expresion_tipo |
+                    expresion_comptime ;
+agrupada          = "(" , expresion , ")" ;
+lista             = "[" , [ lista_argumentos ] , "]" ;
+tupla             = "(" , expresion , "," ,
+                    [ lista_argumentos ] , ")" ;
+mapa              = "{" , [ entrada_mapa ,
+                    { "," , entrada_mapa } , [ "," ] ] , "}" ;
+entrada_mapa      = expresion , ":" , expresion | "..." , expresion ;
+conjunto          = "#{" , [ lista_argumentos ] , "}" ;
+construir         = tipo_nominal , "{" ,
+                    [ inicializador_campo ,
+                    { "," , inicializador_campo } , [ "," ] ] , "}" ;
+inicializador_campo = identificador , [ ":" , expresion ] |
+                      "..." , expresion ;
+
+lambda            = [ "async" ] , "|" , [ parametros_lambda ] , "|" ,
+                    ( expresion | bloque ) ;
+parametros_lambda = parametro_lambda ,
+                    { "," , parametro_lambda } , [ "," ] ;
+parametro_lambda  = patron_nombre , [ ":" , tipo ] ;
+
+comprension       = "[" , expresion , "para" , patron , "en" , expresion ,
+                    { "para" , patron , "en" , expresion } ,
+                    [ "si" , expresion ] , "]" ;
+expresion_si      = "si" , expresion , bloque , "sino" , bloque ;
+expresion_segun   = "segun" , expresion , "{" , { brazo_patron } , "}" ;
+expresion_intentar = "intentar" , bloque ,
+                     { "capturar" , patron , [ "si" , expresion ] , bloque } ,
+                     [ "finalmente" , bloque ] ;
+expresion_async   = "async" , bloque ;
+expresion_await   = "esperar" , expresion ;
+expresion_spawn   = "lanzar_tarea" , expresion ;
+expresion_tipo    = ( "tipo_de" | "tamano_de" | "alineacion_de" ) ,
+                    "(" , ( expresion | tipo ) , ")" ;
+expresion_comptime = "comptime" , bloque ;
+
+lista_argumentos  = argumento , { "," , argumento } , [ "," ] ;
+argumento         = [ identificador , ":" ] , expresion |
+                    "..." , expresion ;
+
+patron            = patron_or ;
+patron_or         = patron_atomico , { "|" , patron_atomico } ;
+patron_atomico    = "_" | patron_nombre | literal |
+                    patron_tupla | patron_lista | patron_objeto |
+                    patron_variante | patron_tipo | patron_rango ;
+patron_nombre     = [ "var" ] , identificador ;
+patron_tupla      = "(" , patron , "," , [ lista_patrones ] , ")" ;
+patron_lista      = "[" , [ lista_patrones ] , "]" ;
+patron_objeto     = tipo_nominal , "{" , [ campo_patron ,
+                    { "," , campo_patron } , [ "," ] ] , "}" ;
+campo_patron      = identificador , [ ":" , patron ] | ".." ;
+patron_variante   = tipo_nominal , "::" , identificador ,
+                    [ "(" , [ lista_patrones ] , ")" ] ;
+patron_tipo       = patron_nombre , ":" , tipo ;
+patron_rango      = literal , ( ".." | "..=" ) , literal ;
+lista_patrones    = patron , { "," , patron } , [ "," ] ;
+
+tipo              = tipo_union ;
+tipo_union        = tipo_interseccion , { "|" , tipo_interseccion } ;
+tipo_interseccion = tipo_opcional , { "&" , tipo_opcional } ;
+tipo_opcional     = tipo_primario , [ "?" ] ;
+tipo_primario     = tipo_primitivo | tipo_nominal | tipo_tupla |
+                    tipo_funcion | tipo_referencia | tipo_puntero |
+                    tipo_array | tipo_condicional | tipo_mapeado |
+                    "dinamico" | "nunca" | "cualquiera" ;
+tipo_primitivo    = "bool" | "caracter" | "texto" |
+                    "i8" | "i16" | "i32" | "i64" | "isize" |
+                    "u8" | "u16" | "u32" | "u64" | "usize" |
+                    "f32" | "f64" | "decimal" | "unidad" ;
+tipo_nominal      = ruta_modulo , [ "<" , lista_tipos , ">" ] ;
+tipo_tupla        = "(" , tipo , "," , lista_tipos , ")" ;
+tipo_funcion      = [ "async" ] , "funcion" ,
+                    "(" , [ lista_tipos ] , ")" , "->" , tipo ,
+                    [ efectos ] ;
+tipo_referencia   = "&" , [ "mut" ] , tipo ;
+tipo_puntero      = "*" , ( "const" | "mut" ) , tipo ;
+tipo_array        = "[" , tipo , [ ";" , expresion_constante ] , "]" ;
+tipo_condicional  = "si_tipo" , "<" , tipo , "es" , tipo ,
+                    "," , tipo , "," , tipo , ">" ;
+tipo_mapeado      = "mapear_tipo" , "<" , identificador , "en" , tipo ,
+                    "," , tipo , ">" ;
+lista_tipos       = tipo , { "," , tipo } , [ "," ] ;
+lista_campos_tipo = parametro_registro ,
+                    { "," , parametro_registro } , [ "," ] ;
+expresion_constante = expresion ;
+
+literal           = numero | texto | caracter | booleano | ausencia ;
+booleano          = "verdadero" | "falso" ;
+ausencia          = "ninguno" ;
+
+numero            = entero | real ;
+entero            = decimal_entero | hexadecimal | binario | octal ;
+decimal_entero    = digito , { digito | "_" } , [ sufijo_entero ] ;
+hexadecimal       = "0x" , hex , { hex | "_" } , [ sufijo_entero ] ;
+binario           = "0b" , bit , { bit | "_" } , [ sufijo_entero ] ;
+octal             = "0o" , oct , { oct | "_" } , [ sufijo_entero ] ;
+real              = digito , { digito | "_" } , "." ,
+                    digito , { digito | "_" } ,
+                    [ exponente ] , [ sufijo_real ] ;
+exponente         = ( "e" | "E" ) , [ "+" | "-" ] ,
+                    digito , { digito | "_" } ;
+sufijo_entero     = "i8" | "i16" | "i32" | "i64" | "isize" |
+                    "u8" | "u16" | "u32" | "u64" | "usize" ;
+sufijo_real       = "f32" | "f64" | "dec" ;
+
+texto             = '"' , { caracter_texto | escape } , '"' |
+                    '"""' , { caracter_texto | salto | escape } , '"""' ;
+caracter          = "'" , ( caracter_texto | escape ) , "'" ;
+escape            = "\" , ( "\" | '"' | "'" | "n" | "r" | "t" | "0" |
+                    "u{" , hex , { hex } , "}" ) ;
+
+identificador     = inicio_id , { inicio_id | digito } ;
+inicio_id         = letra | "_" ;
+fin               = ";" | salto ;
+
+comentario_linea  = "//" , { caracter_texto } , salto |
+                    "#" , { caracter_texto } , salto ;
+comentario_bloque = "/*" , { cualquier_caracter } , "*/" ;
+
+letra             = ? letra Unicode XID_Start ? ;
+digito            = "0" | "1" | "2" | "3" | "4" |
+                    "5" | "6" | "7" | "8" | "9" ;
+hex               = digito | "a" | "b" | "c" | "d" | "e" | "f" |
+                    "A" | "B" | "C" | "D" | "E" | "F" ;
+bit               = "0" | "1" ;
+oct               = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" ;
+salto             = ? LF o CRLF ? ;
+caracter_texto    = ? carácter Unicode válido no reservado ? ;
+cualquier_caracter = ? cualquier valor escalar Unicode ? ;
+)CFV33DATA"},
+        {R"CFV34DATA(ejemplos/diseno_cforge_20.cfv)CFV34DATA", R"CFV35DATA(// Contrato ilustrativo de C-Forge 2.0 Draft.
+// Este archivo documenta la sintaxis objetivo; no se anuncia como ejecutable
+// por el motor 1.6 hasta que la matriz de capacidades lo demuestre.
+
+modulo demostracion
+
+publico interfaz Describible {
+    funcion describir() -> texto
+}
+
+publico registro Persona(nombre: texto, edad: u8)
+
+impl Describible para Persona {
+    funcion describir() -> texto {
+        retornar nombre + " (" + edad.como_texto() + ")"
+    }
+}
+
+publico enum ErrorDemo {
+    EntradaVacia,
+    EdadInvalida(valor: i64)
+}
+
+funcion crear_persona(nombre: texto, edad: i64)
+    -> Resultado<Persona, ErrorDemo>
+{
+    si nombre.longitud == 0 {
+        retornar error(ErrorDemo::EntradaVacia)
+    }
+    si edad < 0 o edad > 255 {
+        retornar error(ErrorDemo::EdadInvalida(edad))
+    }
+    retornar correcto(Persona(nombre: nombre, edad: edad.convertir<u8>()?))
+}
+
+async funcion describir_en_paralelo(personas: &Lista<Persona>)
+    -> Lista<texto>
+{
+    grupo descripciones {
+        sea tareas = [
+            lanzar_tarea async { persona.describir() }
+            para persona en personas
+        ]
+        retornar esperar todas(tareas)
+    }
+}
+
+funcion principal() -> async Resultado<unidad, ErrorDemo> {
+    var personas: Lista<Persona> = []
+    personas.agregar(crear_persona("Javier", 20)?)
+    personas.agregar(crear_persona("C-Forge", 2)?)
+
+    sea textos = esperar describir_en_paralelo(&personas)
+    para texto en textos {
+        mostrar(texto)
+    }
+    retornar correcto(())
+}
+)CFV35DATA"},
+        {R"CFV36DATA(bootstrap/core_lexer.cfv)CFV36DATA", R"CFV37DATA(// Primer componente del compilador de C-Forge escrito en C-Forge.
 // Alcance congelado: lexer de C-Forge Core Bootstrap 0.1.
 
 estructura TokenCore {
@@ -8643,8 +9420,693 @@ test "lexer core reconoce el programa mínimo" {
     afirmar(resultado[4].tipo == "SYMBOL", "asignación no reconocida")
     afirmar(resultado[12].tipo == "EOF", "falta token EOF")
 }
-)CFV29DATA"},
-        {R"CFV30DATA(bootstrap/stage0/cforge_bootstrap.cpp)CFV30DATA", R"CFV31DATA(// C-Forge Stage 0 Bootstrap
+)CFV37DATA"},
+        {R"CFV38DATA(bootstrap/core_ast.cfv)CFV38DATA", R"CFV39DATA(// AST canónico de C-Forge Core Bootstrap 0.4.
+// No contiene objetos del runtime anfitrión: solo textos, números y listas.
+
+estructura NodoASTCore {
+    tipo: texto
+    valor: texto
+    linea: numero
+    hijos: lista
+}
+
+funcion nodo_ast_core(tipo: texto, valor: texto, linea: numero): cualquiera {
+    retornar NodoASTCore(tipo, valor, linea, [])
+}
+
+funcion nodo_ast_core_con_hijos(
+    tipo: texto,
+    valor: texto,
+    linea: numero,
+    hijos: lista
+): cualquiera {
+    retornar NodoASTCore(tipo, valor, linea, hijos)
+}
+
+funcion escapar_ast_core(valor: texto): texto {
+    sea salida: texto = ""
+    sea posicion: numero = 0
+    mientras (posicion < longitud(valor)) {
+        sea caracter: texto = valor[posicion]
+        si (caracter == "\\") {
+            salida = salida + "\\\\"
+        } sino {
+            si (caracter == "\n") {
+                salida = salida + "\\n"
+            } sino {
+                si (caracter == "\r") {
+                    salida = salida + "\\r"
+                } sino {
+                    si (caracter == "\t") {
+                        salida = salida + "\\t"
+                    } sino {
+                        si (caracter == "[" o caracter == "]" o caracter == ":" o caracter == "@") {
+                            salida = salida + "\\" + caracter
+                        } sino {
+                            salida = salida + caracter
+                        }
+                    }
+                }
+            }
+        }
+        posicion = posicion + 1
+    }
+    retornar salida
+}
+
+// Formato estable Core AST 1:
+// tipo:largo:valor@linea[hijo,hijo]
+// El largo corresponde al valor original y evita interpretaciones ambiguas.
+funcion ast_core_canonico(nodo: cualquiera): texto {
+    sea salida: texto = nodo.tipo + ":" + a_texto(longitud(nodo.valor)) + ":" +
+        escapar_ast_core(nodo.valor) + "@" + a_texto(nodo.linea) + "["
+    sea hijos: lista = nodo.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(hijos)) {
+        si (indice > 0) {
+            salida = salida + ","
+        }
+        salida = salida + ast_core_canonico(hijos[indice])
+        indice = indice + 1
+    }
+    retornar salida + "]"
+}
+)CFV39DATA"},
+        {R"CFV40DATA(bootstrap/core_parser.cfv)CFV40DATA", R"CFV41DATA(// Parser recursivo descendente de C-Forge Core Bootstrap 0.4.
+// Requiere TokenCore de core_lexer.cfv y NodoASTCore de core_ast.cfv.
+
+clase EstadoParserCore {
+    campo tokens: lista
+    campo posicion: numero
+
+    metodo actual(): cualquiera {
+        sea tokens_actuales: lista = este.tokens
+        sea posicion_actual: numero = este.posicion
+        retornar tokens_actuales[posicion_actual]
+    }
+
+    metodo anterior(): cualquiera {
+        sea tokens_actuales: lista = este.tokens
+        sea posicion_actual: numero = este.posicion
+        retornar tokens_actuales[posicion_actual - 1]
+    }
+
+    metodo finalizado(): booleano {
+        sea token: cualquiera = este.actual()
+        retornar token.tipo == "EOF"
+    }
+
+    metodo avanzar(): cualquiera {
+        si (no este.finalizado()) {
+            este.posicion = este.posicion + 1
+        }
+        retornar este.anterior()
+    }
+}
+
+funcion token_actual_core(estado: cualquiera): cualquiera {
+    retornar estado.actual()
+}
+
+funcion token_anterior_core(estado: cualquiera): cualquiera {
+    retornar estado.anterior()
+}
+
+funcion esta_al_final_core(estado: cualquiera): booleano {
+    sea token: cualquiera = token_actual_core(estado)
+    retornar token.tipo == "EOF"
+}
+
+funcion avanzar_parser_core(estado: cualquiera): cualquiera {
+    retornar estado.avanzar()
+}
+
+funcion comprobar_lexema_core(estado: cualquiera, lexema: texto): booleano {
+    sea token: cualquiera = token_actual_core(estado)
+    retornar token.lexema == lexema
+}
+
+funcion tomar_lexema_core(estado: cualquiera, lexema: texto): booleano {
+    si (comprobar_lexema_core(estado, lexema)) {
+        avanzar_parser_core(estado)
+        retornar verdadero
+    }
+    retornar falso
+}
+
+funcion requerir_lexema_core(
+    estado: cualquiera,
+    lexema: texto,
+    mensaje: texto
+): cualquiera {
+    sea token: cualquiera = token_actual_core(estado)
+    afirmar(token.lexema == lexema, mensaje + " en línea " + a_texto(token.linea))
+    retornar avanzar_parser_core(estado)
+}
+
+funcion requerir_tipo_core(
+    estado: cualquiera,
+    tipo: texto,
+    mensaje: texto
+): cualquiera {
+    sea token: cualquiera = token_actual_core(estado)
+    afirmar(token.tipo == tipo, mensaje + " en línea " + a_texto(token.linea))
+    retornar avanzar_parser_core(estado)
+}
+
+funcion primaria_parser_core(estado: cualquiera): cualquiera {
+    sea token: cualquiera = token_actual_core(estado)
+    si (token.tipo == "NUMBER") {
+        avanzar_parser_core(estado)
+        retornar nodo_ast_core("Numero", token.lexema, token.linea)
+    }
+    si (token.tipo == "STRING") {
+        avanzar_parser_core(estado)
+        retornar nodo_ast_core("Texto", token.lexema, token.linea)
+    }
+    si (token.tipo == "IDENT") {
+        avanzar_parser_core(estado)
+        si (token.lexema == "mover" y tomar_lexema_core(estado, "(")) {
+            sea movido: cualquiera = expresion_parser_core(estado)
+            requerir_lexema_core(
+                estado, ")", "se esperaba ')' después de mover"
+            )
+            retornar nodo_ast_core_con_hijos(
+                "Mover", "mover", token.linea, [movido]
+            )
+        }
+        retornar nodo_ast_core("Identificador", token.lexema, token.linea)
+    }
+    si (tomar_lexema_core(estado, "(")) {
+        sea expresion: cualquiera = expresion_parser_core(estado)
+        requerir_lexema_core(estado, ")", "se esperaba ')' después de la expresión")
+        retornar expresion
+    }
+    afirmar(falso, "expresión inválida en línea " + a_texto(token.linea))
+    retornar nodo_ast_core("Inalcanzable", "", token.linea)
+}
+
+funcion producto_parser_core(estado: cualquiera): cualquiera {
+    sea expresion: cualquiera = primaria_parser_core(estado)
+    mientras (comprobar_lexema_core(estado, "*") o comprobar_lexema_core(estado, "/")) {
+        sea operador: cualquiera = avanzar_parser_core(estado)
+        sea derecho: cualquiera = primaria_parser_core(estado)
+        expresion = nodo_ast_core_con_hijos(
+            "Binario", operador.lexema, operador.linea, [expresion, derecho]
+        )
+    }
+    retornar expresion
+}
+
+funcion expresion_parser_core(estado: cualquiera): cualquiera {
+    sea expresion: cualquiera = producto_parser_core(estado)
+    mientras (comprobar_lexema_core(estado, "+") o comprobar_lexema_core(estado, "-")) {
+        sea operador: cualquiera = avanzar_parser_core(estado)
+        sea derecho: cualquiera = producto_parser_core(estado)
+        expresion = nodo_ast_core_con_hijos(
+            "Binario", operador.lexema, operador.linea, [expresion, derecho]
+        )
+    }
+    retornar expresion
+}
+
+funcion declaracion_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "sea", "se esperaba la declaración 'sea'"
+    )
+    sea nombre: cualquiera = requerir_tipo_core(
+        estado, "IDENT", "se esperaba el nombre de la variable"
+    )
+    sea tipo_declarado: texto = ""
+    si (tomar_lexema_core(estado, ":")) {
+        sea token_tipo: cualquiera = requerir_tipo_core(
+            estado, "IDENT", "se esperaba el tipo de la variable"
+        )
+        tipo_declarado = token_tipo.lexema
+    }
+    requerir_lexema_core(estado, "=", "se esperaba '=' en la declaración")
+    sea valor: cualquiera = expresion_parser_core(estado)
+    tomar_lexema_core(estado, ";")
+    retornar nodo_ast_core_con_hijos(
+        "Declaracion", nombre.lexema + ":" + tipo_declarado,
+        palabra.linea, [valor]
+    )
+}
+
+funcion impresion_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = avanzar_parser_core(estado)
+    requerir_lexema_core(estado, "(", "se esperaba '(' después de mostrar")
+    sea valor: cualquiera = expresion_parser_core(estado)
+    requerir_lexema_core(estado, ")", "se esperaba ')' después del valor")
+    tomar_lexema_core(estado, ";")
+    retornar nodo_ast_core_con_hijos(
+        "Mostrar", palabra.lexema, palabra.linea, [valor]
+    )
+}
+
+funcion sentencia_parser_core(estado: cualquiera): cualquiera {
+    si (comprobar_lexema_core(estado, "sea")) {
+        retornar declaracion_parser_core(estado)
+    }
+    si (comprobar_lexema_core(estado, "mostrar") o comprobar_lexema_core(estado, "print")) {
+        retornar impresion_parser_core(estado)
+    }
+    sea token: cualquiera = token_actual_core(estado)
+    afirmar(
+        falso,
+        "sentencia Core desconocida '" + token.lexema +
+        "' en línea " + a_texto(token.linea)
+    )
+    retornar nodo_ast_core("Inalcanzable", "", token.linea)
+}
+
+funcion parsear_tokens_core(tokens: lista): cualquiera {
+    sea estado: cualquiera = EstadoParserCore(tokens, 0)
+    sea sentencias: lista = []
+    mientras (no esta_al_final_core(estado)) {
+        agregar(sentencias, sentencia_parser_core(estado))
+    }
+    sea eof: cualquiera = token_actual_core(estado)
+    retornar nodo_ast_core_con_hijos("Programa", "Core-0.4", eof.linea, sentencias)
+}
+
+funcion parsear_fuente_core(fuente: texto): cualquiera {
+    retornar parsear_tokens_core(tokenizar_core(fuente))
+}
+)CFV41DATA"},
+        {R"CFV42DATA(bootstrap/core_semantics.cfv)CFV42DATA", R"CFV43DATA(// Analizador de tipos y ownership de C-Forge Core Bootstrap 0.4.
+// Opera únicamente sobre NodoASTCore y no depende del runtime anfitrión.
+
+clase SimboloCore {
+    campo nombre: texto
+    campo tipo: texto
+    campo movido: booleano
+
+    metodo marcar_movido() {
+        este.movido = verdadero
+    }
+}
+
+estructura ResultadoSemanticoCore {
+    valido: booleano
+    errores: lista
+}
+
+funcion diagnostico_core(
+    codigo: texto,
+    linea: numero,
+    mensaje: texto
+): texto {
+    retornar codigo + " línea " + a_texto(linea) + ": " + mensaje
+}
+
+funcion indice_dos_puntos_core(valor: texto): numero {
+    sea posicion: numero = 0
+    mientras (posicion < longitud(valor)) {
+        si (valor[posicion] == ":") {
+            retornar posicion
+        }
+        posicion = posicion + 1
+    }
+    retornar -1
+}
+
+funcion segmento_core(
+    valor: texto,
+    inicio: numero,
+    final: numero
+): texto {
+    sea salida: texto = ""
+    sea posicion: numero = inicio
+    mientras (posicion < final) {
+        salida = salida + valor[posicion]
+        posicion = posicion + 1
+    }
+    retornar salida
+}
+
+funcion nombre_declaracion_core(valor: texto): texto {
+    sea separador: numero = indice_dos_puntos_core(valor)
+    si (separador < 0) {
+        retornar valor
+    }
+    retornar segmento_core(valor, 0, separador)
+}
+
+funcion tipo_declaracion_core(valor: texto): texto {
+    sea separador: numero = indice_dos_puntos_core(valor)
+    si (separador < 0) {
+        retornar ""
+    }
+    retornar segmento_core(valor, separador + 1, longitud(valor))
+}
+
+funcion buscar_simbolo_core(simbolos: lista, nombre: texto): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(simbolos)) {
+        sea simbolo: cualquiera = simbolos[indice]
+        si (simbolo.nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion tipo_identificador_core(
+    nodo: cualquiera,
+    simbolos: lista,
+    errores: lista
+): texto {
+    sea indice: numero = buscar_simbolo_core(simbolos, nodo.valor)
+    si (indice < 0) {
+        agregar(
+            errores,
+            diagnostico_core(
+                "CFB2002", nodo.linea,
+                "variable no declarada '" + nodo.valor + "'"
+            )
+        )
+        retornar "error"
+    }
+    sea simbolo: cualquiera = simbolos[indice]
+    si (simbolo.movido) {
+        agregar(
+            errores,
+            diagnostico_core(
+                "CFB2003", nodo.linea,
+                "uso después de mover '" + nodo.valor + "'"
+            )
+        )
+        retornar "error"
+    }
+    retornar simbolo.tipo
+}
+
+funcion tipo_expresion_core(
+    nodo: cualquiera,
+    simbolos: lista,
+    errores: lista
+): texto {
+    si (nodo.tipo == "Numero") {
+        retornar "numero"
+    }
+    si (nodo.tipo == "Texto") {
+        retornar "texto"
+    }
+    si (nodo.tipo == "Identificador") {
+        retornar tipo_identificador_core(nodo, simbolos, errores)
+    }
+    si (nodo.tipo == "Mover") {
+        sea hijos_mover: lista = nodo.hijos
+        sea objetivo: cualquiera = hijos_mover[0]
+        si (objetivo.tipo != "Identificador") {
+            agregar(
+                errores,
+                diagnostico_core(
+                    "CFB2004", nodo.linea,
+                    "mover requiere una variable identificable"
+                )
+            )
+            retornar "error"
+        }
+        sea indice: numero = buscar_simbolo_core(simbolos, objetivo.valor)
+        sea tipo_objetivo: texto =
+            tipo_identificador_core(objetivo, simbolos, errores)
+        si (indice >= 0 y tipo_objetivo == "texto") {
+            sea simbolo: cualquiera = simbolos[indice]
+            simbolo.marcar_movido()
+        }
+        retornar tipo_objetivo
+    }
+    si (nodo.tipo == "Binario") {
+        sea hijos_binarios: lista = nodo.hijos
+        sea tipo_izquierdo: texto =
+            tipo_expresion_core(hijos_binarios[0], simbolos, errores)
+        sea tipo_derecho: texto =
+            tipo_expresion_core(hijos_binarios[1], simbolos, errores)
+        si (tipo_izquierdo == "error" o tipo_derecho == "error") {
+            retornar "error"
+        }
+        si (nodo.valor == "+") {
+            si (tipo_izquierdo == tipo_derecho y
+                (tipo_izquierdo == "numero" o tipo_izquierdo == "texto")) {
+                retornar tipo_izquierdo
+            }
+        } sino {
+            si (tipo_izquierdo == "numero" y tipo_derecho == "numero") {
+                retornar "numero"
+            }
+        }
+        agregar(
+            errores,
+            diagnostico_core(
+                "CFB2001", nodo.linea,
+                "operador '" + nodo.valor + "' incompatible con " +
+                tipo_izquierdo + " y " + tipo_derecho
+            )
+        )
+        retornar "error"
+    }
+    agregar(
+        errores,
+        diagnostico_core(
+            "CFB2099", nodo.linea,
+            "nodo de expresión desconocido '" + nodo.tipo + "'"
+        )
+    )
+    retornar "error"
+}
+
+funcion analizar_sentencia_core(
+    nodo: cualquiera,
+    simbolos: lista,
+    errores: lista
+) {
+    sea hijos: lista = nodo.hijos
+    si (nodo.tipo == "Declaracion") {
+        sea nombre: texto = nombre_declaracion_core(nodo.valor)
+        sea declarado: texto = tipo_declaracion_core(nodo.valor)
+        si (buscar_simbolo_core(simbolos, nombre) >= 0) {
+            agregar(
+                errores,
+                diagnostico_core(
+                    "CFB2005", nodo.linea,
+                    "variable duplicada '" + nombre + "'"
+                )
+            )
+            retornar errores
+        }
+        sea inferido: texto =
+            tipo_expresion_core(hijos[0], simbolos, errores)
+        sea tipo_final: texto = inferido
+        si (declarado != "") {
+            tipo_final = declarado
+            si (inferido != "error" y declarado != inferido) {
+                agregar(
+                    errores,
+                    diagnostico_core(
+                        "CFB2001", nodo.linea,
+                        "la variable '" + nombre + "' requiere " +
+                        declarado + " pero recibió " + inferido
+                    )
+                )
+            }
+        }
+        agregar(simbolos, SimboloCore(nombre, tipo_final, falso))
+        retornar errores
+    }
+    si (nodo.tipo == "Mostrar") {
+        tipo_expresion_core(hijos[0], simbolos, errores)
+        retornar errores
+    }
+    agregar(
+        errores,
+        diagnostico_core(
+            "CFB2098", nodo.linea,
+            "sentencia desconocida '" + nodo.tipo + "'"
+        )
+    )
+}
+
+funcion analizar_semantica_core(programa: cualquiera): cualquiera {
+    sea simbolos: lista = []
+    sea errores: lista = []
+    sea sentencias: lista = programa.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(sentencias)) {
+        analizar_sentencia_core(sentencias[indice], simbolos, errores)
+        indice = indice + 1
+    }
+    retornar ResultadoSemanticoCore(longitud(errores) == 0, errores)
+}
+
+funcion diagnosticos_semanticos_core(resultado: cualquiera): texto {
+    sea errores: lista = resultado.errores
+    sea salida: texto = ""
+    sea indice: numero = 0
+    mientras (indice < longitud(errores)) {
+        si (indice > 0) {
+            salida = salida + "\n"
+        }
+        salida = salida + errores[indice]
+        indice = indice + 1
+    }
+    retornar salida
+}
+)CFV43DATA"},
+        {R"CFV44DATA(bootstrap/core_emitter.cfv)CFV44DATA", R"CFV45DATA(// Emisor nativo de C-Forge Core Bootstrap 0.4.
+// Recibe el AST canónico validado por B2 y genera una unidad C++17 completa.
+
+estructura ResultadoEmisionCore {
+    valido: booleano
+    codigo: texto
+    errores: lista
+}
+
+funcion nombre_cpp_core(nombre: texto): texto {
+    retornar "cfv_" + nombre
+}
+
+funcion encabezado_cpp_core(): texto {
+    retornar
+        "#include <cmath>\n" +
+        "#include <iomanip>\n" +
+        "#include <iostream>\n" +
+        "#include <sstream>\n" +
+        "#include <stdexcept>\n" +
+        "#include <string>\n" +
+        "#include <variant>\n\n" +
+        "struct Valor {\n" +
+        "    std::variant<double, std::string> dato;\n" +
+        "    explicit Valor(double valor) : dato(valor) {}\n" +
+        "    explicit Valor(std::string valor) : dato(std::move(valor)) {}\n" +
+        "};\n\n" +
+        "static double numero(const Valor& valor) {\n" +
+        "    if (const auto* n = std::get_if<double>(&valor.dato)) return *n;\n" +
+        "    throw std::runtime_error(\"se esperaba numero\");\n" +
+        "}\n" +
+        "static Valor sumar(const Valor& a, const Valor& b) {\n" +
+        "    if (const auto* x = std::get_if<double>(&a.dato)) {\n" +
+        "        if (const auto* y = std::get_if<double>(&b.dato)) return Valor(*x + *y);\n" +
+        "    }\n" +
+        "    if (const auto* x = std::get_if<std::string>(&a.dato)) {\n" +
+        "        if (const auto* y = std::get_if<std::string>(&b.dato)) return Valor(*x + *y);\n" +
+        "    }\n" +
+        "    throw std::runtime_error(\"tipos incompatibles para +\");\n" +
+        "}\n" +
+        "static Valor restar(const Valor& a, const Valor& b) {\n" +
+        "    return Valor(numero(a) - numero(b));\n" +
+        "}\n" +
+        "static Valor multiplicar(const Valor& a, const Valor& b) {\n" +
+        "    return Valor(numero(a) * numero(b));\n" +
+        "}\n" +
+        "static Valor dividir(const Valor& a, const Valor& b) {\n" +
+        "    const double divisor = numero(b);\n" +
+        "    if (divisor == 0) throw std::runtime_error(\"division por cero\");\n" +
+        "    return Valor(numero(a) / divisor);\n" +
+        "}\n" +
+        "static Valor mover_core(const Valor& valor) { return valor; }\n" +
+        "static void mostrar_core(const Valor& valor) {\n" +
+        "    if (const auto* texto = std::get_if<std::string>(&valor.dato)) {\n" +
+        "        std::cout << *texto << '\\n';\n" +
+        "        return;\n" +
+        "    }\n" +
+        "    const double n = numero(valor);\n" +
+        "    if (std::floor(n) == n) {\n" +
+        "        std::cout << static_cast<long long>(n) << '\\n';\n" +
+        "    } else {\n" +
+        "        std::ostringstream salida;\n" +
+        "        salida << std::setprecision(15) << n;\n" +
+        "        std::cout << salida.str() << '\\n';\n" +
+        "    }\n" +
+        "}\n\n" +
+        "int main() {\n" +
+        "    try {\n"
+}
+
+funcion pie_cpp_core(): texto {
+    retornar
+        "        return 0;\n" +
+        "    } catch (const std::exception& error) {\n" +
+        "        std::cerr << \"[C-Forge Core Runtime Error] \" << error.what() << '\\n';\n" +
+        "        return 1;\n" +
+        "    }\n" +
+        "}\n"
+}
+
+funcion emitir_expresion_core(nodo: cualquiera): texto {
+    si (nodo.tipo == "Numero") {
+        retornar "Valor(" + nodo.valor + ")"
+    }
+    si (nodo.tipo == "Texto") {
+        retornar "Valor(std::string(" + nodo.valor + "))"
+    }
+    si (nodo.tipo == "Identificador") {
+        retornar nombre_cpp_core(nodo.valor)
+    }
+    sea hijos: lista = nodo.hijos
+    si (nodo.tipo == "Mover") {
+        retornar "mover_core(" + emitir_expresion_core(hijos[0]) + ")"
+    }
+    si (nodo.tipo == "Binario") {
+        sea izquierdo: texto = emitir_expresion_core(hijos[0])
+        sea derecho: texto = emitir_expresion_core(hijos[1])
+        si (nodo.valor == "+") {
+            retornar "sumar(" + izquierdo + ", " + derecho + ")"
+        }
+        si (nodo.valor == "-") {
+            retornar "restar(" + izquierdo + ", " + derecho + ")"
+        }
+        si (nodo.valor == "*") {
+            retornar "multiplicar(" + izquierdo + ", " + derecho + ")"
+        }
+        si (nodo.valor == "/") {
+            retornar "dividir(" + izquierdo + ", " + derecho + ")"
+        }
+    }
+    afirmar(
+        falso,
+        "B3 no puede emitir el nodo de expresión '" + nodo.tipo + "'"
+    )
+    retornar ""
+}
+
+funcion emitir_sentencia_core(nodo: cualquiera): texto {
+    sea hijos: lista = nodo.hijos
+    si (nodo.tipo == "Declaracion") {
+        sea nombre: texto = nombre_declaracion_core(nodo.valor)
+        retornar
+            "        Valor " + nombre_cpp_core(nombre) + " = " +
+            emitir_expresion_core(hijos[0]) + ";\n"
+    }
+    si (nodo.tipo == "Mostrar") {
+        retornar
+            "        mostrar_core(" +
+            emitir_expresion_core(hijos[0]) + ");\n"
+    }
+    afirmar(falso, "B3 no puede emitir la sentencia '" + nodo.tipo + "'")
+    retornar ""
+}
+
+funcion emitir_programa_core(programa: cualquiera): cualquiera {
+    sea semantica: cualquiera = analizar_semantica_core(programa)
+    si (no semantica.valido) {
+        retornar ResultadoEmisionCore(falso, "", semantica.errores)
+    }
+    sea codigo: texto = encabezado_cpp_core()
+    sea sentencias: lista = programa.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(sentencias)) {
+        codigo = codigo + emitir_sentencia_core(sentencias[indice])
+        indice = indice + 1
+    }
+    codigo = codigo + pie_cpp_core()
+    retornar ResultadoEmisionCore(verdadero, codigo, [])
+}
+)CFV45DATA"},
+        {R"CFV46DATA(bootstrap/stage0/cforge_bootstrap.cpp)CFV46DATA", R"CFV47DATA(// C-Forge Stage 0 Bootstrap
 // Compilador mínimo alojado exclusivamente en C++17. No carga Python, JVM,
 // .NET, Node ni ningún runtime extranjero.
 
@@ -8822,7 +10284,9 @@ private:
     const Token& peek() const { return tokens_[current_]; }
     const Token& previous() const { return tokens_[current_ - 1]; }
     bool check(TokenKind kind) const { return peek().kind == kind; }
-    bool check_text(const std::string& text) const { return peek().text == text; }
+    bool check_text(const std::string& text) const {
+        return peek().kind != TokenKind::string && peek().text == text;
+    }
     const Token& advance() {
         if (!check(TokenKind::end)) ++current_;
         return previous();
@@ -9003,6 +10467,636 @@ int main() {
     }
 };
 
+// Compilador del subconjunto Core 0.4 requerido por B1/B2/B3. Conserva Stage 0 como
+// una herramienta pequeña, pero añade funciones, control de flujo, listas y
+// objetos suficientes para compilar el lexer, el AST y el parser escritos en
+// C-Forge. La semántica continúa alojada únicamente en este binario C++17.
+class CoreB1Compiler {
+public:
+    explicit CoreB1Compiler(std::vector<Token> tokens) : tokens_(std::move(tokens)) {
+        discover_symbols();
+    }
+
+    std::string compile_to_cpp() {
+        std::ostringstream declarations;
+        std::ostringstream body;
+        current_ = 0;
+        scopes_.push_back({});
+        while (!check(TokenKind::end)) {
+            if (take(";")) continue;
+            if (check_text("estructura")) {
+                parse_structure();
+            } else if (check_text("clase")) {
+                parse_class(declarations);
+            } else if (check_text("funcion")) {
+                parse_function(declarations, false, "");
+            } else {
+                statement(body);
+            }
+        }
+
+        std::ostringstream prototypes;
+        for (const auto& name : functions_) {
+            prototypes << "static Value cfv_fn_" << name
+                       << "(const std::vector<Value>&);\n";
+        }
+        for (const auto& name : methods_) {
+            prototypes << "static Value cfv_method_" << name
+                       << "(Value, const std::vector<Value>&);\n";
+        }
+        return runtime() + prototypes.str() + declarations.str() +
+               "int main() {\n    try {\n" + body.str() +
+               "        return 0;\n"
+               "    } catch (const std::exception& error) {\n"
+               "        std::cerr << \"[C-Forge Core Runtime Error] \""
+               " << error.what() << '\\n';\n"
+               "        return 1;\n"
+               "    }\n}\n";
+    }
+
+private:
+    std::vector<Token> tokens_;
+    std::size_t current_ = 0;
+    std::map<std::string, std::vector<std::string>> records_;
+    std::vector<std::string> functions_;
+    std::vector<std::string> methods_;
+    std::vector<std::map<std::string, bool>> scopes_;
+
+    const Token& peek() const { return tokens_[current_]; }
+    const Token& previous() const { return tokens_[current_ - 1]; }
+    const Token& look(std::size_t offset) const {
+        const std::size_t index = current_ + offset;
+        return tokens_[index < tokens_.size() ? index : tokens_.size() - 1];
+    }
+    bool check(TokenKind kind) const { return peek().kind == kind; }
+    bool check_text(const std::string& text) const {
+        return peek().kind != TokenKind::string && peek().text == text;
+    }
+    const Token& advance() {
+        if (!check(TokenKind::end)) ++current_;
+        return previous();
+    }
+    bool take(const std::string& text) {
+        if (!check_text(text)) return false;
+        advance();
+        return true;
+    }
+    const Token& require(TokenKind kind, const std::string& message) {
+        if (!check(kind)) fail(peek(), message);
+        return advance();
+    }
+    Token require_name(const std::string& message) {
+        return require(TokenKind::identifier, message);
+    }
+    void require_text(const std::string& text, const std::string& message) {
+        if (!take(text)) fail(peek(), message);
+    }
+    static std::string safe(const std::string& name) { return "cfv_" + name; }
+    static bool contains(const std::vector<std::string>& values,
+                         const std::string& value) {
+        for (const auto& item : values) if (item == value) return true;
+        return false;
+    }
+
+    void discover_symbols() {
+        for (std::size_t index = 0; index + 1 < tokens_.size(); ++index) {
+            if (tokens_[index].text == "funcion" &&
+                tokens_[index + 1].kind == TokenKind::identifier) {
+                const std::string name = tokens_[index + 1].text;
+                if (!contains(functions_, name)) functions_.push_back(name);
+            }
+            if (tokens_[index].text == "metodo" &&
+                tokens_[index + 1].kind == TokenKind::identifier) {
+                const std::string name = tokens_[index + 1].text;
+                if (!contains(methods_, name)) methods_.push_back(name);
+            }
+        }
+    }
+
+    void skip_type() {
+        if (!check(TokenKind::identifier)) fail(peek(), "se esperaba un tipo");
+        advance();
+        if (take("<")) {
+            int depth = 1;
+            while (depth > 0 && !check(TokenKind::end)) {
+                if (take("<")) ++depth;
+                else if (take(">")) --depth;
+                else advance();
+            }
+        }
+    }
+
+    void parse_structure() {
+        require_text("estructura", "se esperaba 'estructura'");
+        const Token name = require_name("se esperaba el nombre de la estructura");
+        require_text("{", "se esperaba '{'");
+        std::vector<std::string> fields;
+        while (!take("}")) {
+            const Token field = require_name("se esperaba un campo");
+            require_text(":", "se esperaba ':'");
+            skip_type();
+            take(";");
+            fields.push_back(field.text);
+        }
+        take(";");
+        records_[name.text] = fields;
+    }
+
+    std::vector<std::string> parameters() {
+        std::vector<std::string> result;
+        require_text("(", "se esperaba '('");
+        if (!check_text(")")) {
+            do {
+                const Token parameter = require_name("se esperaba un parámetro");
+                result.push_back(parameter.text);
+                if (take(":")) skip_type();
+            } while (take(","));
+        }
+        require_text(")", "se esperaba ')'");
+        if (take(":")) skip_type();
+        return result;
+    }
+
+    void parse_class(std::ostringstream& output) {
+        require_text("clase", "se esperaba 'clase'");
+        const Token class_name = require_name("se esperaba el nombre de la clase");
+        require_text("{", "se esperaba '{'");
+        std::vector<std::string> fields;
+        while (!check_text("}")) {
+            if (take("campo")) {
+                const Token field = require_name("se esperaba el campo");
+                require_text(":", "se esperaba ':'");
+                skip_type();
+                take(";");
+                fields.push_back(field.text);
+            } else if (check_text("metodo")) {
+                advance();
+                const Token method = require_name("se esperaba el método");
+                parse_function_after_name(output, true, class_name.text, method);
+            } else {
+                fail(peek(), "miembro de clase no admitido por Core 0.4");
+            }
+        }
+        advance();
+        take(";");
+        records_[class_name.text] = fields;
+    }
+
+    void parse_function(std::ostringstream& output, bool method,
+                        const std::string& owner) {
+        require_text("funcion", "se esperaba 'funcion'");
+        const Token name = require_name("se esperaba el nombre de la función");
+        parse_function_after_name(output, method, owner, name);
+    }
+
+    void parse_function_after_name(std::ostringstream& output, bool method,
+                                   const std::string&, const Token& name) {
+        const auto params = parameters();
+        output << "static Value "
+               << (method ? "cfv_method_" : "cfv_fn_") << name.text << "(";
+        if (method) output << "Value cfv_este, ";
+        output << "const std::vector<Value>& cfv_args) {\n";
+        scopes_.push_back({});
+        if (method) scopes_.back()["este"] = true;
+        for (std::size_t index = 0; index < params.size(); ++index) {
+            scopes_.back()[params[index]] = true;
+            output << "    Value " << safe(params[index]) << " = cfv_arg(cfv_args, "
+                   << index << ", " << cpp_string(name.text) << ");\n";
+        }
+        require_text("{", "se esperaba el cuerpo de la función");
+        while (!check_text("}")) statement(output);
+        advance();
+        output << "    return Value();\n}\n";
+        scopes_.pop_back();
+    }
+
+    void statement(std::ostringstream& output) {
+        if (take(";")) return;
+        if (take("sea")) {
+            const Token name = require_name("se esperaba el nombre de la variable");
+            if (take(":")) skip_type();
+            require_text("=", "se esperaba '='");
+            const std::string value = expression();
+            scopes_.back()[name.text] = true;
+            output << "    Value " << safe(name.text) << " = " << value << ";\n";
+            take(";");
+            return;
+        }
+        if (take("si")) {
+            const bool grouped = take("(");
+            const std::string condition = expression();
+            if (grouped) require_text(")", "se esperaba ')'");
+            output << "    if (cfv_truth(" << condition << ")) ";
+            block(output);
+            if (take("sino")) {
+                output << "    else ";
+                block(output);
+            }
+            return;
+        }
+        if (take("mientras")) {
+            const bool grouped = take("(");
+            const std::string condition = expression();
+            if (grouped) require_text(")", "se esperaba ')'");
+            output << "    while (cfv_truth(" << condition << ")) ";
+            block(output);
+            return;
+        }
+        if (take("retornar")) {
+            output << "    return " << expression() << ";\n";
+            take(";");
+            return;
+        }
+        if (take("mostrar") || take("print")) {
+            require_text("(", "se esperaba '('");
+            const std::string value = expression();
+            require_text(")", "se esperaba ')'");
+            output << "    cfv_print(" << value << ");\n";
+            take(";");
+            return;
+        }
+        if (check(TokenKind::identifier) && look(1).text == "=") {
+            const Token name = advance();
+            advance();
+            output << "    " << variable(name) << " = " << expression() << ";\n";
+            take(";");
+            return;
+        }
+        if (check(TokenKind::identifier) && look(1).text == "." &&
+            look(2).kind == TokenKind::identifier && look(3).text == "=") {
+            const Token owner = advance();
+            advance();
+            const Token field = advance();
+            advance();
+            output << "    cfv_member_ref(" << variable(owner) << ", "
+                   << cpp_string(field.text) << ") = " << expression() << ";\n";
+            take(";");
+            return;
+        }
+        output << "    (void)(" << expression() << ");\n";
+        take(";");
+    }
+
+    void block(std::ostringstream& output) {
+        require_text("{", "se esperaba '{'");
+        output << "{\n";
+        scopes_.push_back(scopes_.back());
+        while (!check_text("}")) statement(output);
+        advance();
+        scopes_.pop_back();
+        output << "    }\n";
+    }
+
+    std::string expression() { return logic_or(); }
+    std::string logic_or() {
+        std::string left = logic_and();
+        while (take("o")) left = "cfv_bool(cfv_truth(" + left + ") || cfv_truth(" +
+                                  logic_and() + "))";
+        return left;
+    }
+    std::string logic_and() {
+        std::string left = equality();
+        while (take("y")) left = "cfv_bool(cfv_truth(" + left + ") && cfv_truth(" +
+                                  equality() + "))";
+        return left;
+    }
+    std::string equality() {
+        std::string left = comparison();
+        while (check_text("==") || check_text("!=")) {
+            const std::string op = advance().text;
+            const std::string right = comparison();
+            left = "cfv_bool(cfv_equal(" + left + ", " + right + ")" +
+                   (op == "!=" ? " == false" : "") + ")";
+        }
+        return left;
+    }
+    std::string comparison() {
+        std::string left = sum();
+        while (check_text("<") || check_text("<=") || check_text(">") ||
+               check_text(">=")) {
+            const std::string op = advance().text;
+            left = "cfv_compare(" + left + ", " + sum() + ", " + cpp_string(op) + ")";
+        }
+        return left;
+    }
+    std::string sum() {
+        std::string left = product();
+        while (check_text("+") || check_text("-")) {
+            const std::string op = advance().text;
+            left = (op == "+" ? "cfv_add(" : "cfv_sub(") + left + ", " +
+                   product() + ")";
+        }
+        return left;
+    }
+    std::string product() {
+        std::string left = unary();
+        while (check_text("*") || check_text("/") || check_text("%")) {
+            const std::string op = advance().text;
+            const std::string right = unary();
+            if (op == "*") left = "cfv_mul(" + left + ", " + right + ")";
+            else if (op == "/") left = "cfv_div(" + left + ", " + right + ")";
+            else left = "cfv_mod(" + left + ", " + right + ")";
+        }
+        return left;
+    }
+    std::string unary() {
+        if (take("no")) return "cfv_bool(!cfv_truth(" + unary() + "))";
+        if (take("-")) return "cfv_neg(" + unary() + ")";
+        return postfix();
+    }
+
+    std::string postfix() {
+        std::string value = primary();
+        while (true) {
+            if (take("[")) {
+                const std::string index = expression();
+                require_text("]", "se esperaba ']'");
+                value = "cfv_index(" + value + ", " + index + ")";
+            } else if (take(".")) {
+                const Token member = require_name("se esperaba el miembro");
+                if (take("(")) {
+                    const auto args = arguments_after_open();
+                    value = "cfv_method_" + member.text + "(" + value + ", " +
+                            vector_expression(args) + ")";
+                } else {
+                    value = "cfv_member(" + value + ", " +
+                            cpp_string(member.text) + ")";
+                }
+            } else {
+                break;
+            }
+        }
+        return value;
+    }
+
+    std::string primary() {
+        if (check(TokenKind::number)) return "cfv_number(" + advance().text + ")";
+        if (check(TokenKind::string)) return "cfv_text(" + cpp_string(advance().text) + ")";
+        if (take("verdadero")) return "cfv_bool(true)";
+        if (take("falso")) return "cfv_bool(false)";
+        if (take("[")) return "cfv_list(" + vector_expression(arguments_after("[", "]")) + ")";
+        if (take("(")) {
+            const std::string value = expression();
+            require_text(")", "se esperaba ')'");
+            return value;
+        }
+        if (check(TokenKind::identifier)) {
+            const Token name = advance();
+            if (take("(")) {
+                const auto args = arguments_after_open();
+                const auto record = records_.find(name.text);
+                if (record != records_.end()) {
+                    return "cfv_object(" + cpp_string(name.text) + ", " +
+                           string_vector(record->second) + ", " +
+                           vector_expression(args) + ")";
+                }
+                return call(name, args);
+            }
+            return variable(name);
+        }
+        fail(peek(), "expresión Core 0.4 inválida");
+    }
+
+    std::vector<std::string> arguments_after_open() {
+        std::vector<std::string> args;
+        if (!check_text(")")) {
+            do args.push_back(expression()); while (take(","));
+        }
+        require_text(")", "se esperaba ')' después de los argumentos");
+        return args;
+    }
+    std::vector<std::string> arguments_after(const std::string&,
+                                             const std::string& close) {
+        std::vector<std::string> args;
+        if (!check_text(close)) {
+            do args.push_back(expression()); while (take(","));
+        }
+        require_text(close, "se esperaba el cierre de la lista");
+        return args;
+    }
+
+    std::string call(const Token& name, const std::vector<std::string>& args) {
+        if (name.text == "longitud") return "cfv_length(" + one(name, args) + ")";
+        if (name.text == "a_texto") return "cfv_text(cfv_format(" + one(name, args) + "))";
+        if (name.text == "agregar") {
+            if (args.size() != 2) fail(name, "agregar requiere dos argumentos");
+            return "cfv_append(" + args[0] + ", " + args[1] + ")";
+        }
+        if (name.text == "afirmar") {
+            if (args.size() != 2) fail(name, "afirmar requiere dos argumentos");
+            return "cfv_assert(" + args[0] + ", " + args[1] + ")";
+        }
+        if (!contains(functions_, name.text)) {
+            fail(name, "función desconocida '" + name.text + "'");
+        }
+        return "cfv_fn_" + name.text + "(" + vector_expression(args) + ")";
+    }
+    std::string one(const Token& name, const std::vector<std::string>& args) {
+        if (args.size() != 1) fail(name, name.text + " requiere un argumento");
+        return args[0];
+    }
+    std::string variable(const Token& name) const {
+        if (name.text == "este") return "cfv_este";
+        return safe(name.text);
+    }
+    static std::string vector_expression(const std::vector<std::string>& values) {
+        std::ostringstream output;
+        output << "std::vector<Value>{";
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            if (index) output << ", ";
+            output << values[index];
+        }
+        return output.str() + "}";
+    }
+    static std::string string_vector(const std::vector<std::string>& values) {
+        std::ostringstream output;
+        output << "std::vector<std::string>{";
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            if (index) output << ", ";
+            output << cpp_string(values[index]);
+        }
+        return output.str() + "}";
+    }
+    static std::string cpp_string(const std::string& value) {
+        std::ostringstream escaped;
+        escaped << '"';
+        for (const unsigned char byte : value) {
+            if (byte == '\\') escaped << "\\\\";
+            else if (byte == '"') escaped << "\\\"";
+            else if (byte == '\n') escaped << "\\n";
+            else if (byte == '\r') escaped << "\\r";
+            else if (byte == '\t') escaped << "\\t";
+            else escaped << static_cast<char>(byte);
+        }
+        escaped << '"';
+        return escaped.str();
+    }
+    [[noreturn]] static void fail(const Token& token, const std::string& message) {
+        throw CompileError("Línea " + std::to_string(token.line) + ", columna " +
+                           std::to_string(token.column) + ": " + message);
+    }
+
+    static std::string runtime() {
+        return R"CPP(#include <cmath>
+#include <iomanip>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <variant>
+#include <vector>
+
+struct Value;
+using List = std::vector<Value>;
+using Object = std::map<std::string, Value>;
+struct Value {
+    using Data = std::variant<std::monostate, double, bool, std::string,
+                              std::shared_ptr<List>, std::shared_ptr<Object>>;
+    Data data;
+    Value() = default;
+    explicit Value(double value) : data(value) {}
+    explicit Value(bool value) : data(value) {}
+    explicit Value(std::string value) : data(std::move(value)) {}
+    explicit Value(std::shared_ptr<List> value) : data(std::move(value)) {}
+    explicit Value(std::shared_ptr<Object> value) : data(std::move(value)) {}
+};
+static Value cfv_number(double value) { return Value(value); }
+static Value cfv_text(std::string value) { return Value(std::move(value)); }
+static Value cfv_bool(bool value) { return Value(value); }
+static double cfv_num(const Value& value) {
+    if (const auto* found = std::get_if<double>(&value.data)) return *found;
+    throw std::runtime_error("se esperaba numero");
+}
+static bool cfv_truth(const Value& value) {
+    if (const auto* found = std::get_if<bool>(&value.data)) return *found;
+    if (const auto* found = std::get_if<double>(&value.data)) return *found != 0;
+    if (const auto* found = std::get_if<std::string>(&value.data)) return !found->empty();
+    if (const auto* found = std::get_if<std::shared_ptr<List>>(&value.data))
+        return !(*found)->empty();
+    return !std::holds_alternative<std::monostate>(value.data);
+}
+static std::string cfv_format(const Value& value) {
+    if (std::holds_alternative<std::monostate>(value.data)) return "nulo";
+    if (const auto* found = std::get_if<bool>(&value.data))
+        return *found ? "verdadero" : "falso";
+    if (const auto* found = std::get_if<std::string>(&value.data)) return *found;
+    if (const auto* found = std::get_if<double>(&value.data)) {
+        if (std::floor(*found) == *found) return std::to_string(static_cast<long long>(*found));
+        std::ostringstream output; output << std::setprecision(15) << *found;
+        return output.str();
+    }
+    return "<objeto>";
+}
+static bool cfv_equal(const Value& left, const Value& right) {
+    if (left.data.index() != right.data.index()) return false;
+    if (const auto* a = std::get_if<double>(&left.data))
+        return *a == std::get<double>(right.data);
+    if (const auto* a = std::get_if<bool>(&left.data))
+        return *a == std::get<bool>(right.data);
+    if (const auto* a = std::get_if<std::string>(&left.data))
+        return *a == std::get<std::string>(right.data);
+    return left.data == right.data;
+}
+static Value cfv_add(const Value& left, const Value& right) {
+    if (const auto* a = std::get_if<double>(&left.data)) {
+        if (const auto* b = std::get_if<double>(&right.data)) return Value(*a + *b);
+    }
+    if (const auto* a = std::get_if<std::string>(&left.data)) {
+        if (const auto* b = std::get_if<std::string>(&right.data)) return Value(*a + *b);
+    }
+    throw std::runtime_error("tipos incompatibles para '+'");
+}
+static Value cfv_sub(const Value& a, const Value& b) { return Value(cfv_num(a) - cfv_num(b)); }
+static Value cfv_mul(const Value& a, const Value& b) { return Value(cfv_num(a) * cfv_num(b)); }
+static Value cfv_div(const Value& a, const Value& b) {
+    const double divisor = cfv_num(b);
+    if (divisor == 0) throw std::runtime_error("división por cero");
+    return Value(cfv_num(a) / divisor);
+}
+static Value cfv_mod(const Value& a, const Value& b) {
+    return Value(std::fmod(cfv_num(a), cfv_num(b)));
+}
+static Value cfv_neg(const Value& value) { return Value(-cfv_num(value)); }
+static Value cfv_compare(const Value& a, const Value& b, const std::string& op) {
+    if (const auto* left = std::get_if<double>(&a.data)) {
+        const double right = cfv_num(b);
+        return Value(op == "<" ? *left < right : op == "<=" ? *left <= right :
+                     op == ">" ? *left > right : *left >= right);
+    }
+    const auto* left = std::get_if<std::string>(&a.data);
+    const auto* right = std::get_if<std::string>(&b.data);
+    if (!left || !right) throw std::runtime_error("comparación incompatible");
+    return Value(op == "<" ? *left < *right : op == "<=" ? *left <= *right :
+                 op == ">" ? *left > *right : *left >= *right);
+}
+static Value cfv_list(const std::vector<Value>& values) {
+    return Value(std::make_shared<List>(values));
+}
+static Value cfv_object(const std::string& type,
+                        const std::vector<std::string>& fields,
+                        const std::vector<Value>& values) {
+    if (fields.size() != values.size())
+        throw std::runtime_error(type + " recibió una cantidad de campos inválida");
+    auto object = std::make_shared<Object>();
+    (*object)["__tipo"] = Value(type);
+    for (std::size_t i = 0; i < fields.size(); ++i) (*object)[fields[i]] = values[i];
+    return Value(object);
+}
+static Value cfv_index(const Value& value, const Value& index) {
+    const auto position = static_cast<std::size_t>(cfv_num(index));
+    if (const auto* list = std::get_if<std::shared_ptr<List>>(&value.data)) {
+        if (position >= (*list)->size()) throw std::runtime_error("índice fuera de rango");
+        return (**list)[position];
+    }
+    if (const auto* text = std::get_if<std::string>(&value.data)) {
+        if (position >= text->size()) throw std::runtime_error("índice fuera de rango");
+        return Value(std::string(1, (*text)[position]));
+    }
+    throw std::runtime_error("el valor no admite índices");
+}
+static Value cfv_member(const Value& value, const std::string& field) {
+    const auto* object = std::get_if<std::shared_ptr<Object>>(&value.data);
+    if (!object) throw std::runtime_error("se esperaba un objeto");
+    const auto found = (*object)->find(field);
+    if (found == (*object)->end()) throw std::runtime_error("campo desconocido " + field);
+    return found->second;
+}
+static Value& cfv_member_ref(Value& value, const std::string& field) {
+    auto* object = std::get_if<std::shared_ptr<Object>>(&value.data);
+    if (!object) throw std::runtime_error("se esperaba un objeto mutable");
+    const auto found = (*object)->find(field);
+    if (found == (*object)->end()) throw std::runtime_error("campo desconocido " + field);
+    return found->second;
+}
+static Value cfv_length(const Value& value) {
+    if (const auto* text = std::get_if<std::string>(&value.data))
+        return Value(static_cast<double>(text->size()));
+    if (const auto* list = std::get_if<std::shared_ptr<List>>(&value.data))
+        return Value(static_cast<double>((*list)->size()));
+    throw std::runtime_error("longitud requiere texto o lista");
+}
+static Value cfv_append(Value value, const Value& item) {
+    auto* list = std::get_if<std::shared_ptr<List>>(&value.data);
+    if (!list) throw std::runtime_error("agregar requiere una lista");
+    (*list)->push_back(item);
+    return Value();
+}
+static Value cfv_assert(const Value& condition, const Value& message) {
+    if (!cfv_truth(condition)) throw std::runtime_error(cfv_format(message));
+    return Value();
+}
+static Value cfv_arg(const std::vector<Value>& args, std::size_t index,
+                     const std::string& function) {
+    if (index >= args.size()) throw std::runtime_error(function + ": faltan argumentos");
+    return args[index];
+}
+static void cfv_print(const Value& value) { std::cout << cfv_format(value) << '\n'; }
+)CPP";
+    }
+};
+
 static std::string read_file(const fs::path& path) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream) throw CompileError("no se pudo abrir " + path.string());
@@ -9026,7 +11120,19 @@ int main(int argc, char** argv) {
         }
         const fs::path input = fs::absolute(argv[1]);
         const fs::path output = fs::absolute(argv[3]);
-        const std::string generated = Parser(Lexer(read_file(input)).scan()).compile_to_cpp();
+        std::vector<Token> tokens = Lexer(read_file(input)).scan();
+        bool requires_b1 = false;
+        for (const auto& token : tokens) {
+            if (token.text == "funcion" || token.text == "estructura" ||
+                token.text == "clase" || token.text == "mientras" ||
+                token.text == "si") {
+                requires_b1 = true;
+                break;
+            }
+        }
+        const std::string generated = requires_b1
+            ? CoreB1Compiler(std::move(tokens)).compile_to_cpp()
+            : Parser(std::move(tokens)).compile_to_cpp();
         const fs::path temporary = output.string() + ".stage0.cpp";
         {
             std::ofstream stream(temporary, std::ios::binary);
@@ -9049,23 +11155,86 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-)CFV31DATA"},
-        {R"CFV32DATA(bootstrap/fixtures/minimal.cfv)CFV32DATA", R"CFV33DATA(// Programa aceptado por C-Forge Stage 0.
+)CFV47DATA"},
+        {R"CFV48DATA(bootstrap/fixtures/minimal.cfv)CFV48DATA", R"CFV49DATA(// Programa aceptado por C-Forge Stage 0.
 sea proyecto: texto = "C-Forge"
 sea base: numero = 40
 sea resultado: numero = base + 2
 mostrar(proyecto + " Core Bootstrap")
 mostrar(resultado)
-)CFV33DATA"},
-        {R"CFV34DATA(registry/index.json)CFV34DATA", R"CFV35DATA({
+)CFV49DATA"},
+        {R"CFV50DATA(bootstrap/fixtures/parser_b1_driver.cfv)CFV50DATA", R"CFV51DATA(// Driver B1. Se concatena después de core_lexer, core_ast y core_parser.
+sea fuente_b1: texto =
+    "sea respuesta: numero = 40 + 2 * 3\n" +
+    "mostrar(respuesta)\n"
+sea programa_b1: cualquiera = parsear_fuente_core(fuente_b1)
+mostrar(ast_core_canonico(programa_b1))
+
+sea fuente_texto_b1: texto =
+    "sea nombre: texto = \"C-\" + \"Forge\";\n" +
+    "print((nombre + \" B1\"));\n"
+sea programa_texto_b1: cualquiera = parsear_fuente_core(fuente_texto_b1)
+mostrar(ast_core_canonico(programa_texto_b1))
+
+sea fuente_asociatividad_b1: texto =
+    "sea calculo = 20 - 5 - 3\n" +
+    "mostrar(calculo)\n"
+sea programa_asociatividad_b1: cualquiera =
+    parsear_fuente_core(fuente_asociatividad_b1)
+mostrar(ast_core_canonico(programa_asociatividad_b1))
+)CFV51DATA"},
+        {R"CFV52DATA(bootstrap/fixtures/semantics_b2_driver.cfv)CFV52DATA", R"CFV53DATA(// Corpus normativo B2. Se concatena tras lexer, AST, parser y semántica.
+
+sea fuente_valida_b2: texto =
+    "sea titulo: texto = \"C-Forge\"\n" +
+    "sea copia: texto = mover(titulo)\n" +
+    "sea base: numero = 40\n" +
+    "sea copia_base: numero = mover(base)\n" +
+    "mostrar(base + 2)\n"
+sea resultado_valido_b2: cualquiera =
+    analizar_semantica_core(parsear_fuente_core(fuente_valida_b2))
+mostrar(resultado_valido_b2.valido)
+
+sea fuente_tipo_b2: texto = "sea edad: numero = \"veinte\"\n"
+sea resultado_tipo_b2: cualquiera =
+    analizar_semantica_core(parsear_fuente_core(fuente_tipo_b2))
+mostrar(diagnosticos_semanticos_core(resultado_tipo_b2))
+
+sea fuente_desconocida_b2: texto = "mostrar(fantasma)\n"
+sea resultado_desconocida_b2: cualquiera =
+    analizar_semantica_core(parsear_fuente_core(fuente_desconocida_b2))
+mostrar(diagnosticos_semanticos_core(resultado_desconocida_b2))
+
+sea fuente_movida_b2: texto =
+    "sea nombre: texto = \"Javier\"\n" +
+    "sea destino: texto = mover(nombre)\n" +
+    "mostrar(nombre)\n"
+sea resultado_movida_b2: cualquiera =
+    analizar_semantica_core(parsear_fuente_core(fuente_movida_b2))
+mostrar(diagnosticos_semanticos_core(resultado_movida_b2))
+)CFV53DATA"},
+        {R"CFV54DATA(bootstrap/fixtures/emitter_b3_driver.cfv)CFV54DATA", R"CFV55DATA(// Driver del emisor B3. Su única salida es una unidad C++17 compilable.
+sea fuente_b3: texto =
+    "sea nombre: texto = \"C-Forge\"\n" +
+    "sea nombre_movido: texto = mover(nombre)\n" +
+    "sea base: numero = 40\n" +
+    "sea resultado: numero = base + 2\n" +
+    "mostrar(nombre_movido + \" B3\")\n" +
+    "mostrar(resultado)\n"
+sea programa_b3: cualquiera = parsear_fuente_core(fuente_b3)
+sea emision_b3: cualquiera = emitir_programa_core(programa_b3)
+afirmar(emision_b3.valido, diagnosticos_semanticos_core(emision_b3))
+mostrar(emision_b3.codigo)
+)CFV55DATA"},
+        {R"CFV56DATA(registry/index.json)CFV56DATA", R"CFV57DATA({
   "format": 2,
   "registry": "C-Forge Community Registry",
   "publishers": {},
   "revocations": [],
   "packages": {}
 }
-)CFV35DATA"},
-        {R"CFV36DATA(registry/README.md)CFV36DATA", R"CFV37DATA(# Registro público de paquetes C-Forge
+)CFV57DATA"},
+        {R"CFV58DATA(registry/README.md)CFV58DATA", R"CFV59DATA(# Registro público de paquetes C-Forge
 
 Este directorio define el índice público, auditable y versionado del gestor `cforge pkg`.
 Cada versión del formato 2 debe publicar una URL HTTPS, el SHA-256 exacto del
@@ -9092,8 +11261,8 @@ que cada paquete señale un publicador `active` y que su `key_id` esté autoriza
 por esa cuenta. Esta fase usa
 identidades de GitHub y revisión por pull request; todavía no existe un servicio
 central de inicio de sesión, recuperación de cuenta ni publicación automática.
-)CFV37DATA"},
-        {R"CFV38DATA(include/cforgev_ffi.h)CFV38DATA", R"CFV39DATA(#ifndef CFORGEV_FFI_H
+)CFV59DATA"},
+        {R"CFV60DATA(include/cforgev_ffi.h)CFV60DATA", R"CFV61DATA(#ifndef CFORGEV_FFI_H
 #define CFORGEV_FFI_H
 
 #include <stddef.h>
@@ -9238,8 +11407,8 @@ CFV_EXPORT int cfv_register_function_v2(const char* name, CfvForeignFunctionV2 f
 #endif
 
 #endif
-)CFV39DATA"},
-        {R"CFV40DATA(include/cforge_shared_arena.h)CFV40DATA", R"CFV41DATA(#ifndef CFORGE_SHARED_ARENA_H
+)CFV61DATA"},
+        {R"CFV62DATA(include/cforge_shared_arena.h)CFV62DATA", R"CFV63DATA(#ifndef CFORGE_SHARED_ARENA_H
 #define CFORGE_SHARED_ARENA_H
 
 #include <atomic>
@@ -9589,8 +11758,8 @@ private:
 }  // namespace cforge::arena
 
 #endif
-)CFV41DATA"},
-        {R"CFV42DATA(herramientas/cforgev_ffi_runner.cpp)CFV42DATA", R"CFV43DATA(#include "cforgev_ffi.h"
+)CFV63DATA"},
+        {R"CFV64DATA(herramientas/cforgev_ffi_runner.cpp)CFV64DATA", R"CFV65DATA(#include "cforgev_ffi.h"
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -9638,8 +11807,8 @@ int main(int argc, char** argv) {
     if (result.release) result.release(result.owner);
     return 0;
 }
-)CFV43DATA"},
-        {R"CFV44DATA(herramientas/cforge_cli.cpp)CFV44DATA", R"CFV45DATA(#include <cerrno>
+)CFV65DATA"},
+        {R"CFV66DATA(herramientas/cforge_cli.cpp)CFV66DATA", R"CFV67DATA(#include <cerrno>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -9710,8 +11879,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-)CFV45DATA"},
-        {R"CFV46DATA(herramientas/vscode-cforgev/package.json)CFV46DATA", R"CFV47DATA({
+)CFV67DATA"},
+        {R"CFV68DATA(herramientas/vscode-cforgev/package.json)CFV68DATA", R"CFV69DATA({
   "name": "cforgev-language",
   "displayName": "C-Forge Language Support",
   "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
@@ -9811,8 +11980,8 @@ int main(int argc, char** argv) {
     ]
   }
 }
-)CFV47DATA"},
-        {R"CFV48DATA(herramientas/vscode-cforgev/extension.js)CFV48DATA", R"CFV49DATA("use strict";
+)CFV69DATA"},
+        {R"CFV70DATA(herramientas/vscode-cforgev/extension.js)CFV70DATA", R"CFV71DATA("use strict";
 
 const vscode = require("vscode");
 const { execFile, spawn } = require("child_process");
@@ -10058,8 +12227,8 @@ function activate(context) {
 async function deactivate() { if (languageServer) await languageServer.stop(); }
 
 module.exports = { activate, deactivate };
-)CFV49DATA"},
-        {R"CFV50DATA(herramientas/vscode-cforgev/language-configuration.json)CFV50DATA", R"CFV51DATA({
+)CFV71DATA"},
+        {R"CFV72DATA(herramientas/vscode-cforgev/language-configuration.json)CFV72DATA", R"CFV73DATA({
   "comments": { "lineComment": "//" },
   "brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
   "autoClosingPairs": [
@@ -10069,8 +12238,8 @@ module.exports = { activate, deactivate };
     { "open": "\"", "close": "\"" }
   ]
 }
-)CFV51DATA"},
-        {R"CFV52DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV52DATA", R"CFV53DATA({
+)CFV73DATA"},
+        {R"CFV74DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV74DATA", R"CFV75DATA({
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "C-Forge",
   "scopeName": "source.cforgev",
@@ -10116,7 +12285,7 @@ module.exports = { activate, deactivate };
     ] }
   }
 }
-)CFV53DATA"}
+)CFV75DATA"}
     };
     return resources;
 }

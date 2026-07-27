@@ -106,8 +106,8 @@
       "id": "autonomous-native-core",
       "name": "Compilador autoalojado y núcleo autónomo",
       "status": "planned",
-      "scope": "Stage 0 C++ mínimo produce ejecutables y el lexer Stage 1 está escrito en C-Forge; parser, emisor, Stage 1/2/3 y runtime autónomo siguen pendientes",
-      "evidence": ["docs/COMPLETENESS-POLICY.md", "docs/BOOTSTRAP.md", "docs/CORE-DIRECTION.md", "bootstrap/stage0/cforge_bootstrap.cpp", "bootstrap/core_lexer.cfv", "tests/test_bootstrap_stage0.py"]
+      "scope": "B3 verificado: Stage 0 compila lexer, AST, parser, tipos/ownership y emisor Core 0.4 escritos en C-Forge; Stage 1/2/3 y runtime autónomo siguen pendientes",
+      "evidence": ["docs/COMPLETENESS-POLICY.md", "docs/BOOTSTRAP.md", "docs/CORE-DIRECTION.md", "docs/CORE-GRAMMAR-0.4.ebnf", "docs/C-FORGE-2.0-DRAFT.md", "docs/GRAMMAR-2.0-DRAFT.ebnf", "bootstrap/stage0/cforge_bootstrap.cpp", "bootstrap/fixtures/minimal.cfv", "bootstrap/core_lexer.cfv", "bootstrap/core_ast.cfv", "bootstrap/core_parser.cfv", "bootstrap/core_semantics.cfv", "bootstrap/core_emitter.cfv", "bootstrap/fixtures/parser_b1_driver.cfv", "bootstrap/fixtures/semantics_b2_driver.cfv", "bootstrap/fixtures/emitter_b3_driver.cfv", "tests/test_bootstrap_stage0.py", "tests/test_bootstrap_b1.py", "tests/test_bootstrap_b2.py", "tests/test_bootstrap_b3.py", "tests/test_professional_tooling.py"]
     },
     {
       "id": "critical-production",

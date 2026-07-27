@@ -6,6 +6,11 @@ C-Forge será autoalojado cuando un compilador escrito íntegramente en `.cfv`
 pueda compilar su propio código fuente y las generaciones consecutivas sean
 reproducibles. Los puentes políglotas no forman parte de este núcleo.
 
+El lenguaje que deberá implementar el compilador autoalojado está definido por
+[`C-FORGE-2.0-DRAFT.md`](C-FORGE-2.0-DRAFT.md) y
+[`GRAMMAR-2.0-DRAFT.ebnf`](GRAMMAR-2.0-DRAFT.ebnf). Ambos son contratos
+candidatos; el subconjunto Core crece de forma controlada hasta cubrirlos.
+
 ## Definiciones verificables
 
 - **Stage 0:** compilador mínimo escrito en C++17. Lee C-Forge Core, genera una
@@ -47,21 +52,40 @@ compile y ejecute el artefacto nativo sin invocar Python.
 | Hito | Implementación `.cfv` | Criterio de salida |
 |---|---|---|
 | B0 | Stage 0 C++ + lexer Stage 1 | Stage 0 produce un ejecutable; lexer `.cfv` pasa intérprete y VM |
-| B1 | Parser escrito en C-Forge | AST canónico igual para la suite Core |
-| B2 | Tipos y ownership escritos en C-Forge | Diagnósticos iguales para casos positivos y negativos |
-| B3 | Emisor nativo escrito en C-Forge | Produce el artefacto que ejecutará Stage 1 |
+| B1 | Parser escrito en C-Forge | **Cumplido:** AST canónico igual en Stage 0, intérprete y VM para la suite Core 0.2 |
+| B2 | Tipos y ownership escritos en C-Forge | **Cumplido:** tipos, variable no declarada y uso después de mover producen diagnósticos iguales en los tres motores |
+| B3 | Emisor nativo escrito en C-Forge | **Cumplido:** Stage 0 compila el emisor `.cfv`, que produce C++17 y un ejecutable nativo verificado |
 | B4 | Compilador Stage 1 | Compila todas sus propias fuentes `.cfv` |
 | B5 | Stage 2/3 | Artefactos reproducibles equivalentes |
 | B6 | Runtime autónomo | Funciona sin runtimes externos instalados |
 
 ## Estado actual
 
-**B0 en progreso verificable.**
+**B3 completado de forma verificable; B4 es el siguiente hito.**
 
 - `bootstrap/stage0/cforge_bootstrap.cpp` es el compilador inicial C++.
 - `bootstrap/fixtures/minimal.cfv` se convierte en un ejecutable de máquina real.
 - `bootstrap/core_lexer.cfv` es el primer componente de Stage 1 escrito en
   C-Forge.
+- `bootstrap/core_ast.cfv` define el árbol independiente del runtime anfitrión.
+- `bootstrap/core_parser.cfv` implementa el parser recursivo descendente.
+- `bootstrap/core_semantics.cfv` implementa tipos y ownership Core.
+- `bootstrap/core_emitter.cfv` genera una unidad C++17 completa desde el AST
+  aprobado por B2.
+- `docs/CORE-GRAMMAR-0.4.ebnf` congela exactamente el subconjunto aceptado.
+- `tests/test_bootstrap_b1.py` compila la unidad B1 con Stage 0 y exige que
+  Stage 0, intérprete y VM emitan bytes idénticos para el AST canónico.
+
+B3 cubre toda la gramática **Core 0.4**, no la gramática general de C-Forge
+2.0. `numero` es copiable; `texto` tiene ownership y `mover(texto)` invalida el
+origen. El analizador detecta tipos incompatibles, variables no declaradas y uso
+después de mover. Préstamos, tiempos de vida, regiones, clases del usuario,
+módulos y el resto del lenguaje se añadirán solo cuando los hitos posteriores
+los necesiten y posean pruebas normativas.
+
+La prueba B3 compila el emisor con Stage 0, compara el C++ generado por Stage 0,
+intérprete y VM, compila ese C++ con el compilador del sistema y ejecuta el
+binario resultante. Un AST rechazado por B2 nunca se convierte en C++.
 
 Construcción manual:
 

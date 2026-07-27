@@ -1,0 +1,149 @@
+// Emisor nativo de C-Forge Core Bootstrap 0.4.
+// Recibe el AST canónico validado por B2 y genera una unidad C++17 completa.
+
+estructura ResultadoEmisionCore {
+    valido: booleano
+    codigo: texto
+    errores: lista
+}
+
+funcion nombre_cpp_core(nombre: texto): texto {
+    retornar "cfv_" + nombre
+}
+
+funcion encabezado_cpp_core(): texto {
+    retornar
+        "#include <cmath>\n" +
+        "#include <iomanip>\n" +
+        "#include <iostream>\n" +
+        "#include <sstream>\n" +
+        "#include <stdexcept>\n" +
+        "#include <string>\n" +
+        "#include <variant>\n\n" +
+        "struct Valor {\n" +
+        "    std::variant<double, std::string> dato;\n" +
+        "    explicit Valor(double valor) : dato(valor) {}\n" +
+        "    explicit Valor(std::string valor) : dato(std::move(valor)) {}\n" +
+        "};\n\n" +
+        "static double numero(const Valor& valor) {\n" +
+        "    if (const auto* n = std::get_if<double>(&valor.dato)) return *n;\n" +
+        "    throw std::runtime_error(\"se esperaba numero\");\n" +
+        "}\n" +
+        "static Valor sumar(const Valor& a, const Valor& b) {\n" +
+        "    if (const auto* x = std::get_if<double>(&a.dato)) {\n" +
+        "        if (const auto* y = std::get_if<double>(&b.dato)) return Valor(*x + *y);\n" +
+        "    }\n" +
+        "    if (const auto* x = std::get_if<std::string>(&a.dato)) {\n" +
+        "        if (const auto* y = std::get_if<std::string>(&b.dato)) return Valor(*x + *y);\n" +
+        "    }\n" +
+        "    throw std::runtime_error(\"tipos incompatibles para +\");\n" +
+        "}\n" +
+        "static Valor restar(const Valor& a, const Valor& b) {\n" +
+        "    return Valor(numero(a) - numero(b));\n" +
+        "}\n" +
+        "static Valor multiplicar(const Valor& a, const Valor& b) {\n" +
+        "    return Valor(numero(a) * numero(b));\n" +
+        "}\n" +
+        "static Valor dividir(const Valor& a, const Valor& b) {\n" +
+        "    const double divisor = numero(b);\n" +
+        "    if (divisor == 0) throw std::runtime_error(\"division por cero\");\n" +
+        "    return Valor(numero(a) / divisor);\n" +
+        "}\n" +
+        "static Valor mover_core(const Valor& valor) { return valor; }\n" +
+        "static void mostrar_core(const Valor& valor) {\n" +
+        "    if (const auto* texto = std::get_if<std::string>(&valor.dato)) {\n" +
+        "        std::cout << *texto << '\\n';\n" +
+        "        return;\n" +
+        "    }\n" +
+        "    const double n = numero(valor);\n" +
+        "    if (std::floor(n) == n) {\n" +
+        "        std::cout << static_cast<long long>(n) << '\\n';\n" +
+        "    } else {\n" +
+        "        std::ostringstream salida;\n" +
+        "        salida << std::setprecision(15) << n;\n" +
+        "        std::cout << salida.str() << '\\n';\n" +
+        "    }\n" +
+        "}\n\n" +
+        "int main() {\n" +
+        "    try {\n"
+}
+
+funcion pie_cpp_core(): texto {
+    retornar
+        "        return 0;\n" +
+        "    } catch (const std::exception& error) {\n" +
+        "        std::cerr << \"[C-Forge Core Runtime Error] \" << error.what() << '\\n';\n" +
+        "        return 1;\n" +
+        "    }\n" +
+        "}\n"
+}
+
+funcion emitir_expresion_core(nodo: cualquiera): texto {
+    si (nodo.tipo == "Numero") {
+        retornar "Valor(" + nodo.valor + ")"
+    }
+    si (nodo.tipo == "Texto") {
+        retornar "Valor(std::string(" + nodo.valor + "))"
+    }
+    si (nodo.tipo == "Identificador") {
+        retornar nombre_cpp_core(nodo.valor)
+    }
+    sea hijos: lista = nodo.hijos
+    si (nodo.tipo == "Mover") {
+        retornar "mover_core(" + emitir_expresion_core(hijos[0]) + ")"
+    }
+    si (nodo.tipo == "Binario") {
+        sea izquierdo: texto = emitir_expresion_core(hijos[0])
+        sea derecho: texto = emitir_expresion_core(hijos[1])
+        si (nodo.valor == "+") {
+            retornar "sumar(" + izquierdo + ", " + derecho + ")"
+        }
+        si (nodo.valor == "-") {
+            retornar "restar(" + izquierdo + ", " + derecho + ")"
+        }
+        si (nodo.valor == "*") {
+            retornar "multiplicar(" + izquierdo + ", " + derecho + ")"
+        }
+        si (nodo.valor == "/") {
+            retornar "dividir(" + izquierdo + ", " + derecho + ")"
+        }
+    }
+    afirmar(
+        falso,
+        "B3 no puede emitir el nodo de expresión '" + nodo.tipo + "'"
+    )
+    retornar ""
+}
+
+funcion emitir_sentencia_core(nodo: cualquiera): texto {
+    sea hijos: lista = nodo.hijos
+    si (nodo.tipo == "Declaracion") {
+        sea nombre: texto = nombre_declaracion_core(nodo.valor)
+        retornar
+            "        Valor " + nombre_cpp_core(nombre) + " = " +
+            emitir_expresion_core(hijos[0]) + ";\n"
+    }
+    si (nodo.tipo == "Mostrar") {
+        retornar
+            "        mostrar_core(" +
+            emitir_expresion_core(hijos[0]) + ");\n"
+    }
+    afirmar(falso, "B3 no puede emitir la sentencia '" + nodo.tipo + "'")
+    retornar ""
+}
+
+funcion emitir_programa_core(programa: cualquiera): cualquiera {
+    sea semantica: cualquiera = analizar_semantica_core(programa)
+    si (no semantica.valido) {
+        retornar ResultadoEmisionCore(falso, "", semantica.errores)
+    }
+    sea codigo: texto = encabezado_cpp_core()
+    sea sentencias: lista = programa.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(sentencias)) {
+        codigo = codigo + emitir_sentencia_core(sentencias[indice])
+        indice = indice + 1
+    }
+    codigo = codigo + pie_cpp_core()
+    retornar ResultadoEmisionCore(verdadero, codigo, [])
+}

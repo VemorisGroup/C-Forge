@@ -97,9 +97,10 @@ print(datos.len())
 - **[Parcial]** WebAssembly emite WAT para un subconjunto, no para todo C-Forge.
 - **[Parcial]** Empaquetado para macOS, Linux y Windows; la validación física y
   los catálogos públicos aún no están completos.
-- **[Planeado]** Compilador autoalojado y núcleo autónomo. El bootstrap B0 ya
-  posee un lexer escrito en C-Forge, pero parser, emisor, Stage 1/2/3 y runtime
-  independiente siguen pendientes; consulta [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md).
+- **[Planeado]** Compilador autoalojado y núcleo autónomo. B3 ya posee lexer,
+  AST, parser, tipos/ownership y emisor nativo Core 0.4 escritos en C-Forge y
+  compilables por Stage 0; ensamblar Stage 1/2/3 y el runtime independiente
+  siguen pendientes; consulta [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md).
 - **[No certificado]** Uso bancario o crítico; requiere auditoría profesional,
   LTS, cumplimiento y evidencia externa.
 
@@ -125,11 +126,19 @@ cforge vm bootstrap/core_lexer.cfv
 ```
 
 El primer bloque verifica que Stage 0 produzca código máquina; los dos últimos
-comprueban el lexer que formará parte de Stage 1. Esto todavía es B0 y no
-significa que C-Forge sea autoalojado. La condición definitiva será que Stage 2
+comprueban el lexer que formará parte de Stage 1. B1 está verificado, pero esto
+no significa que C-Forge sea autoalojado. La condición definitiva será que Stage 2
 y Stage 3 recompilen las mismas fuentes `.cfv` y produzcan artefactos
 reproducibles equivalentes. La dirección nativa completa está en
 [`docs/CORE-DIRECTION.md`](docs/CORE-DIRECTION.md).
+
+Los hitos B1/B2 añaden [`core_ast.cfv`](bootstrap/core_ast.cfv),
+[`core_parser.cfv`](bootstrap/core_parser.cfv),
+[`core_semantics.cfv`](bootstrap/core_semantics.cfv) y la
+[`gramática Core 0.4`](docs/CORE-GRAMMAR-0.4.ebnf). B3 agrega
+[`core_emitter.cfv`](bootstrap/core_emitter.cfv). Sus pruebas ensamblan esas
+fuentes con el lexer, las compilan mediante Stage 0, comparan AST, diagnósticos
+y C++ generado contra el intérprete y la VM, y ejecutan el binario final.
 
 ## Herramientas profesionales (base 1.0)
 
@@ -165,6 +174,13 @@ La definición independiente de la implementación está en la
 [`gramática EBNF`](docs/GRAMMAR-1.6.ebnf), el
 [`sistema de tipos`](docs/TYPE-SYSTEM-1.6.md) y el
 [`contrato de backends`](docs/BACKEND-SEMANTICS-1.6.md).
+
+La dirección del lenguaje autónomo está definida en
+[`C-Forge 2.0 Draft`](docs/C-FORGE-2.0-DRAFT.md) y su
+[`gramática candidata completa`](docs/GRAMMAR-2.0-DRAFT.ebnf). Estos documentos
+son una especificación de diseño: **no afirman que el motor 1.6 implemente aún
+todas esas construcciones**. El avance real continúa gobernado por
+`capabilities.json` y la política de completitud.
 
 ## Inicio rápido
 

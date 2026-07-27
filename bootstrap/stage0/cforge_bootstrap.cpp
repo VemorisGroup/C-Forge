@@ -176,7 +176,9 @@ private:
     const Token& peek() const { return tokens_[current_]; }
     const Token& previous() const { return tokens_[current_ - 1]; }
     bool check(TokenKind kind) const { return peek().kind == kind; }
-    bool check_text(const std::string& text) const { return peek().text == text; }
+    bool check_text(const std::string& text) const {
+        return peek().kind != TokenKind::string && peek().text == text;
+    }
     const Token& advance() {
         if (!check(TokenKind::end)) ++current_;
         return previous();
@@ -357,6 +359,636 @@ int main() {
     }
 };
 
+// Compilador del subconjunto Core 0.4 requerido por B1/B2/B3. Conserva Stage 0 como
+// una herramienta pequeña, pero añade funciones, control de flujo, listas y
+// objetos suficientes para compilar el lexer, el AST y el parser escritos en
+// C-Forge. La semántica continúa alojada únicamente en este binario C++17.
+class CoreB1Compiler {
+public:
+    explicit CoreB1Compiler(std::vector<Token> tokens) : tokens_(std::move(tokens)) {
+        discover_symbols();
+    }
+
+    std::string compile_to_cpp() {
+        std::ostringstream declarations;
+        std::ostringstream body;
+        current_ = 0;
+        scopes_.push_back({});
+        while (!check(TokenKind::end)) {
+            if (take(";")) continue;
+            if (check_text("estructura")) {
+                parse_structure();
+            } else if (check_text("clase")) {
+                parse_class(declarations);
+            } else if (check_text("funcion")) {
+                parse_function(declarations, false, "");
+            } else {
+                statement(body);
+            }
+        }
+
+        std::ostringstream prototypes;
+        for (const auto& name : functions_) {
+            prototypes << "static Value cfv_fn_" << name
+                       << "(const std::vector<Value>&);\n";
+        }
+        for (const auto& name : methods_) {
+            prototypes << "static Value cfv_method_" << name
+                       << "(Value, const std::vector<Value>&);\n";
+        }
+        return runtime() + prototypes.str() + declarations.str() +
+               "int main() {\n    try {\n" + body.str() +
+               "        return 0;\n"
+               "    } catch (const std::exception& error) {\n"
+               "        std::cerr << \"[C-Forge Core Runtime Error] \""
+               " << error.what() << '\\n';\n"
+               "        return 1;\n"
+               "    }\n}\n";
+    }
+
+private:
+    std::vector<Token> tokens_;
+    std::size_t current_ = 0;
+    std::map<std::string, std::vector<std::string>> records_;
+    std::vector<std::string> functions_;
+    std::vector<std::string> methods_;
+    std::vector<std::map<std::string, bool>> scopes_;
+
+    const Token& peek() const { return tokens_[current_]; }
+    const Token& previous() const { return tokens_[current_ - 1]; }
+    const Token& look(std::size_t offset) const {
+        const std::size_t index = current_ + offset;
+        return tokens_[index < tokens_.size() ? index : tokens_.size() - 1];
+    }
+    bool check(TokenKind kind) const { return peek().kind == kind; }
+    bool check_text(const std::string& text) const {
+        return peek().kind != TokenKind::string && peek().text == text;
+    }
+    const Token& advance() {
+        if (!check(TokenKind::end)) ++current_;
+        return previous();
+    }
+    bool take(const std::string& text) {
+        if (!check_text(text)) return false;
+        advance();
+        return true;
+    }
+    const Token& require(TokenKind kind, const std::string& message) {
+        if (!check(kind)) fail(peek(), message);
+        return advance();
+    }
+    Token require_name(const std::string& message) {
+        return require(TokenKind::identifier, message);
+    }
+    void require_text(const std::string& text, const std::string& message) {
+        if (!take(text)) fail(peek(), message);
+    }
+    static std::string safe(const std::string& name) { return "cfv_" + name; }
+    static bool contains(const std::vector<std::string>& values,
+                         const std::string& value) {
+        for (const auto& item : values) if (item == value) return true;
+        return false;
+    }
+
+    void discover_symbols() {
+        for (std::size_t index = 0; index + 1 < tokens_.size(); ++index) {
+            if (tokens_[index].text == "funcion" &&
+                tokens_[index + 1].kind == TokenKind::identifier) {
+                const std::string name = tokens_[index + 1].text;
+                if (!contains(functions_, name)) functions_.push_back(name);
+            }
+            if (tokens_[index].text == "metodo" &&
+                tokens_[index + 1].kind == TokenKind::identifier) {
+                const std::string name = tokens_[index + 1].text;
+                if (!contains(methods_, name)) methods_.push_back(name);
+            }
+        }
+    }
+
+    void skip_type() {
+        if (!check(TokenKind::identifier)) fail(peek(), "se esperaba un tipo");
+        advance();
+        if (take("<")) {
+            int depth = 1;
+            while (depth > 0 && !check(TokenKind::end)) {
+                if (take("<")) ++depth;
+                else if (take(">")) --depth;
+                else advance();
+            }
+        }
+    }
+
+    void parse_structure() {
+        require_text("estructura", "se esperaba 'estructura'");
+        const Token name = require_name("se esperaba el nombre de la estructura");
+        require_text("{", "se esperaba '{'");
+        std::vector<std::string> fields;
+        while (!take("}")) {
+            const Token field = require_name("se esperaba un campo");
+            require_text(":", "se esperaba ':'");
+            skip_type();
+            take(";");
+            fields.push_back(field.text);
+        }
+        take(";");
+        records_[name.text] = fields;
+    }
+
+    std::vector<std::string> parameters() {
+        std::vector<std::string> result;
+        require_text("(", "se esperaba '('");
+        if (!check_text(")")) {
+            do {
+                const Token parameter = require_name("se esperaba un parámetro");
+                result.push_back(parameter.text);
+                if (take(":")) skip_type();
+            } while (take(","));
+        }
+        require_text(")", "se esperaba ')'");
+        if (take(":")) skip_type();
+        return result;
+    }
+
+    void parse_class(std::ostringstream& output) {
+        require_text("clase", "se esperaba 'clase'");
+        const Token class_name = require_name("se esperaba el nombre de la clase");
+        require_text("{", "se esperaba '{'");
+        std::vector<std::string> fields;
+        while (!check_text("}")) {
+            if (take("campo")) {
+                const Token field = require_name("se esperaba el campo");
+                require_text(":", "se esperaba ':'");
+                skip_type();
+                take(";");
+                fields.push_back(field.text);
+            } else if (check_text("metodo")) {
+                advance();
+                const Token method = require_name("se esperaba el método");
+                parse_function_after_name(output, true, class_name.text, method);
+            } else {
+                fail(peek(), "miembro de clase no admitido por Core 0.4");
+            }
+        }
+        advance();
+        take(";");
+        records_[class_name.text] = fields;
+    }
+
+    void parse_function(std::ostringstream& output, bool method,
+                        const std::string& owner) {
+        require_text("funcion", "se esperaba 'funcion'");
+        const Token name = require_name("se esperaba el nombre de la función");
+        parse_function_after_name(output, method, owner, name);
+    }
+
+    void parse_function_after_name(std::ostringstream& output, bool method,
+                                   const std::string&, const Token& name) {
+        const auto params = parameters();
+        output << "static Value "
+               << (method ? "cfv_method_" : "cfv_fn_") << name.text << "(";
+        if (method) output << "Value cfv_este, ";
+        output << "const std::vector<Value>& cfv_args) {\n";
+        scopes_.push_back({});
+        if (method) scopes_.back()["este"] = true;
+        for (std::size_t index = 0; index < params.size(); ++index) {
+            scopes_.back()[params[index]] = true;
+            output << "    Value " << safe(params[index]) << " = cfv_arg(cfv_args, "
+                   << index << ", " << cpp_string(name.text) << ");\n";
+        }
+        require_text("{", "se esperaba el cuerpo de la función");
+        while (!check_text("}")) statement(output);
+        advance();
+        output << "    return Value();\n}\n";
+        scopes_.pop_back();
+    }
+
+    void statement(std::ostringstream& output) {
+        if (take(";")) return;
+        if (take("sea")) {
+            const Token name = require_name("se esperaba el nombre de la variable");
+            if (take(":")) skip_type();
+            require_text("=", "se esperaba '='");
+            const std::string value = expression();
+            scopes_.back()[name.text] = true;
+            output << "    Value " << safe(name.text) << " = " << value << ";\n";
+            take(";");
+            return;
+        }
+        if (take("si")) {
+            const bool grouped = take("(");
+            const std::string condition = expression();
+            if (grouped) require_text(")", "se esperaba ')'");
+            output << "    if (cfv_truth(" << condition << ")) ";
+            block(output);
+            if (take("sino")) {
+                output << "    else ";
+                block(output);
+            }
+            return;
+        }
+        if (take("mientras")) {
+            const bool grouped = take("(");
+            const std::string condition = expression();
+            if (grouped) require_text(")", "se esperaba ')'");
+            output << "    while (cfv_truth(" << condition << ")) ";
+            block(output);
+            return;
+        }
+        if (take("retornar")) {
+            output << "    return " << expression() << ";\n";
+            take(";");
+            return;
+        }
+        if (take("mostrar") || take("print")) {
+            require_text("(", "se esperaba '('");
+            const std::string value = expression();
+            require_text(")", "se esperaba ')'");
+            output << "    cfv_print(" << value << ");\n";
+            take(";");
+            return;
+        }
+        if (check(TokenKind::identifier) && look(1).text == "=") {
+            const Token name = advance();
+            advance();
+            output << "    " << variable(name) << " = " << expression() << ";\n";
+            take(";");
+            return;
+        }
+        if (check(TokenKind::identifier) && look(1).text == "." &&
+            look(2).kind == TokenKind::identifier && look(3).text == "=") {
+            const Token owner = advance();
+            advance();
+            const Token field = advance();
+            advance();
+            output << "    cfv_member_ref(" << variable(owner) << ", "
+                   << cpp_string(field.text) << ") = " << expression() << ";\n";
+            take(";");
+            return;
+        }
+        output << "    (void)(" << expression() << ");\n";
+        take(";");
+    }
+
+    void block(std::ostringstream& output) {
+        require_text("{", "se esperaba '{'");
+        output << "{\n";
+        scopes_.push_back(scopes_.back());
+        while (!check_text("}")) statement(output);
+        advance();
+        scopes_.pop_back();
+        output << "    }\n";
+    }
+
+    std::string expression() { return logic_or(); }
+    std::string logic_or() {
+        std::string left = logic_and();
+        while (take("o")) left = "cfv_bool(cfv_truth(" + left + ") || cfv_truth(" +
+                                  logic_and() + "))";
+        return left;
+    }
+    std::string logic_and() {
+        std::string left = equality();
+        while (take("y")) left = "cfv_bool(cfv_truth(" + left + ") && cfv_truth(" +
+                                  equality() + "))";
+        return left;
+    }
+    std::string equality() {
+        std::string left = comparison();
+        while (check_text("==") || check_text("!=")) {
+            const std::string op = advance().text;
+            const std::string right = comparison();
+            left = "cfv_bool(cfv_equal(" + left + ", " + right + ")" +
+                   (op == "!=" ? " == false" : "") + ")";
+        }
+        return left;
+    }
+    std::string comparison() {
+        std::string left = sum();
+        while (check_text("<") || check_text("<=") || check_text(">") ||
+               check_text(">=")) {
+            const std::string op = advance().text;
+            left = "cfv_compare(" + left + ", " + sum() + ", " + cpp_string(op) + ")";
+        }
+        return left;
+    }
+    std::string sum() {
+        std::string left = product();
+        while (check_text("+") || check_text("-")) {
+            const std::string op = advance().text;
+            left = (op == "+" ? "cfv_add(" : "cfv_sub(") + left + ", " +
+                   product() + ")";
+        }
+        return left;
+    }
+    std::string product() {
+        std::string left = unary();
+        while (check_text("*") || check_text("/") || check_text("%")) {
+            const std::string op = advance().text;
+            const std::string right = unary();
+            if (op == "*") left = "cfv_mul(" + left + ", " + right + ")";
+            else if (op == "/") left = "cfv_div(" + left + ", " + right + ")";
+            else left = "cfv_mod(" + left + ", " + right + ")";
+        }
+        return left;
+    }
+    std::string unary() {
+        if (take("no")) return "cfv_bool(!cfv_truth(" + unary() + "))";
+        if (take("-")) return "cfv_neg(" + unary() + ")";
+        return postfix();
+    }
+
+    std::string postfix() {
+        std::string value = primary();
+        while (true) {
+            if (take("[")) {
+                const std::string index = expression();
+                require_text("]", "se esperaba ']'");
+                value = "cfv_index(" + value + ", " + index + ")";
+            } else if (take(".")) {
+                const Token member = require_name("se esperaba el miembro");
+                if (take("(")) {
+                    const auto args = arguments_after_open();
+                    value = "cfv_method_" + member.text + "(" + value + ", " +
+                            vector_expression(args) + ")";
+                } else {
+                    value = "cfv_member(" + value + ", " +
+                            cpp_string(member.text) + ")";
+                }
+            } else {
+                break;
+            }
+        }
+        return value;
+    }
+
+    std::string primary() {
+        if (check(TokenKind::number)) return "cfv_number(" + advance().text + ")";
+        if (check(TokenKind::string)) return "cfv_text(" + cpp_string(advance().text) + ")";
+        if (take("verdadero")) return "cfv_bool(true)";
+        if (take("falso")) return "cfv_bool(false)";
+        if (take("[")) return "cfv_list(" + vector_expression(arguments_after("[", "]")) + ")";
+        if (take("(")) {
+            const std::string value = expression();
+            require_text(")", "se esperaba ')'");
+            return value;
+        }
+        if (check(TokenKind::identifier)) {
+            const Token name = advance();
+            if (take("(")) {
+                const auto args = arguments_after_open();
+                const auto record = records_.find(name.text);
+                if (record != records_.end()) {
+                    return "cfv_object(" + cpp_string(name.text) + ", " +
+                           string_vector(record->second) + ", " +
+                           vector_expression(args) + ")";
+                }
+                return call(name, args);
+            }
+            return variable(name);
+        }
+        fail(peek(), "expresión Core 0.4 inválida");
+    }
+
+    std::vector<std::string> arguments_after_open() {
+        std::vector<std::string> args;
+        if (!check_text(")")) {
+            do args.push_back(expression()); while (take(","));
+        }
+        require_text(")", "se esperaba ')' después de los argumentos");
+        return args;
+    }
+    std::vector<std::string> arguments_after(const std::string&,
+                                             const std::string& close) {
+        std::vector<std::string> args;
+        if (!check_text(close)) {
+            do args.push_back(expression()); while (take(","));
+        }
+        require_text(close, "se esperaba el cierre de la lista");
+        return args;
+    }
+
+    std::string call(const Token& name, const std::vector<std::string>& args) {
+        if (name.text == "longitud") return "cfv_length(" + one(name, args) + ")";
+        if (name.text == "a_texto") return "cfv_text(cfv_format(" + one(name, args) + "))";
+        if (name.text == "agregar") {
+            if (args.size() != 2) fail(name, "agregar requiere dos argumentos");
+            return "cfv_append(" + args[0] + ", " + args[1] + ")";
+        }
+        if (name.text == "afirmar") {
+            if (args.size() != 2) fail(name, "afirmar requiere dos argumentos");
+            return "cfv_assert(" + args[0] + ", " + args[1] + ")";
+        }
+        if (!contains(functions_, name.text)) {
+            fail(name, "función desconocida '" + name.text + "'");
+        }
+        return "cfv_fn_" + name.text + "(" + vector_expression(args) + ")";
+    }
+    std::string one(const Token& name, const std::vector<std::string>& args) {
+        if (args.size() != 1) fail(name, name.text + " requiere un argumento");
+        return args[0];
+    }
+    std::string variable(const Token& name) const {
+        if (name.text == "este") return "cfv_este";
+        return safe(name.text);
+    }
+    static std::string vector_expression(const std::vector<std::string>& values) {
+        std::ostringstream output;
+        output << "std::vector<Value>{";
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            if (index) output << ", ";
+            output << values[index];
+        }
+        return output.str() + "}";
+    }
+    static std::string string_vector(const std::vector<std::string>& values) {
+        std::ostringstream output;
+        output << "std::vector<std::string>{";
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            if (index) output << ", ";
+            output << cpp_string(values[index]);
+        }
+        return output.str() + "}";
+    }
+    static std::string cpp_string(const std::string& value) {
+        std::ostringstream escaped;
+        escaped << '"';
+        for (const unsigned char byte : value) {
+            if (byte == '\\') escaped << "\\\\";
+            else if (byte == '"') escaped << "\\\"";
+            else if (byte == '\n') escaped << "\\n";
+            else if (byte == '\r') escaped << "\\r";
+            else if (byte == '\t') escaped << "\\t";
+            else escaped << static_cast<char>(byte);
+        }
+        escaped << '"';
+        return escaped.str();
+    }
+    [[noreturn]] static void fail(const Token& token, const std::string& message) {
+        throw CompileError("Línea " + std::to_string(token.line) + ", columna " +
+                           std::to_string(token.column) + ": " + message);
+    }
+
+    static std::string runtime() {
+        return R"CPP(#include <cmath>
+#include <iomanip>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <variant>
+#include <vector>
+
+struct Value;
+using List = std::vector<Value>;
+using Object = std::map<std::string, Value>;
+struct Value {
+    using Data = std::variant<std::monostate, double, bool, std::string,
+                              std::shared_ptr<List>, std::shared_ptr<Object>>;
+    Data data;
+    Value() = default;
+    explicit Value(double value) : data(value) {}
+    explicit Value(bool value) : data(value) {}
+    explicit Value(std::string value) : data(std::move(value)) {}
+    explicit Value(std::shared_ptr<List> value) : data(std::move(value)) {}
+    explicit Value(std::shared_ptr<Object> value) : data(std::move(value)) {}
+};
+static Value cfv_number(double value) { return Value(value); }
+static Value cfv_text(std::string value) { return Value(std::move(value)); }
+static Value cfv_bool(bool value) { return Value(value); }
+static double cfv_num(const Value& value) {
+    if (const auto* found = std::get_if<double>(&value.data)) return *found;
+    throw std::runtime_error("se esperaba numero");
+}
+static bool cfv_truth(const Value& value) {
+    if (const auto* found = std::get_if<bool>(&value.data)) return *found;
+    if (const auto* found = std::get_if<double>(&value.data)) return *found != 0;
+    if (const auto* found = std::get_if<std::string>(&value.data)) return !found->empty();
+    if (const auto* found = std::get_if<std::shared_ptr<List>>(&value.data))
+        return !(*found)->empty();
+    return !std::holds_alternative<std::monostate>(value.data);
+}
+static std::string cfv_format(const Value& value) {
+    if (std::holds_alternative<std::monostate>(value.data)) return "nulo";
+    if (const auto* found = std::get_if<bool>(&value.data))
+        return *found ? "verdadero" : "falso";
+    if (const auto* found = std::get_if<std::string>(&value.data)) return *found;
+    if (const auto* found = std::get_if<double>(&value.data)) {
+        if (std::floor(*found) == *found) return std::to_string(static_cast<long long>(*found));
+        std::ostringstream output; output << std::setprecision(15) << *found;
+        return output.str();
+    }
+    return "<objeto>";
+}
+static bool cfv_equal(const Value& left, const Value& right) {
+    if (left.data.index() != right.data.index()) return false;
+    if (const auto* a = std::get_if<double>(&left.data))
+        return *a == std::get<double>(right.data);
+    if (const auto* a = std::get_if<bool>(&left.data))
+        return *a == std::get<bool>(right.data);
+    if (const auto* a = std::get_if<std::string>(&left.data))
+        return *a == std::get<std::string>(right.data);
+    return left.data == right.data;
+}
+static Value cfv_add(const Value& left, const Value& right) {
+    if (const auto* a = std::get_if<double>(&left.data)) {
+        if (const auto* b = std::get_if<double>(&right.data)) return Value(*a + *b);
+    }
+    if (const auto* a = std::get_if<std::string>(&left.data)) {
+        if (const auto* b = std::get_if<std::string>(&right.data)) return Value(*a + *b);
+    }
+    throw std::runtime_error("tipos incompatibles para '+'");
+}
+static Value cfv_sub(const Value& a, const Value& b) { return Value(cfv_num(a) - cfv_num(b)); }
+static Value cfv_mul(const Value& a, const Value& b) { return Value(cfv_num(a) * cfv_num(b)); }
+static Value cfv_div(const Value& a, const Value& b) {
+    const double divisor = cfv_num(b);
+    if (divisor == 0) throw std::runtime_error("división por cero");
+    return Value(cfv_num(a) / divisor);
+}
+static Value cfv_mod(const Value& a, const Value& b) {
+    return Value(std::fmod(cfv_num(a), cfv_num(b)));
+}
+static Value cfv_neg(const Value& value) { return Value(-cfv_num(value)); }
+static Value cfv_compare(const Value& a, const Value& b, const std::string& op) {
+    if (const auto* left = std::get_if<double>(&a.data)) {
+        const double right = cfv_num(b);
+        return Value(op == "<" ? *left < right : op == "<=" ? *left <= right :
+                     op == ">" ? *left > right : *left >= right);
+    }
+    const auto* left = std::get_if<std::string>(&a.data);
+    const auto* right = std::get_if<std::string>(&b.data);
+    if (!left || !right) throw std::runtime_error("comparación incompatible");
+    return Value(op == "<" ? *left < *right : op == "<=" ? *left <= *right :
+                 op == ">" ? *left > *right : *left >= *right);
+}
+static Value cfv_list(const std::vector<Value>& values) {
+    return Value(std::make_shared<List>(values));
+}
+static Value cfv_object(const std::string& type,
+                        const std::vector<std::string>& fields,
+                        const std::vector<Value>& values) {
+    if (fields.size() != values.size())
+        throw std::runtime_error(type + " recibió una cantidad de campos inválida");
+    auto object = std::make_shared<Object>();
+    (*object)["__tipo"] = Value(type);
+    for (std::size_t i = 0; i < fields.size(); ++i) (*object)[fields[i]] = values[i];
+    return Value(object);
+}
+static Value cfv_index(const Value& value, const Value& index) {
+    const auto position = static_cast<std::size_t>(cfv_num(index));
+    if (const auto* list = std::get_if<std::shared_ptr<List>>(&value.data)) {
+        if (position >= (*list)->size()) throw std::runtime_error("índice fuera de rango");
+        return (**list)[position];
+    }
+    if (const auto* text = std::get_if<std::string>(&value.data)) {
+        if (position >= text->size()) throw std::runtime_error("índice fuera de rango");
+        return Value(std::string(1, (*text)[position]));
+    }
+    throw std::runtime_error("el valor no admite índices");
+}
+static Value cfv_member(const Value& value, const std::string& field) {
+    const auto* object = std::get_if<std::shared_ptr<Object>>(&value.data);
+    if (!object) throw std::runtime_error("se esperaba un objeto");
+    const auto found = (*object)->find(field);
+    if (found == (*object)->end()) throw std::runtime_error("campo desconocido " + field);
+    return found->second;
+}
+static Value& cfv_member_ref(Value& value, const std::string& field) {
+    auto* object = std::get_if<std::shared_ptr<Object>>(&value.data);
+    if (!object) throw std::runtime_error("se esperaba un objeto mutable");
+    const auto found = (*object)->find(field);
+    if (found == (*object)->end()) throw std::runtime_error("campo desconocido " + field);
+    return found->second;
+}
+static Value cfv_length(const Value& value) {
+    if (const auto* text = std::get_if<std::string>(&value.data))
+        return Value(static_cast<double>(text->size()));
+    if (const auto* list = std::get_if<std::shared_ptr<List>>(&value.data))
+        return Value(static_cast<double>((*list)->size()));
+    throw std::runtime_error("longitud requiere texto o lista");
+}
+static Value cfv_append(Value value, const Value& item) {
+    auto* list = std::get_if<std::shared_ptr<List>>(&value.data);
+    if (!list) throw std::runtime_error("agregar requiere una lista");
+    (*list)->push_back(item);
+    return Value();
+}
+static Value cfv_assert(const Value& condition, const Value& message) {
+    if (!cfv_truth(condition)) throw std::runtime_error(cfv_format(message));
+    return Value();
+}
+static Value cfv_arg(const std::vector<Value>& args, std::size_t index,
+                     const std::string& function) {
+    if (index >= args.size()) throw std::runtime_error(function + ": faltan argumentos");
+    return args[index];
+}
+static void cfv_print(const Value& value) { std::cout << cfv_format(value) << '\n'; }
+)CPP";
+    }
+};
+
 static std::string read_file(const fs::path& path) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream) throw CompileError("no se pudo abrir " + path.string());
@@ -380,7 +1012,19 @@ int main(int argc, char** argv) {
         }
         const fs::path input = fs::absolute(argv[1]);
         const fs::path output = fs::absolute(argv[3]);
-        const std::string generated = Parser(Lexer(read_file(input)).scan()).compile_to_cpp();
+        std::vector<Token> tokens = Lexer(read_file(input)).scan();
+        bool requires_b1 = false;
+        for (const auto& token : tokens) {
+            if (token.text == "funcion" || token.text == "estructura" ||
+                token.text == "clase" || token.text == "mientras" ||
+                token.text == "si") {
+                requires_b1 = true;
+                break;
+            }
+        }
+        const std::string generated = requires_b1
+            ? CoreB1Compiler(std::move(tokens)).compile_to_cpp()
+            : Parser(std::move(tokens)).compile_to_cpp();
         const fs::path temporary = output.string() + ".stage0.cpp";
         {
             std::ofstream stream(temporary, std::ios::binary);

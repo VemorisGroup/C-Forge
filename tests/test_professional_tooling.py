@@ -1262,6 +1262,48 @@ sea identificador: numero = valor.id
 """
         self.assertEqual(analyze_source(source), [])
 
+    def test_cforge_20_draft_is_complete_as_a_design_contract(self):
+        specification = Path("docs/C-FORGE-2.0-DRAFT.md").read_text(
+            encoding="utf-8"
+        )
+        grammar = Path("docs/GRAMMAR-2.0-DRAFT.ebnf").read_text(
+            encoding="utf-8"
+        )
+        example = Path("ejemplos/diseno_cforge_20.cfv").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "borrador normativo; no representa todavía funcionalidad implementada",
+            specification,
+        )
+        for section in (
+            "Sistema de tipos",
+            "Modelo de memoria",
+            "Semántica de ejecución",
+            "Módulos, paquetes y capacidades",
+            "Errores",
+            "Concurrencia y asincronía",
+            "Modelo de compilación",
+            "Conformidad",
+        ):
+            self.assertIn(section, specification)
+
+        for production in (
+            "programa",
+            "declaracion_tipo",
+            "declaracion_funcion",
+            "expresion_intentar",
+            "sentencia_grupo",
+            "tipo_condicional",
+            "tipo_mapeado",
+        ):
+            self.assertRegex(grammar, rf"(?m)^{production}\s+=")
+
+        self.assertIn("impl Describible para Persona", example)
+        self.assertIn("async funcion describir_en_paralelo", example)
+        self.assertIn("Resultado<Persona, ErrorDemo>", example)
+
 
 if __name__ == "__main__":
     unittest.main()
