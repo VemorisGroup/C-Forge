@@ -53,15 +53,17 @@ jobs:
 
       - name: Compile cforgev.cfv → native binary
         shell: bash
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
         run: |
           python3 -c "
           from pathlib import Path
           from compilador_nativo import compile_native
-          import sys
           binary = '${{ matrix.binary }}'
-          print(f'Compilando cforgev.cfv → {binary} ...')
+          print('Compilando cforgev.cfv ->', binary)
           result = compile_native(Path('cforgev.cfv'), Path(binary))
-          print(f'OK: {result}')
+          print('OK:', result)
           "
 
       - name: Smoke test
