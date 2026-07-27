@@ -1,0 +1,1559 @@
+// compilador_nativo.cfv — Compilador C-Forge -> C++ -> binario nativo
+// Escrito en C-Forge. Sin Python.
+
+// ============================================================
+// UTILIDADES DE TEXTO
+// ============================================================
+
+funcion es_letra(c: texto): booleano {
+    retornar (c >= "a" y c <= "z") o (c >= "A" y c <= "Z") o c == "_"
+}
+
+funcion es_digito(c: texto): booleano {
+    retornar c >= "0" y c <= "9"
+}
+
+funcion es_alfanumerico(c: texto): booleano {
+    retornar es_letra(c) o es_digito(c)
+}
+
+funcion es_espacio_blanco(c: texto): booleano {
+    retornar c == " " o c == "\t" o c == "\r"
+}
+
+funcion contiene_char(s: texto, c: texto): booleano {
+    sea i: numero = 0
+    mientras (i < longitud(s)) {
+        si (s[i] == c) { retornar verdadero }
+        i = i + 1
+    }
+    retornar falso
+}
+
+funcion subcad(s: texto, inicio: numero, fin: numero): texto {
+    sea r: texto = ""
+    sea i: numero = inicio
+    mientras (i < fin y i < longitud(s)) {
+        r = r + s[i]
+        i = i + 1
+    }
+    retornar r
+}
+
+funcion texto_contiene(s: texto, sub: texto): booleano {
+    sea ls: numero = longitud(s)
+    sea lsub: numero = longitud(sub)
+    si (lsub == 0) { retornar verdadero }
+    sea i: numero = 0
+    mientras (i <= ls - lsub) {
+        si (subcad(s, i, i + lsub) == sub) { retornar verdadero }
+        i = i + 1
+    }
+    retornar falso
+}
+
+funcion texto_reemplazar(s: texto, viejo: texto, nuevo: texto): texto {
+    sea r: texto = ""
+    sea ls: numero = longitud(s)
+    sea lv: numero = longitud(viejo)
+    sea i: numero = 0
+    mientras (i < ls) {
+        si (lv > 0 y i + lv <= ls y subcad(s, i, i + lv) == viejo) {
+            r = r + nuevo
+            i = i + lv
+        } sino {
+            r = r + s[i]
+            i = i + 1
+        }
+    }
+    retornar r
+}
+
+funcion num_a_txt(n: numero): texto {
+    retornar a_texto(n)
+}
+
+funcion juntar(lista_txt: lista, sep: texto): texto {
+    sea r: texto = ""
+    sea i: numero = 0
+    mientras (i < longitud(lista_txt)) {
+        si (i > 0) { r = r + sep }
+        r = r + lista_txt[i]
+        i = i + 1
+    }
+    retornar r
+}
+
+funcion escapar_cpp(s: texto): texto {
+    sea r: texto = ""
+    sea i: numero = 0
+    mientras (i < longitud(s)) {
+        sea c: texto = s[i]
+        si (c == "\\") { r = r + "\\\\" }
+        sino si (c == "\"") { r = r + "\\\"" }
+        sino si (c == "\n") { r = r + "\\n" }
+        sino si (c == "\t") { r = r + "\\t" }
+        sino si (c == "\r") { r = r + "\\r" }
+        sino { r = r + c }
+        i = i + 1
+    }
+    retornar r
+}
+
+funcion safe(nombre: texto): texto {
+    sea r: texto = "cfv_"
+    sea i: numero = 0
+    mientras (i < longitud(nombre)) {
+        sea c: texto = nombre[i]
+        si (es_alfanumerico(c)) { r = r + c }
+        sino { r = r + "_" }
+        i = i + 1
+    }
+    retornar r
+}
+
+// ============================================================
+// TOKENIZADOR
+// ============================================================
+
+sea KEYWORDS: lista = [
+    "sea", "funcion", "si", "sino", "mientras", "para",
+    "retornar", "romper", "continuar", "verdadero", "falso", "nulo",
+    "estructura", "clase", "intentar", "capturar", "lanzar",
+    "importar", "usar", "exportar", "gpu", "y", "o", "no",
+    "cualquiera", "numero", "texto", "booleano", "lista", "mapa",
+    "afirmar", "mostrar", "en"
+]
+
+funcion es_keyword(s: texto): booleano {
+    sea i: numero = 0
+    mientras (i < longitud(KEYWORDS)) {
+        si (KEYWORDS[i] == s) { retornar verdadero }
+        i = i + 1
+    }
+    retornar falso
+}
+
+funcion mk_tok(tipo: texto, valor: texto, linea: numero): cualquiera {
+    sea t: cualquiera = {}
+    t["k"] = tipo
+    t["v"] = valor
+    t["l"] = linea
+    retornar t
+}
+
+funcion scan_string_dq(fuente: texto, inicio: numero, ln_in: numero): cualquiera {
+    sea i: numero = inicio + 1
+    sea n: numero = longitud(fuente)
+    sea s: texto = ""
+    sea ln: numero = ln_in
+    mientras (i < n y fuente[i] != "\"") {
+        si (fuente[i] == "\\" y i + 1 < n) {
+            sea esc: texto = fuente[i + 1]
+            si (esc == "n") { s = s + "\n" }
+            sino si (esc == "t") { s = s + "\t" }
+            sino si (esc == "r") { s = s + "\r" }
+            sino si (esc == "\"") { s = s + "\"" }
+            sino si (esc == "\\") { s = s + "\\" }
+            sino { s = s + "\\" + esc }
+            i = i + 2
+        } sino {
+            si (fuente[i] == "\n") { ln = ln + 1 }
+            s = s + fuente[i]
+            i = i + 1
+        }
+    }
+    sea res: cualquiera = {}
+    res["s"] = s
+    res["i"] = i + 1
+    res["ln"] = ln
+    retornar res
+}
+
+funcion scan_string_sq(fuente: texto, inicio: numero, ln_in: numero): cualquiera {
+    sea i: numero = inicio + 1
+    sea n: numero = longitud(fuente)
+    sea s: texto = ""
+    sea ln: numero = ln_in
+    mientras (i < n y fuente[i] != "'") {
+        si (fuente[i] == "\\" y i + 1 < n) {
+            sea esc: texto = fuente[i + 1]
+            si (esc == "n") { s = s + "\n" }
+            sino si (esc == "t") { s = s + "\t" }
+            sino si (esc == "'") { s = s + "'" }
+            sino si (esc == "\\") { s = s + "\\" }
+            sino { s = s + "\\" + esc }
+            i = i + 2
+        } sino {
+            s = s + fuente[i]
+            i = i + 1
+        }
+    }
+    sea res: cualquiera = {}
+    res["s"] = s
+    res["i"] = i + 1
+    res["ln"] = ln
+    retornar res
+}
+
+funcion tokenizar(fuente: texto): lista {
+    sea toks: lista = []
+    sea i: numero = 0
+    sea ln: numero = 1
+    sea n: numero = longitud(fuente)
+
+    mientras (i < n) {
+        sea c: texto = fuente[i]
+        si (c == "\n") {
+            ln = ln + 1
+            i = i + 1
+        } sino si (es_espacio_blanco(c)) {
+            i = i + 1
+        } sino si (c == "/" y i + 1 < n y fuente[i + 1] == "/") {
+            mientras (i < n y fuente[i] != "\n") { i = i + 1 }
+        } sino si (c == "/" y i + 1 < n y fuente[i + 1] == "*") {
+            i = i + 2
+            mientras (i + 1 < n y no (fuente[i] == "*" y fuente[i + 1] == "/")) {
+                si (fuente[i] == "\n") { ln = ln + 1 }
+                i = i + 1
+            }
+            i = i + 2
+        } sino si (c == "\"") {
+            sea r: cualquiera = scan_string_dq(fuente, i, ln)
+            agregar(toks, mk_tok("TEXT", r["s"], r["ln"]))
+            i = r["i"]
+            ln = r["ln"]
+        } sino si (c == "'") {
+            sea r: cualquiera = scan_string_sq(fuente, i, ln)
+            agregar(toks, mk_tok("TEXT", r["s"], r["ln"]))
+            i = r["i"]
+            ln = r["ln"]
+        } sino si (es_digito(c)) {
+            sea num: texto = ""
+            mientras (i < n y es_digito(fuente[i])) {
+                num = num + fuente[i]
+                i = i + 1
+            }
+            si (i < n y fuente[i] == "." y i + 1 < n y es_digito(fuente[i + 1])) {
+                num = num + "."
+                i = i + 1
+                mientras (i < n y es_digito(fuente[i])) {
+                    num = num + fuente[i]
+                    i = i + 1
+                }
+            }
+            agregar(toks, mk_tok("NUM", num, ln))
+        } sino si (es_letra(c)) {
+            sea id: texto = ""
+            mientras (i < n y es_alfanumerico(fuente[i])) {
+                id = id + fuente[i]
+                i = i + 1
+            }
+            si (es_keyword(id)) {
+                agregar(toks, mk_tok("KEY", id, ln))
+            } sino {
+                agregar(toks, mk_tok("ID", id, ln))
+            }
+        } sino si (i + 1 < n y contiene_char("=!<>+-%*/&|", c)) {
+            sea dos: texto = c + fuente[i + 1]
+            si (dos == "==" o dos == "!=" o dos == "<=" o dos == ">=" o
+                dos == "+=" o dos == "-=" o dos == "*=" o dos == "/=" o
+                dos == "%=" o dos == "&&" o dos == "||" o dos == "->" o
+                dos == "::" o dos == "**") {
+                agregar(toks, mk_tok("OP", dos, ln))
+                i = i + 2
+            } sino si (contiene_char("+-*/%=<>!&|^~", c)) {
+                agregar(toks, mk_tok("OP", c, ln))
+                i = i + 1
+            } sino {
+                i = i + 1
+            }
+        } sino si (contiene_char("+-*/%=<>!&|^~", c)) {
+            agregar(toks, mk_tok("OP", c, ln))
+            i = i + 1
+        } sino si (contiene_char("(){}[],;:.", c)) {
+            agregar(toks, mk_tok("DELIM", c, ln))
+            i = i + 1
+        } sino {
+            i = i + 1
+        }
+    }
+
+    agregar(toks, mk_tok("EOF", "", ln))
+    retornar toks
+}
+
+// ============================================================
+// PARSER — estado global
+// ============================================================
+
+sea G_STATE: cualquiera = {}
+G_STATE["toks"] = []
+G_STATE["pos"] = 0
+
+funcion tok_actual(): cualquiera {
+    retornar G_STATE["toks"][G_STATE["pos"]]
+}
+
+funcion tok_peek(offset: numero): cualquiera {
+    sea idx: numero = G_STATE["pos"] + offset
+    si (idx < longitud(G_STATE["toks"])) {
+        retornar G_STATE["toks"][idx]
+    }
+    retornar G_STATE["toks"][longitud(G_STATE["toks"]) - 1]
+}
+
+funcion tok_es(tipo: texto, valor: texto): booleano {
+    sea t: cualquiera = tok_actual()
+    retornar t["k"] == tipo y t["v"] == valor
+}
+
+funcion tok_es_tipo(tipo: texto): booleano {
+    retornar tok_actual()["k"] == tipo
+}
+
+funcion tok_es_key(v: texto): booleano {
+    sea t: cualquiera = tok_actual()
+    retornar t["k"] == "KEY" y t["v"] == v
+}
+
+funcion tok_es_delim(v: texto): booleano {
+    sea t: cualquiera = tok_actual()
+    retornar t["k"] == "DELIM" y t["v"] == v
+}
+
+funcion tok_es_op(v: texto): booleano {
+    sea t: cualquiera = tok_actual()
+    retornar t["k"] == "OP" y t["v"] == v
+}
+
+funcion avanzar(): cualquiera {
+    sea t: cualquiera = G_STATE["toks"][G_STATE["pos"]]
+    si (G_STATE["pos"] + 1 < longitud(G_STATE["toks"])) {
+        G_STATE["pos"] = G_STATE["pos"] + 1
+    }
+    retornar t
+}
+
+funcion consumir(tipo: texto, valor: texto): cualquiera {
+    sea t: cualquiera = tok_actual()
+    si (t["k"] != tipo o t["v"] != valor) {
+        afirmar(falso, "Error línea " + num_a_txt(t["l"]) + ": se esperaba '" + valor + "' pero se encontró '" + t["v"] + "'")
+    }
+    retornar avanzar()
+}
+
+funcion consumir_tipo(tipo: texto): cualquiera {
+    sea t: cualquiera = tok_actual()
+    // Permitir KEY como ID (tipos como lista/texto/numero pueden ser nombres de variable)
+    si (tipo == "ID" y t["k"] == "KEY") {
+        retornar avanzar()
+    }
+    si (t["k"] != tipo) {
+        afirmar(falso, "Error línea " + num_a_txt(t["l"]) + ": se esperaba " + tipo + " pero se encontró '" + t["v"] + "'")
+    }
+    retornar avanzar()
+}
+
+// ============================================================
+// PARSER — tipos
+// ============================================================
+
+funcion parse_tipo(): texto {
+    sea t: cualquiera = tok_actual()
+    sea tipos_base: lista = ["cualquiera", "numero", "texto", "booleano", "lista", "mapa", "nulo"]
+    sea i: numero = 0
+    mientras (i < longitud(tipos_base)) {
+        si (t["k"] == "KEY" y t["v"] == tipos_base[i]) {
+            avanzar()
+            // Tipo genérico lista<X> o mapa<X>
+            si (tok_es_op("<")) {
+                avanzar()
+                parse_tipo()  // consumir el tipo interno
+                consumir("OP", ">")
+            }
+            retornar tipos_base[i]
+        }
+        i = i + 1
+    }
+    // Tipo personalizado (nombre de estructura)
+    si (t["k"] == "ID") {
+        sea nombre: texto = t["v"]
+        avanzar()
+        retornar nombre
+    }
+    retornar "cualquiera"
+}
+
+// ============================================================
+// PARSER — expresiones
+// ============================================================
+
+funcion parse_expr(): cualquiera {
+    retornar parse_asignacion()
+}
+
+funcion parse_asignacion(): cualquiera {
+    sea izq: cualquiera = parse_or()
+    sea t: cualquiera = tok_actual()
+
+    si (t["k"] == "OP" y (t["v"] == "=" o t["v"] == "+=" o t["v"] == "-=" o
+        t["v"] == "*=" o t["v"] == "/=" o t["v"] == "%=")) {
+        sea op: texto = t["v"]
+        avanzar()
+        sea der: cualquiera = parse_asignacion()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "asgn"
+        nodo["op"] = op
+        nodo["l"] = izq
+        nodo["r"] = der
+        retornar nodo
+    }
+    retornar izq
+}
+
+funcion parse_or(): cualquiera {
+    sea izq: cualquiera = parse_and()
+    mientras (tok_es_key("o") o tok_es_op("||")) {
+        avanzar()
+        sea der: cualquiera = parse_and()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "bin"
+        nodo["op"] = "||"
+        nodo["l"] = izq
+        nodo["r"] = der
+        izq = nodo
+    }
+    retornar izq
+}
+
+funcion parse_and(): cualquiera {
+    sea izq: cualquiera = parse_igual()
+    mientras (tok_es_key("y") o tok_es_op("&&")) {
+        avanzar()
+        sea der: cualquiera = parse_igual()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "bin"
+        nodo["op"] = "&&"
+        nodo["l"] = izq
+        nodo["r"] = der
+        izq = nodo
+    }
+    retornar izq
+}
+
+funcion parse_igual(): cualquiera {
+    sea izq: cualquiera = parse_cmp()
+    mientras (tok_es_op("==") o tok_es_op("!=")) {
+        sea op: texto = tok_actual()["v"]
+        avanzar()
+        sea der: cualquiera = parse_cmp()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "bin"
+        nodo["op"] = op
+        nodo["l"] = izq
+        nodo["r"] = der
+        izq = nodo
+    }
+    retornar izq
+}
+
+funcion parse_cmp(): cualquiera {
+    sea izq: cualquiera = parse_suma()
+    mientras (tok_es_op("<") o tok_es_op(">") o tok_es_op("<=") o tok_es_op(">=")) {
+        sea op: texto = tok_actual()["v"]
+        avanzar()
+        sea der: cualquiera = parse_suma()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "bin"
+        nodo["op"] = op
+        nodo["l"] = izq
+        nodo["r"] = der
+        izq = nodo
+    }
+    retornar izq
+}
+
+funcion parse_suma(): cualquiera {
+    sea izq: cualquiera = parse_mul()
+    mientras (tok_es_op("+") o tok_es_op("-")) {
+        sea op: texto = tok_actual()["v"]
+        avanzar()
+        sea der: cualquiera = parse_mul()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "bin"
+        nodo["op"] = op
+        nodo["l"] = izq
+        nodo["r"] = der
+        izq = nodo
+    }
+    retornar izq
+}
+
+funcion parse_mul(): cualquiera {
+    sea izq: cualquiera = parse_unario()
+    mientras (tok_es_op("*") o tok_es_op("/") o tok_es_op("%")) {
+        sea op: texto = tok_actual()["v"]
+        avanzar()
+        sea der: cualquiera = parse_unario()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "bin"
+        nodo["op"] = op
+        nodo["l"] = izq
+        nodo["r"] = der
+        izq = nodo
+    }
+    retornar izq
+}
+
+funcion parse_unario(): cualquiera {
+    si (tok_es_key("no") o tok_es_op("!")) {
+        avanzar()
+        sea v: cualquiera = parse_unario()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "un"
+        nodo["op"] = "!"
+        nodo["v"] = v
+        retornar nodo
+    }
+    si (tok_es_op("-")) {
+        avanzar()
+        sea v: cualquiera = parse_unario()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "un"
+        nodo["op"] = "-"
+        nodo["v"] = v
+        retornar nodo
+    }
+    retornar parse_postfijo()
+}
+
+funcion parse_postfijo(): cualquiera {
+    sea base: cualquiera = parse_primario()
+
+    sea _pf_cont: numero = 1
+    mientras (_pf_cont > 0) {
+        si (tok_es_delim("[")) {
+            avanzar()
+            sea idx: cualquiera = parse_expr()
+            consumir("DELIM", "]")
+            sea nodo: cualquiera = {}
+            nodo["k"] = "idx"
+            nodo["o"] = base
+            nodo["i"] = idx
+            base = nodo
+        } sino si (tok_es_delim(".")) {
+            avanzar()
+            sea campo: cualquiera = consumir_tipo("ID")
+            // Llamada a método: obj.metodo(args)
+            si (tok_es_delim("(")) {
+                avanzar()
+                sea args: lista = []
+                si (no tok_es_delim(")")) {
+                    agregar(args, parse_expr())
+                    mientras (tok_es_delim(",")) {
+                        avanzar()
+                        agregar(args, parse_expr())
+                    }
+                }
+                consumir("DELIM", ")")
+                sea nodo: cualquiera = {}
+                nodo["k"] = "metodo"
+                nodo["o"] = base
+                nodo["m"] = campo["v"]
+                nodo["a"] = args
+                base = nodo
+            } sino {
+                sea nodo: cualquiera = {}
+                nodo["k"] = "dot"
+                nodo["o"] = base
+                nodo["f"] = campo["v"]
+                base = nodo
+            }
+        } sino {
+            _pf_cont = 0
+        }
+    }
+    retornar base
+}
+
+funcion parse_args(): lista {
+    sea args: lista = []
+    si (no tok_es_delim(")")) {
+        agregar(args, parse_expr())
+        sea _args_sigue: booleano = tok_es_delim(",") y no tok_es_delim(")")
+        mientras (_args_sigue) {
+            avanzar()
+            si (no tok_es_delim(")")) {
+                agregar(args, parse_expr())
+            }
+            _args_sigue = tok_es_delim(",") y no tok_es_delim(")")
+        }
+    }
+    retornar args
+}
+
+funcion parse_primario(): cualquiera {
+    sea t: cualquiera = tok_actual()
+
+    // Número
+    si (t["k"] == "NUM") {
+        avanzar()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "num"
+        nodo["v"] = a_numero(t["v"])
+        retornar nodo
+    }
+
+    // Texto
+    si (t["k"] == "TEXT") {
+        avanzar()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "txt"
+        nodo["v"] = t["v"]
+        retornar nodo
+    }
+
+    // verdadero / falso
+    si (t["k"] == "KEY" y t["v"] == "verdadero") {
+        avanzar()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "bool"
+        nodo["v"] = verdadero
+        retornar nodo
+    }
+    si (t["k"] == "KEY" y t["v"] == "falso") {
+        avanzar()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "bool"
+        nodo["v"] = falso
+        retornar nodo
+    }
+
+    // nulo
+    si (t["k"] == "KEY" y t["v"] == "nulo") {
+        avanzar()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "nul"
+        retornar nodo
+    }
+
+    // Lista literal [...]
+    si (t["k"] == "DELIM" y t["v"] == "[") {
+        avanzar()
+        sea items: lista = []
+        si (no tok_es_delim("]")) {
+            agregar(items, parse_expr())
+            sea _lst_sigue: booleano = tok_es_delim(",") y no tok_es_delim("]")
+            mientras (_lst_sigue) {
+                avanzar()
+                si (no tok_es_delim("]")) { agregar(items, parse_expr()) }
+                _lst_sigue = tok_es_delim(",") y no tok_es_delim("]")
+            }
+        }
+        consumir("DELIM", "]")
+        sea nodo: cualquiera = {}
+        nodo["k"] = "lst"
+        nodo["v"] = items
+        retornar nodo
+    }
+
+    // Mapa literal {...} o bloque
+    si (t["k"] == "DELIM" y t["v"] == "{") {
+        // Intentar detectar si es mapa o bloque
+        // Si el siguiente token es KEY:valor o ID:valor o "texto":valor es mapa
+        sea siguiente: cualquiera = tok_peek(1)
+        sea es_mapa: booleano = falso
+        si (siguiente["k"] == "TEXT" o siguiente["k"] == "ID") {
+            sea despues: cualquiera = tok_peek(2)
+            si (despues["k"] == "DELIM" y despues["v"] == ":") {
+                es_mapa = verdadero
+            }
+        }
+        si (tok_peek(1)["k"] == "DELIM" y tok_peek(1)["v"] == "}") {
+            // Mapa vacío {}
+            avanzar()
+            avanzar()
+            sea nodo: cualquiera = {}
+            nodo["k"] = "mapa_lit"
+            nodo["claves"] = []
+            nodo["vals"] = []
+            retornar nodo
+        }
+        si (es_mapa) {
+            avanzar()
+            sea claves: lista = []
+            sea vals: lista = []
+            mientras (no tok_es_delim("}")) {
+                sea clave: cualquiera = tok_actual()
+                avanzar()
+                consumir("DELIM", ":")
+                sea val: cualquiera = parse_expr()
+                agregar(claves, clave["v"])
+                agregar(vals, val)
+                si (tok_es_delim(",")) { avanzar() }
+            }
+            consumir("DELIM", "}")
+            sea nodo: cualquiera = {}
+            nodo["k"] = "mapa_lit"
+            nodo["claves"] = claves
+            nodo["vals"] = vals
+            retornar nodo
+        }
+    }
+
+    // Paréntesis
+    si (t["k"] == "DELIM" y t["v"] == "(") {
+        avanzar()
+        sea e: cualquiera = parse_expr()
+        consumir("DELIM", ")")
+        retornar e
+    }
+
+    // Identificador o llamada a función
+    si (t["k"] == "ID" o t["k"] == "KEY") {
+        sea nombre: texto = t["v"]
+        avanzar()
+
+        // Llamada a función
+        si (tok_es_delim("(")) {
+            avanzar()
+            sea args: lista = parse_args()
+            consumir("DELIM", ")")
+            sea nodo: cualquiera = {}
+            nodo["k"] = "call"
+            nodo["n"] = nombre
+            nodo["a"] = args
+            retornar nodo
+        }
+
+        // Solo identificador
+        sea nodo: cualquiera = {}
+        nodo["k"] = "id"
+        nodo["v"] = nombre
+        retornar nodo
+    }
+
+    // No reconocido — nulo
+    sea nodo: cualquiera = {}
+    nodo["k"] = "nul"
+    retornar nodo
+}
+
+// ============================================================
+// PARSER — sentencias
+// ============================================================
+
+funcion parse_bloque(): lista {
+    consumir("DELIM", "{")
+    sea stmts: lista = []
+    mientras (no tok_es_delim("}") y tok_actual()["k"] != "EOF") {
+        agregar(stmts, parse_stmt())
+    }
+    consumir("DELIM", "}")
+    retornar stmts
+}
+
+funcion parse_stmt(): cualquiera {
+    sea t: cualquiera = tok_actual()
+
+    // Declaración: sea x: tipo = expr
+    si (t["k"] == "KEY" y t["v"] == "sea") {
+        avanzar()
+        sea nombre: cualquiera = consumir_tipo("ID")
+        sea tipo_dato: texto = "cualquiera"
+        si (tok_es_delim(":")) {
+            avanzar()
+            tipo_dato = parse_tipo()
+        }
+        sea val: cualquiera = nulo
+        si (tok_es_op("=")) {
+            avanzar()
+            val = parse_expr()
+        }
+        si (tok_es_delim(";")) { avanzar() }
+        sea nodo: cualquiera = {}
+        nodo["k"] = "var"
+        nodo["n"] = nombre["v"]
+        nodo["t"] = tipo_dato
+        nodo["v"] = val
+        retornar nodo
+    }
+
+    // Función
+    si (t["k"] == "KEY" y t["v"] == "funcion") {
+        avanzar()
+        sea nombre: cualquiera = consumir_tipo("ID")
+        consumir("DELIM", "(")
+        sea params: lista = []
+        sea param_tipos: lista = []
+        mientras (no tok_es_delim(")")) {
+            sea pnombre: cualquiera = consumir_tipo("ID")
+            sea ptipo: texto = "cualquiera"
+            si (tok_es_delim(":")) {
+                avanzar()
+                ptipo = parse_tipo()
+            }
+            agregar(params, pnombre["v"])
+            agregar(param_tipos, ptipo)
+            si (tok_es_delim(",")) { avanzar() }
+        }
+        consumir("DELIM", ")")
+        sea ret_tipo: texto = "cualquiera"
+        si (tok_es_delim(":")) {
+            avanzar()
+            ret_tipo = parse_tipo()
+        }
+        sea cuerpo: lista = parse_bloque()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "fun"
+        nodo["n"] = nombre["v"]
+        nodo["p"] = params
+        nodo["pt"] = param_tipos
+        nodo["rt"] = ret_tipo
+        nodo["b"] = cuerpo
+        retornar nodo
+    }
+
+    // retornar
+    si (t["k"] == "KEY" y t["v"] == "retornar") {
+        avanzar()
+        sea val: cualquiera = nulo
+        si (no tok_es_delim(";") y no tok_es_delim("}") y tok_actual()["k"] != "EOF") {
+            val = parse_expr()
+        }
+        si (tok_es_delim(";")) { avanzar() }
+        sea nodo: cualquiera = {}
+        nodo["k"] = "ret"
+        nodo["v"] = val
+        retornar nodo
+    }
+
+    // romper
+    si (t["k"] == "KEY" y t["v"] == "romper") {
+        avanzar()
+        si (tok_es_delim(";")) { avanzar() }
+        sea nodo: cualquiera = {}
+        nodo["k"] = "rom"
+        retornar nodo
+    }
+
+    // continuar
+    si (t["k"] == "KEY" y t["v"] == "continuar") {
+        avanzar()
+        si (tok_es_delim(";")) { avanzar() }
+        sea nodo: cualquiera = {}
+        nodo["k"] = "cont"
+        retornar nodo
+    }
+
+    // lanzar
+    si (t["k"] == "KEY" y t["v"] == "lanzar") {
+        avanzar()
+        sea val: cualquiera = parse_expr()
+        si (tok_es_delim(";")) { avanzar() }
+        sea nodo: cualquiera = {}
+        nodo["k"] = "throw"
+        nodo["v"] = val
+        retornar nodo
+    }
+
+    // mostrar / afirmar (built-ins como sentencias)
+    si (t["k"] == "KEY" y (t["v"] == "mostrar" o t["v"] == "afirmar")) {
+        sea nombre: texto = t["v"]
+        avanzar()
+        consumir("DELIM", "(")
+        sea args: lista = parse_args()
+        consumir("DELIM", ")")
+        si (tok_es_delim(";")) { avanzar() }
+        sea nodo: cualquiera = {}
+        nodo["k"] = "call_stmt"
+        nodo["n"] = nombre
+        nodo["a"] = args
+        retornar nodo
+    }
+
+    // si / sino
+    si (t["k"] == "KEY" y t["v"] == "si") {
+        avanzar()
+        consumir("DELIM", "(")
+        sea cond: cualquiera = parse_expr()
+        consumir("DELIM", ")")
+        sea entonces: lista = parse_bloque()
+        sea sino_ramas: lista = []
+
+        sea _sino_sigue: booleano = tok_es_key("sino")
+        mientras (_sino_sigue) {
+            avanzar()
+            si (tok_es_key("si")) {
+                avanzar()
+                consumir("DELIM", "(")
+                sea cond2: cualquiera = parse_expr()
+                consumir("DELIM", ")")
+                sea bloque2: lista = parse_bloque()
+                sea rama: cualquiera = {}
+                rama["c"] = cond2
+                rama["b"] = bloque2
+                agregar(sino_ramas, rama)
+                _sino_sigue = tok_es_key("sino")
+            } sino {
+                sea bloque_sino: lista = parse_bloque()
+                sea rama: cualquiera = {}
+                rama["c"] = nulo
+                rama["b"] = bloque_sino
+                agregar(sino_ramas, rama)
+                _sino_sigue = falso
+            }
+        }
+
+        sea nodo: cualquiera = {}
+        nodo["k"] = "si"
+        nodo["c"] = cond
+        nodo["t"] = entonces
+        nodo["e"] = sino_ramas
+        retornar nodo
+    }
+
+    // mientras
+    si (t["k"] == "KEY" y t["v"] == "mientras") {
+        avanzar()
+        consumir("DELIM", "(")
+        sea cond: cualquiera = parse_expr()
+        consumir("DELIM", ")")
+        sea cuerpo: lista = parse_bloque()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "mien"
+        nodo["c"] = cond
+        nodo["b"] = cuerpo
+        retornar nodo
+    }
+
+    // para x en colección
+    si (t["k"] == "KEY" y t["v"] == "para") {
+        avanzar()
+        consumir("DELIM", "(")
+        sea var_nombre: cualquiera = consumir_tipo("ID")
+        consumir("KEY", "en")
+        sea iterable: cualquiera = parse_expr()
+        consumir("DELIM", ")")
+        sea cuerpo: lista = parse_bloque()
+        sea nodo: cualquiera = {}
+        nodo["k"] = "para"
+        nodo["v"] = var_nombre["v"]
+        nodo["i"] = iterable
+        nodo["b"] = cuerpo
+        retornar nodo
+    }
+
+    // intentar / capturar
+    si (t["k"] == "KEY" y t["v"] == "intentar") {
+        avanzar()
+        sea cuerpo: lista = parse_bloque()
+        sea err_nombre: texto = "e"
+        sea cuerpo_cap: lista = []
+        si (tok_es_key("capturar")) {
+            avanzar()
+            consumir("DELIM", "(")
+            sea en: cualquiera = consumir_tipo("ID")
+            err_nombre = en["v"]
+            si (tok_es_delim(":")) {
+                avanzar()
+                parse_tipo()
+            }
+            consumir("DELIM", ")")
+            cuerpo_cap = parse_bloque()
+        }
+        sea nodo: cualquiera = {}
+        nodo["k"] = "try"
+        nodo["b"] = cuerpo
+        nodo["en"] = err_nombre
+        nodo["eb"] = cuerpo_cap
+        retornar nodo
+    }
+
+    // estructura
+    si (t["k"] == "KEY" y t["v"] == "estructura") {
+        avanzar()
+        sea nombre: cualquiera = consumir_tipo("ID")
+        consumir("DELIM", "{")
+        sea campos: lista = []
+        sea campo_tipos: lista = []
+        mientras (no tok_es_delim("}")) {
+            si (tok_es_key("funcion")) {
+                parse_stmt()
+            } sino {
+                sea campo: cualquiera = consumir_tipo("ID")
+                sea ctipo: texto = "cualquiera"
+                si (tok_es_delim(":")) {
+                    avanzar()
+                    ctipo = parse_tipo()
+                }
+                si (tok_es_delim(";")) { avanzar() }
+                agregar(campos, campo["v"])
+                agregar(campo_tipos, ctipo)
+            }
+        }
+        consumir("DELIM", "}")
+        sea nodo: cualquiera = {}
+        nodo["k"] = "struct"
+        nodo["n"] = nombre["v"]
+        nodo["f"] = campos
+        nodo["ft"] = campo_tipos
+        retornar nodo
+    }
+
+    // importar
+    si (t["k"] == "KEY" y t["v"] == "importar") {
+        avanzar()
+        sea ruta: cualquiera = consumir_tipo("TEXT")
+        si (tok_es_delim(";")) { avanzar() }
+        sea nodo: cualquiera = {}
+        nodo["k"] = "import"
+        nodo["r"] = ruta["v"]
+        retornar nodo
+    }
+
+    // Sentencia de expresión (asignación, llamada, etc.)
+    sea expr: cualquiera = parse_expr()
+    si (tok_es_delim(";")) { avanzar() }
+    sea nodo: cualquiera = {}
+    nodo["k"] = "expr_stmt"
+    nodo["v"] = expr
+    retornar nodo
+}
+
+funcion parse_programa(): lista {
+    sea stmts: lista = []
+    mientras (tok_actual()["k"] != "EOF") {
+        agregar(stmts, parse_stmt())
+    }
+    retornar stmts
+}
+
+// ============================================================
+// GENERADOR DE C++
+// ============================================================
+
+G_STATE["indent"] = 0
+
+funcion pad(): texto {
+    sea r: texto = ""
+    sea i: numero = 0
+    mientras (i < G_STATE["indent"]) {
+        r = r + "  "
+        i = i + 1
+    }
+    retornar r
+}
+
+funcion gen_expr(nodo: cualquiera): texto {
+    si (tipo_de(nodo) == "nulo") { retornar "Value{}" }
+
+    sea k: texto = nodo["k"]
+
+    si (k == "num") {
+        sea v: numero = nodo["v"]
+        retornar "Value{(double)" + num_a_txt(v) + "}"
+    }
+
+    si (k == "txt") {
+        retornar "Value{std::string(\"" + escapar_cpp(nodo["v"]) + "\")}"
+    }
+
+    si (k == "bool") {
+        si (nodo["v"]) { retornar "Value{true}" }
+        retornar "Value{false}"
+    }
+
+    si (k == "nul") { retornar "Value{}" }
+
+    si (k == "id") {
+        retornar safe(nodo["v"])
+    }
+
+    si (k == "bin") {
+        sea l: texto = gen_expr(nodo["l"])
+        sea r: texto = gen_expr(nodo["r"])
+        sea op: texto = nodo["op"]
+        si (op == "+") { retornar "_add(" + l + "," + r + ")" }
+        si (op == "-") { retornar "_sub(" + l + "," + r + ")" }
+        si (op == "*") { retornar "_mul(" + l + "," + r + ")" }
+        si (op == "/") { retornar "_div(" + l + "," + r + ")" }
+        si (op == "%") { retornar "_mod(" + l + "," + r + ")" }
+        si (op == "==") { retornar "compara(" + l + "," + r + ",\"==\")" }
+        si (op == "!=") { retornar "compara(" + l + "," + r + ",\"!=\")" }
+        si (op == "<") { retornar "compara(" + l + "," + r + ",\"<\")" }
+        si (op == ">") { retornar "compara(" + l + "," + r + ",\">\")" }
+        si (op == "<=") { retornar "compara(" + l + "," + r + ",\"<=\")" }
+        si (op == ">=") { retornar "compara(" + l + "," + r + ",\">=\")" }
+        si (op == "&&") { retornar "Value{booleano(" + l + ")&&booleano(" + r + ")}" }
+        si (op == "||") { retornar "Value{booleano(" + l + ")||booleano(" + r + ")}" }
+        retornar l + op + r
+    }
+
+    si (k == "un") {
+        sea v: texto = gen_expr(nodo["v"])
+        sea op: texto = nodo["op"]
+        si (op == "!") { retornar "Value{!booleano(" + v + ")}" }
+        si (op == "-") { retornar "Value{-numero(" + v + ")}" }
+        retornar op + v
+    }
+
+    si (k == "call") {
+        sea nombre: texto = nodo["n"]
+        sea args: lista = nodo["a"]
+        sea args_cpp: lista = []
+        sea i: numero = 0
+        mientras (i < longitud(args)) {
+            agregar(args_cpp, gen_expr(args[i]))
+            i = i + 1
+        }
+        sea args_str: texto = juntar(args_cpp, ",")
+
+        // Built-ins especiales
+        si (nombre == "mostrar" o nombre == "print") {
+            retornar "mostrar(" + args_str + ")"
+        }
+        si (nombre == "longitud") { retornar "cfv_longitud(" + args_str + ")" }
+        si (nombre == "agregar") { retornar "cfv_agregar(" + args_str + ")" }
+        si (nombre == "a_texto") { retornar "cfv_a_texto(" + args_str + ")" }
+        si (nombre == "a_numero") { retornar "cfv_a_numero(" + args_str + ")" }
+        si (nombre == "tipo_de") { retornar "cfv_tipo_de(" + args_str + ")" }
+        si (nombre == "tiene_clave") { retornar "cfv_tiene_clave(" + args_str + ")" }
+        si (nombre == "claves") { retornar "cfv_claves(" + args_str + ")" }
+        si (nombre == "leer_archivo") { retornar "cfv_leer_archivo(" + args_str + ")" }
+        si (nombre == "escribir_archivo") { retornar "cfv_escribir_archivo(" + args_str + ")" }
+        si (nombre == "existe_archivo") { retornar "cfv_existe_archivo(" + args_str + ")" }
+        si (nombre == "sys_run") { retornar "cfv_sys_run(" + args_str + ")" }
+        si (nombre == "argumentos_programa") { retornar "cfv_argumentos_programa()" }
+        si (nombre == "raiz") { retornar "cfv_raiz(" + args_str + ")" }
+        si (nombre == "absoluto") { retornar "cfv_absoluto(" + args_str + ")" }
+        si (nombre == "redondear") { retornar "cfv_redondear(" + args_str + ")" }
+        si (nombre == "potencia") { retornar "cfv_potencia(" + args_str + ")" }
+        si (nombre == "afirmar") { retornar "cfv_afirmar(" + args_str + ")" }
+
+        retornar safe(nombre) + "(" + args_str + ")"
+    }
+
+    si (k == "idx") {
+        sea obj: texto = gen_expr(nodo["o"])
+        sea idx: texto = gen_expr(nodo["i"])
+        retornar "_idx(" + obj + "," + idx + ")"
+    }
+
+    si (k == "dot") {
+        sea obj: texto = gen_expr(nodo["o"])
+        sea campo: texto = nodo["f"]
+        retornar "_campo(" + obj + ",\"" + campo + "\")"
+    }
+
+    si (k == "metodo") {
+        sea obj: texto = gen_expr(nodo["o"])
+        sea metodo: texto = nodo["m"]
+        sea args: lista = nodo["a"]
+        sea args_cpp: lista = []
+        sea i: numero = 0
+        mientras (i < longitud(args)) {
+            agregar(args_cpp, gen_expr(args[i]))
+            i = i + 1
+        }
+        sea args_str: texto = juntar(args_cpp, ",")
+        si (metodo == "length" o metodo == "longitud") {
+            retornar "cfv_longitud(" + obj + ")"
+        }
+        retornar "cfv_metodo(" + obj + ",\"" + metodo + "\"," + args_str + ")"
+    }
+
+    si (k == "lst") {
+        sea items: lista = nodo["v"]
+        sea items_cpp: lista = []
+        sea i: numero = 0
+        mientras (i < longitud(items)) {
+            agregar(items_cpp, gen_expr(items[i]))
+            i = i + 1
+        }
+        sea items_str: texto = juntar(items_cpp, ",")
+        retornar "_mk_lista({" + items_str + "})"
+    }
+
+    si (k == "mapa_lit") {
+        sea claves: lista = nodo["claves"]
+        sea vals: lista = nodo["vals"]
+        si (longitud(claves) == 0) {
+            retornar "_mk_mapa_vacio()"
+        }
+        sea pares: lista = []
+        sea i: numero = 0
+        mientras (i < longitud(claves)) {
+            agregar(pares, "{\"" + escapar_cpp(claves[i]) + "\"," + gen_expr(vals[i]) + "}")
+            i = i + 1
+        }
+        retornar "_mk_mapa({" + juntar(pares, ",") + "})"
+    }
+
+    si (k == "asgn") {
+        sea op: texto = nodo["op"]
+        sea izq: cualquiera = nodo["l"]
+        sea der: texto = gen_expr(nodo["r"])
+
+        si (izq["k"] == "idx") {
+            sea obj: texto = gen_expr(izq["o"])
+            sea idx: texto = gen_expr(izq["i"])
+            si (op == "=") {
+                retornar "asignar_indice(" + obj + "," + idx + "," + der + ")"
+            }
+            sea tmp: texto = "_idx(" + obj + "," + idx + ")"
+            si (op == "+=") { retornar "asignar_indice(" + obj + "," + idx + ",cfv_add(" + tmp + "," + der + "))" }
+            si (op == "-=") { retornar "asignar_indice(" + obj + "," + idx + ",cfv_sub(" + tmp + "," + der + "))" }
+            retornar "asignar_indice(" + obj + "," + idx + "," + der + ")"
+        }
+
+        si (izq["k"] == "dot") {
+            sea obj: texto = gen_expr(izq["o"])
+            sea campo: texto = izq["f"]
+            si (op == "=") {
+                retornar "_set_campo(" + obj + ",\"" + campo + "\"," + der + ")"
+            }
+        }
+
+        // Variable simple
+        sea var_cpp: texto = gen_expr(izq)
+        si (op == "=") { retornar var_cpp + "=" + der }
+        si (op == "+=") { retornar var_cpp + "=cfv_add(" + var_cpp + "," + der + ")" }
+        si (op == "-=") { retornar var_cpp + "=Value{numero(" + var_cpp + ")-numero(" + der + ")}" }
+        si (op == "*=") { retornar var_cpp + "=Value{numero(" + var_cpp + ")*numero(" + der + ")}" }
+        si (op == "/=") { retornar var_cpp + "=Value{numero(" + var_cpp + ")/numero(" + der + ")}" }
+        retornar var_cpp + op + der
+    }
+
+    retornar "Value{}"
+}
+
+funcion gen_stmt(nodo: cualquiera): texto {
+    sea k: texto = nodo["k"]
+    sea p: texto = pad()
+
+    si (k == "var") {
+        sea nombre_cpp: texto = safe(nodo["n"])
+        sea val_str: texto = "Value{}"
+        si (nodo["v"] != nulo) {
+            val_str = gen_expr(nodo["v"])
+        }
+        retornar p + "Value " + nombre_cpp + "=" + val_str + ";\n"
+    }
+
+    si (k == "fun") {
+        sea nombre_cpp: texto = safe(nodo["n"])
+        sea params: lista = nodo["p"]
+        sea params_cpp: lista = []
+        sea i: numero = 0
+        mientras (i < longitud(params)) {
+            agregar(params_cpp, "Value " + safe(params[i]))
+            i = i + 1
+        }
+        sea params_str: texto = juntar(params_cpp, ",")
+        sea r: texto = p + "Value " + nombre_cpp + "(" + params_str + "){\n"
+        G_STATE["indent"] = G_STATE["indent"] + 1
+        sea i2: numero = 0
+        mientras (i2 < longitud(nodo["b"])) {
+            r = r + gen_stmt(nodo["b"][i2])
+            i2 = i2 + 1
+        }
+        G_STATE["indent"] = G_STATE["indent"] - 1
+        r = r + p + "return Value{};}\n"
+        retornar r
+    }
+
+    si (k == "ret") {
+        si (nodo["v"] == nulo) {
+            retornar p + "return Value{};\n"
+        }
+        retornar p + "return " + gen_expr(nodo["v"]) + ";\n"
+    }
+
+    si (k == "rom") {
+        retornar p + "break;\n"
+    }
+
+    si (k == "cont") {
+        retornar p + "continue;\n"
+    }
+
+    si (k == "throw") {
+        retornar p + "throw std::runtime_error(texto(" + gen_expr(nodo["v"]) + "));\n"
+    }
+
+    si (k == "si") {
+        sea r: texto = p + "if(booleano(" + gen_expr(nodo["c"]) + ")){\n"
+        G_STATE["indent"] = G_STATE["indent"] + 1
+        sea i: numero = 0
+        mientras (i < longitud(nodo["t"])) {
+            r = r + gen_stmt(nodo["t"][i])
+            i = i + 1
+        }
+        G_STATE["indent"] = G_STATE["indent"] - 1
+        r = r + p + "}"
+        sea ramas: lista = nodo["e"]
+        sea j: numero = 0
+        mientras (j < longitud(ramas)) {
+            sea rama: cualquiera = ramas[j]
+            si (rama["c"] != nulo) {
+                r = r + " else if(booleano(" + gen_expr(rama["c"]) + ")){\n"
+            } sino {
+                r = r + " else{\n"
+            }
+            G_STATE["indent"] = G_STATE["indent"] + 1
+            sea i2: numero = 0
+            mientras (i2 < longitud(rama["b"])) {
+                r = r + gen_stmt(rama["b"][i2])
+                i2 = i2 + 1
+            }
+            G_STATE["indent"] = G_STATE["indent"] - 1
+            r = r + p + "}"
+            j = j + 1
+        }
+        r = r + "\n"
+        retornar r
+    }
+
+    si (k == "mien") {
+        sea r: texto = p + "while(booleano(" + gen_expr(nodo["c"]) + ")){\n"
+        G_STATE["indent"] = G_STATE["indent"] + 1
+        sea i: numero = 0
+        mientras (i < longitud(nodo["b"])) {
+            r = r + gen_stmt(nodo["b"][i])
+            i = i + 1
+        }
+        G_STATE["indent"] = G_STATE["indent"] - 1
+        r = r + p + "}\n"
+        retornar r
+    }
+
+    si (k == "para") {
+        sea var_cpp: texto = safe(nodo["v"])
+        sea iter: texto = gen_expr(nodo["i"])
+        sea tmp: texto = var_cpp + "_iter"
+        sea r: texto = p + "{\nValue " + tmp + "=" + iter + ";\n"
+        r = r + p + "auto " + var_cpp + "_lst=std::get_if<Lista>(&" + tmp + ".data);\n"
+        r = r + p + "if(" + var_cpp + "_lst){for(Value " + var_cpp + ":*(*" + var_cpp + "_lst)){\n"
+        G_STATE["indent"] = G_STATE["indent"] + 1
+        sea i: numero = 0
+        mientras (i < longitud(nodo["b"])) {
+            r = r + gen_stmt(nodo["b"][i])
+            i = i + 1
+        }
+        G_STATE["indent"] = G_STATE["indent"] - 1
+        r = r + p + "}}\n"
+        r = r + p + "}\n"
+        retornar r
+    }
+
+    si (k == "try") {
+        sea r: texto = p + "try{\n"
+        G_STATE["indent"] = G_STATE["indent"] + 1
+        sea i: numero = 0
+        mientras (i < longitud(nodo["b"])) {
+            r = r + gen_stmt(nodo["b"][i])
+            i = i + 1
+        }
+        G_STATE["indent"] = G_STATE["indent"] - 1
+        r = r + p + "} catch(const std::exception& " + safe(nodo["en"]) + "_ex){\n"
+        r = r + p + "  Value " + safe(nodo["en"]) + "=Value{std::string(" + safe(nodo["en"]) + "_ex.what())};\n"
+        G_STATE["indent"] = G_STATE["indent"] + 1
+        sea j: numero = 0
+        mientras (j < longitud(nodo["eb"])) {
+            r = r + gen_stmt(nodo["eb"][j])
+            j = j + 1
+        }
+        G_STATE["indent"] = G_STATE["indent"] - 1
+        r = r + p + "} catch(const Value& " + safe(nodo["en"]) + "_v){\n"
+        r = r + p + "  Value " + safe(nodo["en"]) + "=" + safe(nodo["en"]) + "_v;\n"
+        G_STATE["indent"] = G_STATE["indent"] + 1
+        sea j2: numero = 0
+        mientras (j2 < longitud(nodo["eb"])) {
+            r = r + gen_stmt(nodo["eb"][j2])
+            j2 = j2 + 1
+        }
+        G_STATE["indent"] = G_STATE["indent"] - 1
+        r = r + p + "}\n"
+        retornar r
+    }
+
+    si (k == "struct") {
+        // Las estructuras se generan como funciones constructoras
+        sea nombre: texto = nodo["n"]
+        sea campos: lista = nodo["f"]
+        sea params_cpp: lista = []
+        sea i: numero = 0
+        mientras (i < longitud(campos)) {
+            agregar(params_cpp, "Value " + safe(campos[i]))
+            i = i + 1
+        }
+        sea r: texto = p + "Value " + safe(nombre) + "(" + juntar(params_cpp, ",") + "){\n"
+        r = r + p + "  auto m=std::make_shared<std::map<std::string,Value>>();\n"
+        sea j: numero = 0
+        mientras (j < longitud(campos)) {
+            r = r + p + "  (*m)[\"" + campos[j] + "\"]=" + safe(campos[j]) + ";\n"
+            j = j + 1
+        }
+        r = r + p + "  return Value{m};\n"
+        r = r + p + "}\n"
+        retornar r
+    }
+
+    si (k == "import") {
+        // Importaciones — ignorar en el generador nativo por ahora
+        retornar ""
+    }
+
+    si (k == "call_stmt") {
+        sea nombre: texto = nodo["n"]
+        sea args: lista = nodo["a"]
+        sea args_cpp: lista = []
+        sea i: numero = 0
+        mientras (i < longitud(args)) {
+            agregar(args_cpp, gen_expr(args[i]))
+            i = i + 1
+        }
+        sea args_str: texto = juntar(args_cpp, ",")
+        si (nombre == "mostrar" o nombre == "print") {
+            retornar p + "mostrar(" + args_str + ");\n"
+        }
+        si (nombre == "afirmar") {
+            retornar p + "cfv_afirmar(" + args_str + ");\n"
+        }
+        retornar p + safe(nombre) + "(" + args_str + ");\n"
+    }
+
+    si (k == "expr_stmt") {
+        sea e: cualquiera = nodo["v"]
+        si (e["k"] == "asgn") {
+            retornar p + gen_expr(e) + ";\n"
+        }
+        si (e["k"] == "call") {
+            retornar p + gen_expr(e) + ";\n"
+        }
+        retornar p + gen_expr(e) + ";\n"
+    }
+
+    retornar ""
+}
+
+// ============================================================
+// FUNCIONES AUXILIARES DE RUNTIME (leidas desde archivo externo)
+// ============================================================
+
+sea RUNTIME_EXTRA: texto = leer_archivo("runtime_extra.cpp")
+
+// ============================================================
+// PROGRAMA PRINCIPAL
+// ============================================================
+
+sea args: lista = argumentos_programa()
+
+sea cfv_ok: booleano = longitud(args) >= 2
+si (no cfv_ok) {
+    mostrar("uso: compilador_nativo.cfv <fuente.cfv> <salida>")
+    mostrar("  ejemplo: ./cforgev compilador_nativo.cfv programa.cfv programa")
+}
+si (cfv_ok) {
+
+sea ruta_fuente: texto = args[0]
+sea ruta_salida: texto = args[1]
+sea ruta_cpp: texto = ruta_salida + ".cpp"
+
+mostrar("C-Forge compilador nativo: " + ruta_fuente + " -> " + ruta_salida)
+
+// Leer fuente
+sea fuente: texto = leer_archivo(ruta_fuente)
+
+// Tokenizar
+G_STATE["toks"] = tokenizar(fuente)
+G_STATE["pos"] = 0
+
+// Parsear
+sea programa: lista = parse_programa()
+
+// Leer RUNTIME
+sea runtime_path: texto = "runtime.cpp"
+sea runtime_str: texto = leer_archivo(runtime_path)
+
+// Generar prototipos y funciones
+sea prototipos: lista = []
+sea funciones: lista = []
+sea main_code: texto = ""
+
+G_STATE["indent"] = 1
+
+sea i: numero = 0
+mientras (i < longitud(programa)) {
+    sea stmt: cualquiera = programa[i]
+    si (stmt["k"] == "fun") {
+        // Prototipo
+        sea nombre_cpp: texto = safe(stmt["n"])
+        sea params: lista = stmt["p"]
+        sea params_cpp: lista = []
+        sea j: numero = 0
+        mientras (j < longitud(params)) {
+            agregar(params_cpp, "Value " + safe(params[j]))
+            j = j + 1
+        }
+        agregar(prototipos, "Value " + nombre_cpp + "(" + juntar(params_cpp, ",") + ");")
+        // Función completa
+        G_STATE["indent"] = 0
+        agregar(funciones, gen_stmt(stmt))
+    } sino {
+        G_STATE["indent"] = 1
+        main_code = main_code + gen_stmt(stmt)
+    }
+    i = i + 1
+}
+
+// Ensamblar el archivo C++
+sea cpp: texto = runtime_str + "\n"
+cpp = cpp + RUNTIME_EXTRA + "\n"
+cpp = cpp + juntar(prototipos, "\n") + "\n"
+cpp = cpp + juntar(funciones, "\n") + "\n"
+cpp = cpp + "int main(int argc,char**argv){\n"
+cpp = cpp + "  try{\n"
+cpp = cpp + "    auto cfv_args_lista=std::make_shared<std::vector<Value>>();\n"
+cpp = cpp + "    for(int i=1;i<argc;++i) cfv_args_lista->push_back(Value{std::string(argv[i])});\n"
+cpp = cpp + "    cfv_argumentos_global=Value{cfv_args_lista};\n"
+cpp = cpp + main_code
+cpp = cpp + "    return 0;\n"
+cpp = cpp + "  } catch(const std::exception& e){\n"
+cpp = cpp + "    std::cerr<<\"[C-Forge] \"<<e.what()<<'\\n';return 1;\n"
+cpp = cpp + "  }\n"
+cpp = cpp + "}\n"
+
+// Escribir .cpp
+escribir_archivo(ruta_cpp, cpp)
+mostrar("C++ generado: " + ruta_cpp)
+
+// Detectar flags de plataforma
+sea flags_extra: texto = ""
+sea info_plat: cualquiera = sys_run("uname -s")
+si (info_plat["estado"] == 0 y texto_contiene(info_plat["salida"], "Linux")) {
+    flags_extra = " -ldl"
+}
+
+// Compilar: probar clang++ primero, luego g++
+sea cmd: texto = "clang++ -std=c++17 -O2 -Iinclude " + ruta_cpp + " -o " + ruta_salida + flags_extra
+mostrar("Compilando: " + cmd)
+sea resultado: cualquiera = sys_run(cmd)
+
+si (resultado["estado"] != 0) {
+    // Intentar con g++
+    sea cmd2: texto = "g++ -std=c++17 -O2 -Iinclude " + ruta_cpp + " -o " + ruta_salida + flags_extra
+    mostrar("Reintentando con g++: " + cmd2)
+    resultado = sys_run(cmd2)
+}
+
+si (resultado["estado"] != 0) {
+    mostrar("Error del compilador C++:")
+    mostrar(resultado["salida"])
+    mostrar(resultado["error"])
+}
+
+mostrar("Binario listo: " + ruta_salida)
+} // fin si cfv_ok
