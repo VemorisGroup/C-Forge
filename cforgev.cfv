@@ -1,0 +1,1123 @@
+// ============================================================
+// cforgev.cfv — Intérprete de C-Forge escrito en C-Forge
+// VemorisGroup © 2026 — B8 Autonomous Interpreter v0.1
+//
+// Uso:  python3 cforgev.py cforgev.cfv programa.cfv
+// Meta: ./cforge cforgev.cfv programa.cfv  (sin Python)
+//
+// Nota: usa mapas en lugar de estructuras para evitar que el
+// verificador de ownership trate los pasos de estado como moves.
+// ============================================================
+
+// ============================================================
+// PARTE 1: LEXER
+// ============================================================
+
+// Constructores de mapa (no estructuras, para evitar ownership moves)
+funcion Token(tipo: texto, lexema: texto, linea: numero): cualquiera {
+    retornar {"tipo": tipo, "lexema": lexema, "linea": linea}
+}
+
+funcion Nodo(tipo: texto, valor: cualquiera, hijos: lista): cualquiera {
+    retornar {"tipo": tipo, "valor": valor, "hijos": hijos}
+}
+
+funcion nodo(tipo: texto, valor: cualquiera, hijos: lista): cualquiera {
+    retornar {"tipo": tipo, "valor": valor, "hijos": hijos}
+}
+
+funcion es_espacio(c: texto): booleano {
+    retornar c == " " o c == "\t" o c == "\r"
+}
+
+funcion es_digito(c: texto): booleano {
+    retornar c >= "0" y c <= "9"
+}
+
+funcion es_letra(c: texto): booleano {
+    retornar (c >= "a" y c <= "z") o (c >= "A" y c <= "Z") o c == "_"
+}
+
+funcion es_alfanum(c: texto): booleano {
+    retornar es_letra(c) o es_digito(c)
+}
+
+funcion subcadena(fuente: texto, inicio: numero, fin: numero): texto {
+    sea resultado: texto = ""
+    sea i: numero = inicio
+    mientras (i < fin) {
+        resultado = resultado + fuente[i]
+        i = i + 1
+    }
+    retornar resultado
+}
+
+funcion tokenizar(fuente: texto): lista {
+    sea tokens: lista = []
+    sea pos: numero = 0
+    sea linea: numero = 1
+    sea n: numero = longitud(fuente)
+
+    mientras (pos < n) {
+        sea c: texto = fuente[pos]
+
+        si (c == "\n") {
+            linea = linea + 1
+            pos = pos + 1
+
+        } sino si (es_espacio(c)) {
+            pos = pos + 1
+
+        } sino si (c == "/") {
+            si (pos + 1 < n y fuente[pos + 1] == "/") {
+                mientras (pos < n y fuente[pos] != "\n") {
+                    pos = pos + 1
+                }
+            } sino {
+                pos = pos + 1
+                agregar(tokens, Token("SYMBOL", "/", linea))
+            }
+
+        } sino si (es_digito(c)) {
+            sea inicio: numero = pos
+            mientras (pos < n y es_digito(fuente[pos])) {
+                pos = pos + 1
+            }
+            si (pos < n y fuente[pos] == ".") {
+                pos = pos + 1
+                mientras (pos < n y es_digito(fuente[pos])) {
+                    pos = pos + 1
+                }
+            }
+            agregar(tokens, Token("NUMBER", subcadena(fuente, inicio, pos), linea))
+
+        } sino si (es_letra(c)) {
+            sea inicio: numero = pos
+            mientras (pos < n y es_alfanum(fuente[pos])) {
+                pos = pos + 1
+            }
+            sea lex: texto = subcadena(fuente, inicio, pos)
+            agregar(tokens, Token("IDENT", lex, linea))
+
+        } sino si (c == "\"") {
+            sea linea_str: numero = linea
+            sea literal: texto = "\""
+            pos = pos + 1
+            sea cerrado: booleano = falso
+            mientras (pos < n y no cerrado) {
+                sea ch: texto = fuente[pos]
+                si (ch == "\\") {
+                    pos = pos + 1
+                    si (pos < n) {
+                        sea esc: texto = fuente[pos]
+                        si (esc == "n") {
+                            literal = literal + "\n"
+                        } sino si (esc == "t") {
+                            literal = literal + "\t"
+                        } sino si (esc == "\"") {
+                            literal = literal + "\""
+                        } sino si (esc == "\\") {
+                            literal = literal + "\\"
+                        } sino {
+                            literal = literal + "\\" + esc
+                        }
+                        pos = pos + 1
+                    }
+                } sino si (ch == "\"") {
+                    literal = literal + "\""
+                    pos = pos + 1
+                    cerrado = verdadero
+                } sino {
+                    si (ch == "\n") { linea = linea + 1 }
+                    literal = literal + ch
+                    pos = pos + 1
+                }
+            }
+            afirmar(cerrado, "texto sin cerrar en línea " + a_texto(linea_str))
+            agregar(tokens, Token("STRING", literal, linea_str))
+
+        } sino {
+            sea sym: texto = c
+            si (pos + 1 < n) {
+                sea par: texto = c + fuente[pos + 1]
+                si (par == "==" o par == "!=" o par == ">=" o par == "<=" o
+                    par == "<<" o par == ">>" o par == "->") {
+                    sym = par
+                    pos = pos + 1
+                }
+            }
+            pos = pos + 1
+            agregar(tokens, Token("SYMBOL", sym, linea))
+        }
+    }
+
+    agregar(tokens, Token("EOF", "", linea))
+    retornar tokens
+}
+
+// ============================================================
+// PARTE 2: PARSER
+// Usa un mapa {"tokens": lista, "pos": numero} como estado.
+// Los mapas son colecciones → se pasan por referencia (no se mueven).
+// ============================================================
+
+funcion mk_parser(tokens: lista): cualquiera {
+    retornar {"tokens": tokens, "pos": 0}
+}
+
+funcion tok_actual(p: cualquiera): cualquiera {
+    retornar p["tokens"][p["pos"]]
+}
+
+funcion tok_anterior(p: cualquiera): cualquiera {
+    retornar p["tokens"][p["pos"] - 1]
+}
+
+funcion al_final(p: cualquiera): booleano {
+    retornar tok_actual(p)["tipo"] == "EOF"
+}
+
+funcion avanzar(p: cualquiera): cualquiera {
+    si (no al_final(p)) {
+        p["pos"] = p["pos"] + 1
+    }
+    retornar tok_anterior(p)
+}
+
+funcion ver(p: cualquiera, lex: texto): booleano {
+    retornar tok_actual(p)["lexema"] == lex
+}
+
+funcion ver_tipo(p: cualquiera, tipo: texto): booleano {
+    retornar tok_actual(p)["tipo"] == tipo
+}
+
+funcion tomar(p: cualquiera, lex: texto): booleano {
+    si (ver(p, lex)) {
+        avanzar(p)
+        retornar verdadero
+    }
+    retornar falso
+}
+
+funcion requerir(p: cualquiera, lex: texto, msg: texto): cualquiera {
+    afirmar(ver(p, lex), msg + " (línea " + a_texto(tok_actual(p)["linea"]) + "), se encontró '" + tok_actual(p)["lexema"] + "'")
+    retornar avanzar(p)
+}
+
+funcion requerir_tipo(p: cualquiera, tipo: texto, msg: texto): cualquiera {
+    afirmar(ver_tipo(p, tipo), msg + " (línea " + a_texto(tok_actual(p)["linea"]) + ")")
+    retornar avanzar(p)
+}
+
+funcion parse_bloque(p: cualquiera): lista {
+    requerir(p, "{", "Se esperaba '{'")
+    sea sentencias: lista = []
+    mientras (no al_final(p) y no ver(p, "}")) {
+        agregar(sentencias, parse_sentencia(p))
+    }
+    requerir(p, "}", "Se esperaba '}'")
+    retornar sentencias
+}
+
+funcion parse_sentencia(p: cualquiera): cualquiera {
+    // Declaración sea/var/const
+    si (ver(p, "sea") o ver(p, "var") o ver(p, "const")) {
+        avanzar(p)
+        sea nombre_tok: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba nombre de variable")
+        sea nombre: texto = nombre_tok["lexema"]
+        // Tipo opcional
+        si (tomar(p, ":")) {
+            requerir_tipo(p, "IDENT", "Se esperaba tipo")
+            si (tomar(p, "<")) {
+                requerir_tipo(p, "IDENT", "Se esperaba tipo genérico")
+                tomar(p, ">")
+            }
+        }
+        si (tomar(p, "=")) {
+            sea val: cualquiera = parse_expresion(p)
+            tomar(p, ";")
+            retornar nodo("Declaracion", nombre, [val])
+        } sino {
+            tomar(p, ";")
+            retornar nodo("Declaracion", nombre, [nodo("Nulo", nulo, [])])
+        }
+    }
+
+    // Retornar
+    si (ver(p, "retornar")) {
+        avanzar(p)
+        si (ver(p, "}") o ver(p, ";") o al_final(p)) {
+            tomar(p, ";")
+            retornar nodo("Retornar", nulo, [nodo("Nulo", nulo, [])])
+        }
+        sea val: cualquiera = parse_expresion(p)
+        tomar(p, ";")
+        retornar nodo("Retornar", nulo, [val])
+    }
+
+    // Romper / continuar
+    si (ver(p, "romper")) {
+        avanzar(p)
+        tomar(p, ";")
+        retornar nodo("Romper", nulo, [])
+    }
+    si (ver(p, "continuar")) {
+        avanzar(p)
+        tomar(p, ";")
+        retornar nodo("Continuar", nulo, [])
+    }
+
+    // si / sino
+    si (ver(p, "si")) {
+        avanzar(p)
+        requerir(p, "(", "Se esperaba '(' tras 'si'")
+        sea cond: cualquiera = parse_expresion(p)
+        requerir(p, ")", "Se esperaba ')' tras condición")
+        sea entonces: lista = parse_bloque(p)
+        sea ramas: lista = [cond, nodo("Bloque", nulo, entonces)]
+        mientras (ver(p, "sino")) {
+            avanzar(p)
+            si (ver(p, "si")) {
+                avanzar(p)
+                requerir(p, "(", "Se esperaba '('")
+                sea cond2: cualquiera = parse_expresion(p)
+                requerir(p, ")", "Se esperaba ')'")
+                sea blq2: lista = parse_bloque(p)
+                agregar(ramas, cond2)
+                agregar(ramas, nodo("Bloque", nulo, blq2))
+            } sino {
+                sea blq_sino: lista = parse_bloque(p)
+                agregar(ramas, nodo("Bloque", nulo, blq_sino))
+            }
+        }
+        retornar nodo("Si", nulo, ramas)
+    }
+
+    // mientras
+    si (ver(p, "mientras")) {
+        avanzar(p)
+        requerir(p, "(", "Se esperaba '('")
+        sea cond: cualquiera = parse_expresion(p)
+        requerir(p, ")", "Se esperaba ')'")
+        sea cuerpo: lista = parse_bloque(p)
+        retornar nodo("Mientras", nulo, [cond, nodo("Bloque", nulo, cuerpo)])
+    }
+
+    // para variable en coleccion
+    si (ver(p, "para")) {
+        avanzar(p)
+        sea var_tok: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba variable de iteración")
+        sea var_nombre: texto = var_tok["lexema"]
+        si (tomar(p, ":")) {
+            si (ver_tipo(p, "IDENT") y no ver(p, "en")) {
+                avanzar(p)
+            }
+        }
+        requerir(p, "en", "Se esperaba 'en' en bucle para")
+        sea col: cualquiera = parse_expresion(p)
+        sea cuerpo: lista = parse_bloque(p)
+        retornar nodo("Para", var_nombre, [col, nodo("Bloque", nulo, cuerpo)])
+    }
+
+    // funcion
+    si (ver(p, "funcion")) {
+        avanzar(p)
+        sea nombre_tok: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba nombre de función")
+        sea fn_nombre: texto = nombre_tok["lexema"]
+        requerir(p, "(", "Se esperaba '('")
+        sea params: lista = []
+        mientras (no ver(p, ")") y no al_final(p)) {
+            sea pnom: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba parámetro")
+            agregar(params, pnom["lexema"])
+            si (tomar(p, ":")) {
+                requerir_tipo(p, "IDENT", "Se esperaba tipo de parámetro")
+                si (tomar(p, "<")) {
+                    requerir_tipo(p, "IDENT", "Se esperaba tipo genérico")
+                    tomar(p, ">")
+                }
+            }
+            si (no ver(p, ")")) {
+                requerir(p, ",", "Se esperaba ','")
+            }
+        }
+        requerir(p, ")", "Se esperaba ')'")
+        // Tipo de retorno opcional
+        si (tomar(p, ":")) {
+            si (ver_tipo(p, "IDENT")) {
+                avanzar(p)
+                si (tomar(p, "<")) {
+                    requerir_tipo(p, "IDENT", "Se esperaba tipo genérico")
+                    tomar(p, ">")
+                }
+            }
+        }
+        sea cuerpo: lista = parse_bloque(p)
+        retornar nodo("Funcion", fn_nombre, [nodo("Params", nulo, params), nodo("Bloque", nulo, cuerpo)])
+    }
+
+    // mostrar directo
+    si (ver(p, "mostrar")) {
+        avanzar(p)
+        requerir(p, "(", "Se esperaba '('")
+        sea arg: cualquiera = parse_expresion(p)
+        requerir(p, ")", "Se esperaba ')'")
+        tomar(p, ";")
+        retornar nodo("Mostrar", nulo, [arg])
+    }
+
+    // Expresión o asignación
+    sea expr: cualquiera = parse_expresion(p)
+    tomar(p, ";")
+    retornar nodo("Expresion", nulo, [expr])
+}
+
+funcion parse_expresion(p: cualquiera): cualquiera {
+    retornar parse_asignacion(p)
+}
+
+funcion parse_asignacion(p: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_logico_o(p)
+    si (tok_actual(p)["lexema"] == "=") {
+        avanzar(p)
+        sea der: cualquiera = parse_expresion(p)
+        retornar nodo("Asignacion", nulo, [izq, der])
+    }
+    retornar izq
+}
+
+funcion parse_logico_o(p: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_logico_y(p)
+    mientras (ver(p, "o")) {
+        avanzar(p)
+        sea der: cualquiera = parse_logico_y(p)
+        izq = nodo("Binario", "o", [izq, der])
+    }
+    retornar izq
+}
+
+funcion parse_logico_y(p: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_igualdad(p)
+    mientras (ver(p, "y")) {
+        avanzar(p)
+        sea der: cualquiera = parse_igualdad(p)
+        izq = nodo("Binario", "y", [izq, der])
+    }
+    retornar izq
+}
+
+funcion parse_igualdad(p: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_comparacion(p)
+    mientras (ver(p, "==") o ver(p, "!=")) {
+        sea op: texto = tok_actual(p)["lexema"]
+        avanzar(p)
+        sea der: cualquiera = parse_comparacion(p)
+        izq = nodo("Binario", op, [izq, der])
+    }
+    retornar izq
+}
+
+funcion parse_comparacion(p: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_bit_o(p)
+    mientras (ver(p, "<") o ver(p, "<=") o ver(p, ">") o ver(p, ">=")) {
+        sea op: texto = tok_actual(p)["lexema"]
+        avanzar(p)
+        sea der: cualquiera = parse_bit_o(p)
+        izq = nodo("Binario", op, [izq, der])
+    }
+    retornar izq
+}
+
+funcion parse_bit_o(p: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_bit_xor(p)
+    mientras (ver(p, "|")) {
+        avanzar(p)
+        sea der: cualquiera = parse_bit_xor(p)
+        izq = nodo("Binario", "|", [izq, der])
+    }
+    retornar izq
+}
+
+funcion parse_bit_xor(p: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_bit_y(p)
+    mientras (ver(p, "^")) {
+        avanzar(p)
+        sea der: cualquiera = parse_bit_y(p)
+        izq = nodo("Binario", "^", [izq, der])
+    }
+    retornar izq
+}
+
+funcion parse_bit_y(p: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_desplaz(p)
+    mientras (ver(p, "&")) {
+        avanzar(p)
+        sea der: cualquiera = parse_desplaz(p)
+        izq = nodo("Binario", "&", [izq, der])
+    }
+    retornar izq
+}
+
+funcion parse_desplaz(p: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_suma(p)
+    mientras (ver(p, "<<") o ver(p, ">>")) {
+        sea op: texto = tok_actual(p)["lexema"]
+        avanzar(p)
+        sea der: cualquiera = parse_suma(p)
+        izq = nodo("Binario", op, [izq, der])
+    }
+    retornar izq
+}
+
+funcion parse_suma(p: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_producto(p)
+    mientras (ver(p, "+") o ver(p, "-")) {
+        sea op: texto = tok_actual(p)["lexema"]
+        avanzar(p)
+        sea der: cualquiera = parse_producto(p)
+        izq = nodo("Binario", op, [izq, der])
+    }
+    retornar izq
+}
+
+funcion parse_producto(p: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_unario(p)
+    mientras (ver(p, "*") o ver(p, "/") o ver(p, "%")) {
+        sea op: texto = tok_actual(p)["lexema"]
+        avanzar(p)
+        sea der: cualquiera = parse_unario(p)
+        izq = nodo("Binario", op, [izq, der])
+    }
+    retornar izq
+}
+
+funcion parse_unario(p: cualquiera): cualquiera {
+    si (ver(p, "no")) {
+        avanzar(p)
+        retornar nodo("Unario", "no", [parse_unario(p)])
+    }
+    si (ver(p, "-")) {
+        avanzar(p)
+        retornar nodo("Unario", "-", [parse_unario(p)])
+    }
+    si (ver(p, "~")) {
+        avanzar(p)
+        retornar nodo("Unario", "~", [parse_unario(p)])
+    }
+    retornar parse_postfijo(p)
+}
+
+funcion parse_postfijo(p: cualquiera): cualquiera {
+    sea base: cualquiera = parse_primaria(p)
+    sea continuar_pf: booleano = verdadero
+    mientras (continuar_pf) {
+        si (ver(p, "[")) {
+            avanzar(p)
+            sea idx: cualquiera = parse_expresion(p)
+            requerir(p, "]", "Se esperaba ']'")
+            base = nodo("Indice", nulo, [base, idx])
+        } sino si (ver(p, ".")) {
+            avanzar(p)
+            sea campo_tok: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba campo")
+            sea campo: texto = campo_tok["lexema"]
+            si (ver(p, "(")) {
+                avanzar(p)
+                sea args: lista = parse_argumentos(p)
+                requerir(p, ")", "Se esperaba ')'")
+                sea hijos_m: lista = [base]
+                sea mi: numero = 0
+                mientras (mi < longitud(args)) {
+                    agregar(hijos_m, args[mi])
+                    mi = mi + 1
+                }
+                base = nodo("MetodoLlamada", campo, hijos_m)
+            } sino {
+                base = nodo("Campo", campo, [base])
+            }
+        } sino si (ver(p, "(") y base["tipo"] == "Identificador") {
+            avanzar(p)
+            sea args: lista = parse_argumentos(p)
+            requerir(p, ")", "Se esperaba ')'")
+            base = nodo("Llamada", base["valor"], args)
+        } sino {
+            continuar_pf = falso
+        }
+    }
+    retornar base
+}
+
+funcion parse_argumentos(p: cualquiera): lista {
+    sea args: lista = []
+    mientras (no ver(p, ")") y no al_final(p)) {
+        agregar(args, parse_expresion(p))
+        si (no ver(p, ")")) {
+            requerir(p, ",", "Se esperaba ','")
+        }
+    }
+    retornar args
+}
+
+funcion parse_primaria(p: cualquiera): cualquiera {
+    si (ver_tipo(p, "NUMBER")) {
+        sea tok: cualquiera = avanzar(p)
+        retornar nodo("Numero", tok["lexema"], [])
+    }
+    si (ver_tipo(p, "STRING")) {
+        sea tok: cualquiera = avanzar(p)
+        retornar nodo("Texto", tok["lexema"], [])
+    }
+    si (ver(p, "verdadero")) { avanzar(p); retornar nodo("Booleano", "verdadero", []) }
+    si (ver(p, "falso"))     { avanzar(p); retornar nodo("Booleano", "falso", []) }
+    si (ver(p, "nulo"))      { avanzar(p); retornar nodo("Nulo", nulo, []) }
+
+    // Lista literal
+    si (ver(p, "[")) {
+        avanzar(p)
+        sea elementos: lista = []
+        mientras (no ver(p, "]") y no al_final(p)) {
+            agregar(elementos, parse_expresion(p))
+            si (no ver(p, "]")) { requerir(p, ",", "Se esperaba ','") }
+        }
+        requerir(p, "]", "Se esperaba ']'")
+        retornar nodo("Lista", nulo, elementos)
+    }
+
+    // Mapa literal
+    si (ver(p, "{")) {
+        avanzar(p)
+        sea pares: lista = []
+        mientras (no ver(p, "}") y no al_final(p)) {
+            sea clave: cualquiera = parse_expresion(p)
+            requerir(p, ":", "Se esperaba ':'")
+            sea val: cualquiera = parse_expresion(p)
+            agregar(pares, clave)
+            agregar(pares, val)
+            si (no ver(p, "}")) { requerir(p, ",", "Se esperaba ','") }
+        }
+        requerir(p, "}", "Se esperaba '}'")
+        retornar nodo("Mapa", nulo, pares)
+    }
+
+    // Paréntesis
+    si (ver(p, "(")) {
+        avanzar(p)
+        sea ex: cualquiera = parse_expresion(p)
+        requerir(p, ")", "Se esperaba ')'")
+        retornar ex
+    }
+
+    // Identificadores / llamadas
+    si (ver_tipo(p, "IDENT")) {
+        sea tok: cualquiera = avanzar(p)
+        si (ver(p, "(")) {
+            avanzar(p)
+            sea args: lista = parse_argumentos(p)
+            requerir(p, ")", "Se esperaba ')'")
+            retornar nodo("Llamada", tok["lexema"], args)
+        }
+        retornar nodo("Identificador", tok["lexema"], [])
+    }
+
+    afirmar(falso, "Token inesperado '" + tok_actual(p)["lexema"] + "' en línea " + a_texto(tok_actual(p)["linea"]))
+    retornar nodo("Nulo", nulo, [])
+}
+
+funcion parsear(tokens: lista): lista {
+    sea p: cualquiera = mk_parser(tokens)
+    sea sentencias: lista = []
+    mientras (no al_final(p)) {
+        agregar(sentencias, parse_sentencia(p))
+    }
+    retornar sentencias
+}
+
+// ============================================================
+// PARTE 3: EVALUADOR
+// ============================================================
+
+funcion env_buscar(env: lista, nombre: texto): cualquiera {
+    sea i: numero = 0
+    mientras (i < longitud(env)) {
+        si (tiene_clave(env[i], nombre)) {
+            retornar env[i][nombre]
+        }
+        i = i + 1
+    }
+    afirmar(falso, "variable desconocida '" + nombre + "'")
+    retornar nulo
+}
+
+funcion env_tiene(env: lista, nombre: texto): booleano {
+    sea i: numero = 0
+    mientras (i < longitud(env)) {
+        si (tiene_clave(env[i], nombre)) {
+            retornar verdadero
+        }
+        i = i + 1
+    }
+    retornar falso
+}
+
+funcion env_declarar(env: lista, nombre: texto, valor: cualquiera) {
+    sea scope: cualquiera = env[0]
+    scope[nombre] = valor
+}
+
+funcion env_asignar(env: lista, nombre: texto, valor: cualquiera) {
+    sea i: numero = 0
+    mientras (i < longitud(env)) {
+        si (tiene_clave(env[i], nombre)) {
+            sea scope: cualquiera = env[i]
+            scope[nombre] = valor
+            retornar 0
+        }
+        i = i + 1
+    }
+    sea scope: cualquiera = env[0]
+    scope[nombre] = valor
+}
+
+funcion env_nuevo_scope(env: lista): lista {
+    sea nuevo: lista = [{}]
+    sea i: numero = 0
+    mientras (i < longitud(env)) {
+        agregar(nuevo, env[i])
+        i = i + 1
+    }
+    retornar nuevo
+}
+
+funcion formato_valor(v: cualquiera): texto {
+    si (v == nulo) { retornar "nulo" }
+    si (v == verdadero) { retornar "verdadero" }
+    si (v == falso) { retornar "falso" }
+    retornar a_texto(v)
+}
+
+funcion eval_binario(op: texto, izq: cualquiera, der: cualquiera): cualquiera {
+    si (op == "+") {
+        si (tipo_de(izq) == "texto" o tipo_de(der) == "texto") {
+            retornar formato_valor(izq) + formato_valor(der)
+        }
+        retornar izq + der
+    }
+    si (op == "-") { retornar izq - der }
+    si (op == "*") { retornar izq * der }
+    si (op == "/") {
+        afirmar(der != 0, "División por cero")
+        retornar izq / der
+    }
+    si (op == "%") {
+        afirmar(der != 0, "Módulo por cero")
+        retornar izq % der
+    }
+    si (op == "&") { retornar izq & der }
+    si (op == "|") { retornar izq | der }
+    si (op == "^") { retornar izq ^ der }
+    si (op == "<<") { retornar izq << der }
+    si (op == ">>") { retornar izq >> der }
+    si (op == "==") { retornar izq == der }
+    si (op == "!=") { retornar izq != der }
+    si (op == "<")  { retornar izq < der }
+    si (op == "<=") { retornar izq <= der }
+    si (op == ">")  { retornar izq > der }
+    si (op == ">=") { retornar izq >= der }
+    si (op == "y")  { retornar izq y der }
+    si (op == "o")  { retornar izq o der }
+    afirmar(falso, "operador desconocido '" + op + "'")
+    retornar nulo
+}
+
+funcion eval_builtin(nombre: texto, args: lista, env: lista, fns: cualquiera): cualquiera {
+    si (nombre == "mostrar") {
+        afirmar(longitud(args) == 1, "mostrar requiere un argumento")
+        mostrar(args[0])
+        retornar "__ok__"
+    }
+    si (nombre == "longitud") {
+        afirmar(longitud(args) == 1, "longitud requiere un argumento")
+        retornar longitud(args[0])
+    }
+    si (nombre == "agregar") {
+        afirmar(longitud(args) == 2, "agregar requiere dos argumentos")
+        agregar(args[0], args[1])
+        retornar "__ok__"
+    }
+    si (nombre == "a_texto") {
+        afirmar(longitud(args) == 1, "a_texto requiere un argumento")
+        retornar formato_valor(args[0])
+    }
+    si (nombre == "a_numero") {
+        afirmar(longitud(args) == 1, "a_numero requiere un argumento")
+        retornar a_numero(args[0])
+    }
+    si (nombre == "tiene_clave") {
+        afirmar(longitud(args) == 2, "tiene_clave requiere dos argumentos")
+        retornar tiene_clave(args[0], args[1])
+    }
+    si (nombre == "claves") {
+        afirmar(longitud(args) == 1, "claves requiere un argumento")
+        retornar claves(args[0])
+    }
+    si (nombre == "tipo_de") {
+        afirmar(longitud(args) == 1, "tipo_de requiere un argumento")
+        retornar tipo_de(args[0])
+    }
+    si (nombre == "leer_archivo") {
+        afirmar(longitud(args) == 1, "leer_archivo requiere un argumento")
+        retornar leer_archivo(args[0])
+    }
+    si (nombre == "afirmar") {
+        si (longitud(args) == 2) {
+            afirmar(args[0], args[1])
+        } sino {
+            afirmar(args[0], "afirmación fallida")
+        }
+        retornar "__ok__"
+    }
+    si (nombre == "argumentos_programa") {
+        retornar argumentos_programa()
+    }
+    retornar "__no_builtin__"
+}
+
+funcion eval_expr(nodo_e: cualquiera, env: lista, fns: cualquiera): cualquiera {
+    sea t: texto = nodo_e["tipo"]
+
+    si (t == "Numero") {
+        retornar a_numero(nodo_e["valor"])
+    }
+
+    si (t == "Texto") {
+        sea raw: texto = nodo_e["valor"]
+        sea n: numero = longitud(raw)
+        retornar subcadena(raw, 1, n - 1)
+    }
+
+    si (t == "Booleano") {
+        retornar nodo_e["valor"] == "verdadero"
+    }
+
+    si (t == "Nulo") {
+        retornar nulo
+    }
+
+    si (t == "Identificador") {
+        retornar env_buscar(env, nodo_e["valor"])
+    }
+
+    si (t == "Lista") {
+        sea resultado: lista = []
+        sea i: numero = 0
+        mientras (i < longitud(nodo_e["hijos"])) {
+            agregar(resultado, eval_expr(nodo_e["hijos"][i], env, fns))
+            i = i + 1
+        }
+        retornar resultado
+    }
+
+    si (t == "Mapa") {
+        sea resultado: cualquiera = {}
+        sea i: numero = 0
+        mientras (i < longitud(nodo_e["hijos"])) {
+            sea clave_v: cualquiera = eval_expr(nodo_e["hijos"][i], env, fns)
+            sea val_v: cualquiera = eval_expr(nodo_e["hijos"][i + 1], env, fns)
+            sea res_m: cualquiera = resultado
+            res_m[clave_v] = val_v
+            i = i + 2
+        }
+        retornar resultado
+    }
+
+    si (t == "Unario") {
+        sea operando: cualquiera = eval_expr(nodo_e["hijos"][0], env, fns)
+        si (nodo_e["valor"] == "-") { retornar 0 - operando }
+        si (nodo_e["valor"] == "no") { retornar no operando }
+        si (nodo_e["valor"] == "~") { retornar ~operando }
+    }
+
+    si (t == "Binario") {
+        // Cortocircuito lógico
+        si (nodo_e["valor"] == "y") {
+            sea izq_v: cualquiera = eval_expr(nodo_e["hijos"][0], env, fns)
+            si (no izq_v) { retornar falso }
+            retornar eval_expr(nodo_e["hijos"][1], env, fns)
+        }
+        si (nodo_e["valor"] == "o") {
+            sea izq_v: cualquiera = eval_expr(nodo_e["hijos"][0], env, fns)
+            si (izq_v) { retornar verdadero }
+            retornar eval_expr(nodo_e["hijos"][1], env, fns)
+        }
+        sea izq: cualquiera = eval_expr(nodo_e["hijos"][0], env, fns)
+        sea der: cualquiera = eval_expr(nodo_e["hijos"][1], env, fns)
+        retornar eval_binario(nodo_e["valor"], izq, der)
+    }
+
+    si (t == "Indice") {
+        sea base: cualquiera = eval_expr(nodo_e["hijos"][0], env, fns)
+        sea idx: cualquiera = eval_expr(nodo_e["hijos"][1], env, fns)
+        retornar base[idx]
+    }
+
+    si (t == "Campo") {
+        sea base: cualquiera = eval_expr(nodo_e["hijos"][0], env, fns)
+        sea campo: texto = nodo_e["valor"]
+        si (campo == "longitud" o campo == "length") {
+            retornar longitud(base)
+        }
+        retornar base[campo]
+    }
+
+    si (t == "Asignacion") {
+        sea objetivo: cualquiera = nodo_e["hijos"][0]
+        sea nuevo_val: cualquiera = eval_expr(nodo_e["hijos"][1], env, fns)
+        si (objetivo["tipo"] == "Identificador") {
+            env_asignar(env, objetivo["valor"], nuevo_val)
+        } sino si (objetivo["tipo"] == "Indice") {
+            sea base: cualquiera = eval_expr(objetivo["hijos"][0], env, fns)
+            sea idx: cualquiera = eval_expr(objetivo["hijos"][1], env, fns)
+            sea b: cualquiera = base
+            b[idx] = nuevo_val
+        } sino si (objetivo["tipo"] == "Campo") {
+            sea base: cualquiera = eval_expr(objetivo["hijos"][0], env, fns)
+            sea b: cualquiera = base
+            b[objetivo["valor"]] = nuevo_val
+        }
+        retornar nuevo_val
+    }
+
+    si (t == "Llamada") {
+        sea nombre_fn: texto = nodo_e["valor"]
+        sea args_eval: lista = []
+        sea ai: numero = 0
+        mientras (ai < longitud(nodo_e["hijos"])) {
+            agregar(args_eval, eval_expr(nodo_e["hijos"][ai], env, fns))
+            ai = ai + 1
+        }
+
+        // Intentar built-in
+        sea res_b: cualquiera = eval_builtin(nombre_fn, args_eval, env, fns)
+        si (res_b != "__no_builtin__") {
+            si (res_b == "__ok__") { retornar nulo }
+            retornar res_b
+        }
+
+        // Función definida por el usuario
+        afirmar(tiene_clave(fns, nombre_fn), "función desconocida '" + nombre_fn + "'")
+        sea fn_def: cualquiera = fns[nombre_fn]
+        sea params: lista = fn_def["params"]
+        sea cuerpo_fn: lista = fn_def["cuerpo"]
+
+        sea fn_env: lista = [{}]
+        sea pi: numero = 0
+        mientras (pi < longitud(params)) {
+            sea fscope: cualquiera = fn_env[0]
+            fscope[params[pi]] = args_eval[pi]
+            pi = pi + 1
+        }
+
+        sea senal: lista = exec_bloque(cuerpo_fn, fn_env, fns)
+        si (senal[0] == "retornar") {
+            retornar senal[1]
+        }
+        retornar nulo
+    }
+
+    si (t == "MetodoLlamada") {
+        sea base: cualquiera = eval_expr(nodo_e["hijos"][0], env, fns)
+        sea metodo: texto = nodo_e["valor"]
+        sea args_m: lista = []
+        sea mi: numero = 1
+        mientras (mi < longitud(nodo_e["hijos"])) {
+            agregar(args_m, eval_expr(nodo_e["hijos"][mi], env, fns))
+            mi = mi + 1
+        }
+        si (metodo == "agregar" o metodo == "push" o metodo == "append") {
+            agregar(base, args_m[0])
+            retornar nulo
+        }
+        si (metodo == "longitud" o metodo == "length" o metodo == "len") {
+            retornar longitud(base)
+        }
+        si (metodo == "tiene_clave") {
+            retornar tiene_clave(base, args_m[0])
+        }
+        afirmar(falso, "método desconocido '" + metodo + "'")
+        retornar nulo
+    }
+
+    afirmar(falso, "expresión no evaluable tipo '" + t + "'")
+    retornar nulo
+}
+
+funcion exec_bloque(sentencias: lista, env: lista, fns: cualquiera): lista {
+    sea i: numero = 0
+    mientras (i < longitud(sentencias)) {
+        sea senal: lista = exec_stmt(sentencias[i], env, fns)
+        si (senal[0] != "normal") {
+            retornar senal
+        }
+        i = i + 1
+    }
+    retornar ["normal", nulo]
+}
+
+funcion exec_stmt(stmt: cualquiera, env: lista, fns: cualquiera): lista {
+    sea t: texto = stmt["tipo"]
+
+    si (t == "Declaracion") {
+        sea val: cualquiera = eval_expr(stmt["hijos"][0], env, fns)
+        env_declarar(env, stmt["valor"], val)
+        retornar ["normal", nulo]
+    }
+
+    si (t == "Expresion") {
+        eval_expr(stmt["hijos"][0], env, fns)
+        retornar ["normal", nulo]
+    }
+
+    si (t == "Mostrar") {
+        sea val: cualquiera = eval_expr(stmt["hijos"][0], env, fns)
+        mostrar(val)
+        retornar ["normal", nulo]
+    }
+
+    si (t == "Retornar") {
+        sea val: cualquiera = eval_expr(stmt["hijos"][0], env, fns)
+        retornar ["retornar", val]
+    }
+
+    si (t == "Romper") {
+        retornar ["romper", nulo]
+    }
+
+    si (t == "Continuar") {
+        retornar ["continuar", nulo]
+    }
+
+    si (t == "Si") {
+        sea hijos: lista = stmt["hijos"]
+        sea n_hijos: numero = longitud(hijos)
+        sea i: numero = 0
+        sea ejecutado: booleano = falso
+        mientras (i < n_hijos y no ejecutado) {
+            sea es_ultimo: booleano = (i == n_hijos - 1)
+            si (hijos[i]["tipo"] == "Bloque" y es_ultimo) {
+                sea scope_si: lista = env_nuevo_scope(env)
+                sea senal: lista = exec_bloque(hijos[i]["hijos"], scope_si, fns)
+                ejecutado = verdadero
+                si (senal[0] != "normal") { retornar senal }
+            } sino si (hijos[i]["tipo"] != "Bloque") {
+                sea cond_val: cualquiera = eval_expr(hijos[i], env, fns)
+                si (cond_val) {
+                    sea scope_si: lista = env_nuevo_scope(env)
+                    sea senal: lista = exec_bloque(hijos[i + 1]["hijos"], scope_si, fns)
+                    ejecutado = verdadero
+                    si (senal[0] != "normal") { retornar senal }
+                }
+                i = i + 1
+            }
+            i = i + 1
+        }
+        retornar ["normal", nulo]
+    }
+
+    si (t == "Mientras") {
+        sea cond_nodo: cualquiera = stmt["hijos"][0]
+        sea cuerpo_nodo: cualquiera = stmt["hijos"][1]
+        sea continuar_bucle: booleano = verdadero
+        mientras (continuar_bucle) {
+            sea cond_val: cualquiera = eval_expr(cond_nodo, env, fns)
+            si (no cond_val) {
+                continuar_bucle = falso
+            } sino {
+                sea scope_w: lista = env_nuevo_scope(env)
+                sea senal: lista = exec_bloque(cuerpo_nodo["hijos"], scope_w, fns)
+                si (senal[0] == "romper") { continuar_bucle = falso }
+                si (senal[0] == "retornar") { retornar senal }
+            }
+        }
+        retornar ["normal", nulo]
+    }
+
+    si (t == "Para") {
+        sea var_nombre: texto = stmt["valor"]
+        sea coleccion_val: cualquiera = eval_expr(stmt["hijos"][0], env, fns)
+        sea cuerpo_nodo: cualquiera = stmt["hijos"][1]
+        sea idx: numero = 0
+        sea tam: numero = longitud(coleccion_val)
+        sea continuar_para: booleano = verdadero
+        mientras (idx < tam y continuar_para) {
+            sea scope_p: lista = env_nuevo_scope(env)
+            env_declarar(scope_p, var_nombre, coleccion_val[idx])
+            sea senal: lista = exec_bloque(cuerpo_nodo["hijos"], scope_p, fns)
+            si (senal[0] == "romper") { continuar_para = falso }
+            si (senal[0] == "retornar") { retornar senal }
+            idx = idx + 1
+        }
+        retornar ["normal", nulo]
+    }
+
+    si (t == "Funcion") {
+        sea fn_nombre: texto = stmt["valor"]
+        sea params_nodo: cualquiera = stmt["hijos"][0]
+        sea cuerpo_nodo: cualquiera = stmt["hijos"][1]
+        sea fn_def: cualquiera = {
+            "params": params_nodo["hijos"],
+            "cuerpo": cuerpo_nodo["hijos"]
+        }
+        sea fns_m: cualquiera = fns
+        fns_m[fn_nombre] = fn_def
+        retornar ["normal", nulo]
+    }
+
+    si (t == "Bloque") {
+        sea scope_b: lista = env_nuevo_scope(env)
+        retornar exec_bloque(stmt["hijos"], scope_b, fns)
+    }
+
+    si (t == "Asignacion") {
+        eval_expr(stmt, env, fns)
+        retornar ["normal", nulo]
+    }
+
+    afirmar(falso, "sentencia no implementada tipo '" + t + "'")
+    retornar ["normal", nulo]
+}
+
+// ============================================================
+// PARTE 4: MAIN
+// ============================================================
+
+// argumentos_programa() devuelve los argumentos extra.
+// python3 cforgev.py cforgev.cfv programa.cfv → ["programa.cfv"]
+sea args_cfv: lista = argumentos_programa()
+afirmar(
+    longitud(args_cfv) >= 1,
+    "uso: cforgev.cfv programa.cfv [argumentos...]"
+)
+
+sea ruta_programa: texto = args_cfv[0]
+sea fuente_programa: texto = leer_archivo(ruta_programa)
+afirmar(longitud(fuente_programa) > 0, "no se pudo leer '" + ruta_programa + "'")
+
+sea tokens_prog: lista = tokenizar(fuente_programa)
+sea ast_prog: lista = parsear(tokens_prog)
+
+sea entorno_global: lista = [{}]
+sea funciones_globales: cualquiera = {}
+
+sea args_usuario: lista = []
+sea ai_main: numero = 1
+mientras (ai_main < longitud(args_cfv)) {
+    agregar(args_usuario, args_cfv[ai_main])
+    ai_main = ai_main + 1
+}
+sea eg: cualquiera = entorno_global[0]
+eg["__args__"] = args_usuario
+
+sea resultado_final: lista = exec_bloque(ast_prog, entorno_global, funciones_globales)
+
+si (resultado_final[0] == "retornar") {
+    mostrar("Programa retornó: " + formato_valor(resultado_final[1]))
+}

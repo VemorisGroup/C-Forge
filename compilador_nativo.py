@@ -281,10 +281,22 @@ class Parser:
         if self.word("si"):
             condition = self.parenthesized()
             yes = self.block()
-            no: list[Stmt] = []
-            if self.word("sino"):
-                no = self.block()
-            return ("if", condition, yes, no)
+            # Collect else-if and else branches
+            branches: list[tuple] = [(condition, yes)]
+            else_body: list[Stmt] = []
+            while self.word("sino"):
+                if self.peek().kind == "IDENT" and self.peek().value == "si":
+                    self.advance()  # consume 'si'
+                    cond2 = self.parenthesized()
+                    blk2 = self.block()
+                    branches.append((cond2, blk2))
+                else:
+                    else_body = self.block()
+                    break
+            if len(branches) == 1:
+                return ("if", branches[0][0], branches[0][1], else_body)
+            # Desugar chain: ("if_chain", [(cond, block),...], else_body)
+            return ("if_chain", branches, else_body)
         if self.word("mientras"):
             return ("while", self.parenthesized(), self.block())
         if self.word("retornar"):
@@ -297,8 +309,6 @@ class Parser:
         ):
             owner = self.advance().value
             self.advance()
-            if owner != "este":
-                raise CForgevError("Los campos solo pueden modificarse desde métodos mediante 'este'")
             field = self.ident("Se esperaba el campo")
             self.advance()
             expression = self.expression()
@@ -313,6 +323,19 @@ class Parser:
                 self.declared.add(name)
                 return ("let", name, None, expression)
             return ("assign", name, expression)
+        # Indexed/chained assignment: expr[i][j] = value or expr[i].field = value
+        # Detect by parsing an expression and checking if = follows
+        saved = self.current
+        try:
+            lhs = self.expression()
+            if self.take("="):
+                rhs = self.expression()
+                self.take(";")
+                return ("lvalue_assign", lhs, rhs)
+            # No '=', restore and fall through to normal expression stmt
+            self.current = saved
+        except Exception:
+            self.current = saved
         expression = self.expression()
         self.take(";")
         return ("expression", expression)
@@ -443,23 +466,26 @@ class Parser:
 
     def primary(self) -> Expr:
         expression = self.atom()
-        while self.take("["):
-            key = self.expression()
-            self.value("]", "Se esperaba ']'")
-            expression = ("index", expression, key)
-        while self.take("."):
-            name = self.ident("Se esperaba el nombre del campo")
-            if self.take("("):
-                arguments: list[Expr] = []
-                if self.peek().value != ")":
-                    while True:
-                        arguments.append(self.expression())
-                        if not self.take(","):
-                            break
-                self.value(")", "Se esperaba ')' después del método")
-                expression = ("method_call", expression, name, arguments)
+        while True:
+            if self.take("["):
+                key = self.expression()
+                self.value("]", "Se esperaba ']'")
+                expression = ("index", expression, key)
+            elif self.take("."):
+                name = self.ident("Se esperaba el nombre del campo")
+                if self.take("("):
+                    arguments: list[Expr] = []
+                    if self.peek().value != ")":
+                        while True:
+                            arguments.append(self.expression())
+                            if not self.take(","):
+                                break
+                    self.value(")", "Se esperaba ')' después del método")
+                    expression = ("method_call", expression, name, arguments)
+                else:
+                    expression = ("field", expression, name)
             else:
-                expression = ("field", expression, name)
+                break
         return expression
 
     def atom(self) -> Expr:
@@ -679,6 +705,11 @@ class StaticTypeAnalyzer:
                 self.expression(statement[1], types)
                 self.statements(statement[2], types)
                 self.statements(statement[3], types)
+            elif kind == "if_chain":
+                for cond, blk in statement[1]:
+                    self.expression(cond, types)
+                    self.statements(blk, types)
+                self.statements(statement[2], types)
             elif kind == "while":
                 self.expression(statement[1], types)
                 self.statements(statement[2], types)
@@ -695,12 +726,19 @@ class StaticTypeAnalyzer:
                 validate_foreign_memory(statement[1], statement[2])
             elif kind == "test":
                 self.statements(statement[2], dict(types))
+            elif kind == "lvalue_assign":
+                self.expression(statement[1], types)
+                self.expression(statement[2], types)
             elif kind in {"print", "return", "expression"}:
                 inferred = self.expression(statement[1], types)
                 if kind == "return" and self.expected_return not in {"cualquiera", inferred} and inferred != "cualquiera":
-                    raise CForgevError(
-                        f"Inferencia estática: retorno {inferred}, se esperaba {self.expected_return}"
-                    )
+                    # Allow lista<T> where lista is expected, and similar generic erasure
+                    inferred_base = inferred.split("<")[0]
+                    expected_base = self.expected_return.split("<")[0]
+                    if inferred_base != expected_base:
+                        raise CForgevError(
+                            f"Inferencia estática: retorno {inferred}, se esperaba {self.expected_return}"
+                        )
             elif kind == "universal_import":
                 types[statement[2]] = "cualquiera"
             elif kind == "ffi_function":
@@ -764,9 +802,13 @@ class StaticTypeAnalyzer:
                     f"Inferencia estática: '{expression[1]}' requiere números, recibió {left} y {right}"
                 )
             if expression[1] == "+" and left != "cualquiera" and right != "cualquiera" and left != right:
-                raise CForgevError(
-                    f"Inferencia estática: '+' no puede combinar {left} con {right}"
-                )
+                # Allow combining generic list types (lista<X> + lista<Y> → lista)
+                left_base = left.split("<")[0]
+                right_base = right.split("<")[0]
+                if left_base != right_base:
+                    raise CForgevError(
+                        f"Inferencia estática: '+' no puede combinar {left} con {right}"
+                    )
             return left if left == right else "cualquiera"
         if kind == "call":
             argument_types = [self.expression(argument, types) for argument in expression[2]]
@@ -1293,6 +1335,8 @@ class Generator:
                     if field == statement[2]:
                         expected = {"nulo":0,"numero":1,"texto":2,"booleano":3,"lista":4,"mapa":5,"tupla":8,"conjunto":9,"cualquiera":99}.get(field_type, 5)
             return f'{pad}asignar_campo({safe(statement[1])}, "{statement[2]}", {self.expr(statement[3])}, {expected});\n'
+        if kind == "lvalue_assign":
+            return f"{pad}asignar_indice({self.expr(statement[1])}, {self.expr(statement[2])});\n"
         if kind == "print":
             return f"{pad}mostrar({self.expr(statement[1])});\n"
         if kind == "expression":
@@ -1306,6 +1350,16 @@ class Generator:
                 no = self.statements(statement[3], indent + 2)
                 result += f" else {{\n{no}{pad}}}"
             return result + "\n"
+        if kind == "if_chain":
+            parts = []
+            for i, (cond, blk) in enumerate(statement[1]):
+                body = self.statements(blk, indent + 2)
+                kw = "if" if i == 0 else "else if"
+                parts.append(f"{pad}{kw} (verdad({self.expr(cond)})) {{\n{body}{pad}}}")
+            if statement[2]:
+                else_body = self.statements(statement[2], indent + 2)
+                parts.append(f" else {{\n{else_body}{pad}}}")
+            return " ".join(parts) + "\n"
         if kind == "while":
             body = self.statements(statement[2], indent + 2)
             return f"{pad}while (verdad({self.expr(statement[1])})) {{\n{body}{pad}}}\n"

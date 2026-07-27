@@ -466,20 +466,22 @@ class Interpreter:
         ):
             owner = self.advance()
             self.advance()
-            if owner.value != "este":
-                raise CForgevError(
-                    f"Línea {owner.line}: los campos solo pueden modificarse desde métodos mediante 'este'"
-                )
             field_token = self.consume("IDENT", "Se esperaba el campo")
             self.advance()
             instance = self.variables.get(owner.value)
-            if not isinstance(instance, StructureValue) or field_token.value not in instance:
-                raise CForgevError(f"Línea {field_token.line}: campo desconocido '{field_token.value}'")
-            structure = self.structures[instance.structure_name]
-            expected = dict(structure.fields)[field_token.value]
+            if instance is None:
+                raise CForgevError(f"Línea {owner.line}: variable desconocida '{owner.value}'")
             value = self.expression()
-            ensure_type(field_token.value, expected, value, field_token.line)
-            instance[field_token.value] = value
+            if isinstance(instance, StructureValue) and field_token.value in instance:
+                structure = self.structures.get(instance.structure_name)
+                if structure:
+                    expected = dict(structure.fields).get(field_token.value, "cualquiera")
+                    ensure_type(field_token.value, expected, value, field_token.line)
+                instance[field_token.value] = value
+            elif isinstance(instance, dict):
+                instance[field_token.value] = value
+            else:
+                raise CForgevError(f"Línea {field_token.line}: no se puede asignar campo '{field_token.value}' en '{owner.value}'")
             self.optional_semicolon()
             return
         if self.check("IDENT") and self.peek_next().value == "=":
@@ -504,10 +506,53 @@ class Interpreter:
             self.expression()
             self.optional_semicolon()
             return
+        # Indexed/chained lvalue assignment: expr[i][j] = value
+        # Try to parse as lvalue = rhs by backtracking
+        if self.check("IDENT") and self.peek_next().value == "[":
+            saved = self.current
+            try:
+                container, key = self._parse_lvalue_chain()
+                if self.match_value("="):
+                    rhs = self.expression()
+                    container[key] = rhs
+                    self.optional_semicolon()
+                    return
+            except Exception:
+                pass
+            self.current = saved
         token = self.peek()
         raise CForgevError(
             f"Línea {token.line}: instrucción desconocida {token.value!r}"
         )
+
+    def _parse_lvalue_chain(self) -> tuple:
+        """Parse a chained lvalue like a[i][j] and return (container, key) for assignment."""
+        # Parse base identifier
+        name = self.advance()
+        if name.value not in self.variables:
+            raise CForgevError(f"Línea {name.line}: variable desconocida '{name.value}'")
+        value = self.variables[name.value]
+        # Parse all subscripts except the last one
+        accesses: list[tuple] = []
+        while self.match_value("["):
+            key = self.expression()
+            self.consume_value("]", "Se esperaba ']'")
+            accesses.append(("[", key))
+        while self.match_value("."):
+            field = self.consume("IDENT", "Se esperaba campo")
+            accesses.append((".", field.value))
+        if not accesses:
+            raise CForgevError("lvalue sin acceso")
+        # Navigate to the second-to-last container
+        container = value
+        for access_type, key in accesses[:-1]:
+            if access_type == "[":
+                container = container[key]
+            else:
+                container = container[key]
+        # Return the final (container, key) pair
+        final_type, final_key = accesses[-1]
+        return container, final_key
 
     def structure_declaration(self) -> None:
         name = self.consume("IDENT", "Se esperaba el nombre de la estructura")
@@ -897,13 +942,35 @@ class Interpreter:
                 f"Línea {self.previous().line}: la condición de 'si' debe ser verdadera o falsa"
             )
         true_branch = self.block()
-        false_branch: list[Token] | None = None
-        if self.match_ident("sino"):
-            false_branch = self.block()
-        selected = true_branch if condition else false_branch
-        if selected is not None:
+        # Collect (condition, branch) pairs and optional else branch
+        branches: list[tuple[bool, list[Token]]] = [(condition, true_branch)]
+        else_branch: list[Token] | None = None
+        while self.match_ident("sino"):
+            if self.peek().kind == "IDENT" and self.peek().value == "si":
+                self.advance()  # consume 'si'
+                self.consume_value("(", "Se esperaba '(' después de 'sino si'")
+                cond2 = self.expression()
+                self.consume_value(")", "Se esperaba ')' después de la condición")
+                if not isinstance(cond2, bool):
+                    raise CForgevError(
+                        f"Línea {self.previous().line}: la condición de 'sino si' debe ser verdadera o falsa"
+                    )
+                branches.append((cond2, self.block()))
+            else:
+                else_branch = self.block()
+                break
+        # Execute first matching branch
+        for cond, blk in branches:
+            if cond:
+                Interpreter(
+                    blk, self.variables, self.functions, self.variable_types,
+                    self.base_dir, self.imported_modules, self.structures, self.program_arguments,
+                    extern_policy=self.extern_policy,
+                ).run()
+                return
+        if else_branch is not None:
             Interpreter(
-                selected, self.variables, self.functions, self.variable_types,
+                else_branch, self.variables, self.functions, self.variable_types,
                 self.base_dir, self.imported_modules, self.structures, self.program_arguments,
                 extern_policy=self.extern_policy,
             ).run()
@@ -927,22 +994,49 @@ class Interpreter:
     def expression(self) -> object:
         return self.logical_or()
 
+    def _skip_expr_tokens(self) -> None:
+        """Advance past one comparison-level sub-expression without evaluating."""
+        depth = 0
+        while not self.check("EOF"):
+            tok = self.peek()
+            if tok.value in {"(", "[", "{"}:
+                depth += 1; self.advance()
+            elif tok.value in {")", "]", "}"}:
+                if depth == 0: break
+                depth -= 1; self.advance()
+            elif depth == 0 and tok.value in {";", ","}:
+                break
+            elif depth == 0 and tok.kind == "IDENT" and tok.value in {"y", "o"}:
+                break
+            else:
+                self.advance()
+
     def logical_or(self) -> object:
         value = self.logical_and()
         while self.match_ident("o"):
+            op_token = self.previous()
+            if require_bool(value, op_token.line):
+                # Short-circuit: consume all remaining `o` clauses without evaluating
+                self._skip_expr_tokens()
+                while self.match_ident("o"):
+                    self._skip_expr_tokens()
+                return True
             right = self.logical_and()
-            value = require_bool(value, self.previous().line) or require_bool(
-                right, self.previous().line
-            )
+            value = require_bool(right, self.previous().line)
         return value
 
     def logical_and(self) -> object:
         value = self.equality()
         while self.match_ident("y"):
+            op_token = self.previous()
+            if not require_bool(value, op_token.line):
+                # Short-circuit: consume all remaining `y` clauses without evaluating
+                self._skip_expr_tokens()
+                while self.match_ident("y"):
+                    self._skip_expr_tokens()
+                return False
             right = self.equality()
-            value = require_bool(value, self.previous().line) and require_bool(
-                right, self.previous().line
-            )
+            value = require_bool(right, self.previous().line)
         return value
 
     def equality(self) -> object:
@@ -1056,33 +1150,36 @@ class Interpreter:
 
     def primary(self) -> object:
         value = self.atom()
-        while self.match_value("["):
-            key = self.expression()
-            bracket = self.consume_value("]", "Se esperaba ']' después del índice")
-            try:
-                if isinstance(value, (str, list, tuple)):
-                    if not isinstance(key, int) or isinstance(key, bool):
-                        raise CForgevError(f"Línea {bracket.line}: el índice de colección debe ser entero")
-                    value = value[key]
-                elif isinstance(value, dict):
-                    if not isinstance(key, str):
-                        raise CForgevError(f"Línea {bracket.line}: la clave del mapa debe ser texto")
-                    value = value[key]
+        # Interleave subscript and field access so obj.field[i].other[j] works
+        while True:
+            if self.match_value("["):
+                key = self.expression()
+                bracket = self.consume_value("]", "Se esperaba ']' después del índice")
+                try:
+                    if isinstance(value, (str, list, tuple)):
+                        if isinstance(key, float) and key.is_integer():
+                            key = int(key)
+                        if not isinstance(key, int) or isinstance(key, bool):
+                            raise CForgevError(f"Línea {bracket.line}: el índice de colección debe ser entero")
+                        value = value[key]
+                    elif isinstance(value, dict):
+                        value = value[key]
+                    else:
+                        raise CForgevError(f"Línea {bracket.line}: este valor no admite índices")
+                except (IndexError, KeyError) as error:
+                    raise CForgevError(f"Línea {bracket.line}: índice o clave inexistente") from error
+            elif self.match_value("."):
+                field = self.consume("IDENT", "Se esperaba el nombre del campo")
+                if self.match_value("("):
+                    value = self.call_method(value, field)
+                elif field.value == "length" and isinstance(value, (str, list, dict, tuple, set)):
+                    value = len(value)
+                elif isinstance(value, (dict, StructureValue)) and field.value in value:
+                    value = value[field.value]
                 else:
-                    raise CForgevError(f"Línea {bracket.line}: este valor no admite índices")
-            except (IndexError, KeyError) as error:
-                raise CForgevError(f"Línea {bracket.line}: índice o clave inexistente") from error
-        while self.match_value("."):
-            field = self.consume("IDENT", "Se esperaba el nombre del campo")
-            if self.match_value("("):
-                value = self.call_method(value, field)
-                continue
-            if field.value == "length" and isinstance(value, (str, list, dict, tuple, set)):
-                value = len(value)
-                continue
-            if not isinstance(value, dict) or field.value not in value:
-                raise CForgevError(f"Línea {field.line}: campo desconocido '{field.value}'")
-            value = value[field.value]
+                    raise CForgevError(f"Línea {field.line}: campo desconocido '{field.value}'")
+            else:
+                break
         return value
 
     def call_method(self, instance: object, name: Token) -> object:
@@ -1567,6 +1664,35 @@ class Interpreter:
             if arguments:
                 raise CForgevError(f"Línea {name.line}: cluster_estado no recibe argumentos")
             return sorted(f"{kind}:{name}" for name, kind in self.cluster_symbols.items())
+        if name.value == "argumentos_programa":
+            return list(self.program_arguments) if self.program_arguments else []
+        if name.value == "tiene_clave":
+            if len(arguments) != 2:
+                raise CForgevError(f"Línea {name.line}: tiene_clave requiere 2 argumentos")
+            obj, key = arguments
+            if isinstance(obj, dict):
+                return key in obj
+            if isinstance(obj, StructureValue):
+                return key in obj
+            raise CForgevError(f"Línea {name.line}: tiene_clave requiere un mapa o estructura")
+        if name.value == "claves":
+            if len(arguments) != 1:
+                raise CForgevError(f"Línea {name.line}: claves requiere 1 argumento")
+            obj = arguments[0]
+            if isinstance(obj, (dict, StructureValue)):
+                return list(obj.keys())
+            raise CForgevError(f"Línea {name.line}: claves requiere un mapa o estructura")
+        if name.value == "tipo_de":
+            if len(arguments) != 1:
+                raise CForgevError(f"Línea {name.line}: tipo_de requiere un argumento")
+            v = arguments[0]
+            if v is None: return "nulo"
+            if isinstance(v, bool): return "booleano"
+            if isinstance(v, (int, float)): return "numero"
+            if isinstance(v, str): return "texto"
+            if isinstance(v, list): return "lista"
+            if isinstance(v, dict): return "mapa"
+            return "cualquiera"
         if name.value == "afirmar":
             if len(arguments) not in {1, 2} or not isinstance(arguments[0], bool):
                 raise CForgevError(f"Línea {name.line}: afirmar requiere booleano y mensaje opcional")
