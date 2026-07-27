@@ -106,10 +106,14 @@ expresion         = disyuncion ;
 disyuncion        = conjuncion, { "o", conjuncion } ;
 conjuncion        = igualdad, { "y", igualdad } ;
 igualdad          = comparacion, { ( "==" | "!=" ), comparacion } ;
-comparacion       = suma, { ( "<" | "<=" | ">" | ">=" ), suma } ;
+comparacion       = bit_o, { ( "<" | "<=" | ">" | ">=" ), bit_o } ;
+bit_o             = bit_xor, { "|", bit_xor } ;
+bit_xor           = bit_y, { "^", bit_y } ;
+bit_y             = desplaz, { "&", desplaz } ;
+desplaz           = suma, { ( "<<" | ">>" ), suma } ;
 suma              = producto, { ( "+" | "-" ), producto } ;
 producto          = unaria, { ( "*" | "/" | "%" ), unaria } ;
-unaria            = ( "no" | "-" | "await" ), unaria | postfija ;
+unaria            = ( "no" | "-" | "~" | "await" ), unaria | postfija ;
 
 postfija          = primaria,
                     { llamada | indice | acceso_miembro } ;

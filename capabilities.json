@@ -22,7 +22,7 @@
       "id": "reference-interpreter",
       "name": "Intérprete de referencia",
       "status": "verified-preview",
-      "scope": "Sintaxis y semántica cubiertas por la suite de intérprete",
+      "scope": "Sintaxis y semántica cubiertas por la suite de intérprete. Incluye operadores aritméticos (+, -, *, /, %), bitwise (&, |, ^, ~, <<, >>) y comparación completos.",
       "evidence": ["tests/test_cforgev.py", "ejemplos/hola.cfv"]
     },
     {
