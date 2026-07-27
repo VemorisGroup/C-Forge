@@ -8366,8 +8366,8 @@ def reports_json(reports: list[ParityReport]) -> str:
       "id": "autonomous-native-core",
       "name": "Compilador autoalojado y núcleo autónomo",
       "status": "planned",
-      "scope": "B3 verificado: Stage 0 compila lexer, AST, parser, tipos/ownership y emisor Core 0.4 escritos en C-Forge; Stage 1/2/3 y runtime autónomo siguen pendientes",
-      "evidence": ["docs/COMPLETENESS-POLICY.md", "docs/BOOTSTRAP.md", "docs/CORE-DIRECTION.md", "docs/CORE-GRAMMAR-0.4.ebnf", "docs/C-FORGE-2.0-DRAFT.md", "docs/GRAMMAR-2.0-DRAFT.ebnf", "bootstrap/stage0/cforge_bootstrap.cpp", "bootstrap/fixtures/minimal.cfv", "bootstrap/core_lexer.cfv", "bootstrap/core_ast.cfv", "bootstrap/core_parser.cfv", "bootstrap/core_semantics.cfv", "bootstrap/core_emitter.cfv", "bootstrap/fixtures/parser_b1_driver.cfv", "bootstrap/fixtures/semantics_b2_driver.cfv", "bootstrap/fixtures/emitter_b3_driver.cfv", "tests/test_bootstrap_stage0.py", "tests/test_bootstrap_b1.py", "tests/test_bootstrap_b2.py", "tests/test_bootstrap_b3.py", "tests/test_professional_tooling.py"]
+      "scope": "B4 verificado: Stage 0 construye un compilador Stage 1 escrito en C-Forge que compila programas Core 0.4 a ejecutables sin Python; Stage 2/3, paridad de lenguaje y runtime autónomo siguen pendientes",
+      "evidence": ["docs/COMPLETENESS-POLICY.md", "docs/BOOTSTRAP.md", "docs/CORE-DIRECTION.md", "docs/CORE-GRAMMAR-0.4.ebnf", "docs/C-FORGE-2.0-DRAFT.md", "docs/GRAMMAR-2.0-DRAFT.ebnf", "bootstrap/stage0/cforge_bootstrap.cpp", "bootstrap/fixtures/minimal.cfv", "bootstrap/core_lexer.cfv", "bootstrap/core_ast.cfv", "bootstrap/core_parser.cfv", "bootstrap/core_semantics.cfv", "bootstrap/core_emitter.cfv", "bootstrap/core_driver.cfv", "bootstrap/stage1/cforge_stage1.cfv", "bootstrap/fixtures/parser_b1_driver.cfv", "bootstrap/fixtures/semantics_b2_driver.cfv", "bootstrap/fixtures/emitter_b3_driver.cfv", "tests/test_bootstrap_stage0.py", "tests/test_bootstrap_b1.py", "tests/test_bootstrap_b2.py", "tests/test_bootstrap_b3.py", "tests/test_bootstrap_b4.py", "tests/test_professional_tooling.py"]
     },
     {
       "id": "critical-production",
@@ -8436,13 +8436,13 @@ compile y ejecute el artefacto nativo sin invocar Python.
 | B1 | Parser escrito en C-Forge | **Cumplido:** AST canónico igual en Stage 0, intérprete y VM para la suite Core 0.2 |
 | B2 | Tipos y ownership escritos en C-Forge | **Cumplido:** tipos, variable no declarada y uso después de mover producen diagnósticos iguales en los tres motores |
 | B3 | Emisor nativo escrito en C-Forge | **Cumplido:** Stage 0 compila el emisor `.cfv`, que produce C++17 y un ejecutable nativo verificado |
-| B4 | Compilador Stage 1 | Compila todas sus propias fuentes `.cfv` |
-| B5 | Stage 2/3 | Artefactos reproducibles equivalentes |
+| B4 | Compilador Stage 1 | **Cumplido:** Stage 0 construye el compilador `.cfv`; este compila programas Core a ejecutables sin Python |
+| B5 | Stage 2/3 | Stage 1 compila sus propias fuentes y los artefactos de Stage 2/3 son reproducibles |
 | B6 | Runtime autónomo | Funciona sin runtimes externos instalados |
 
 ## Estado actual
 
-**B3 completado de forma verificable; B4 es el siguiente hito.**
+**B4 completado de forma verificable; B5 es el siguiente hito.**
 
 - `bootstrap/stage0/cforge_bootstrap.cpp` es el compilador inicial C++.
 - `bootstrap/fixtures/minimal.cfv` se convierte en un ejecutable de máquina real.
@@ -8453,6 +8453,10 @@ compile y ejecute el artefacto nativo sin invocar Python.
 - `bootstrap/core_semantics.cfv` implementa tipos y ownership Core.
 - `bootstrap/core_emitter.cfv` genera una unidad C++17 completa desde el AST
   aprobado por B2.
+- `bootstrap/core_driver.cfv` conecta automáticamente lexer, parser, análisis
+  semántico, ownership, emisión C++ y compilación nativa.
+- `bootstrap/stage1/cforge_stage1.cfv` es la unidad Stage 1 autocontenida,
+  escrita íntegramente en C-Forge y construible por Stage 0.
 - `docs/CORE-GRAMMAR-0.4.ebnf` congela exactamente el subconjunto aceptado.
 - `tests/test_bootstrap_b1.py` compila la unidad B1 con Stage 0 y exige que
   Stage 0, intérprete y VM emitan bytes idénticos para el AST canónico.
@@ -8464,9 +8468,15 @@ después de mover. Préstamos, tiempos de vida, regiones, clases del usuario,
 módulos y el resto del lenguaje se añadirán solo cuando los hitos posteriores
 los necesiten y posean pruebas normativas.
 
-La prueba B3 compila el emisor con Stage 0, compara el C++ generado por Stage 0,
-intérprete y VM, compila ese C++ con el compilador del sistema y ejecuta el
-binario resultante. Un AST rechazado por B2 nunca se convierte en C++.
+La prueba B4 construye Stage 1 con Stage 0 y usa ese nuevo binario para compilar
+un programa `.cfv` Core completo. La ejecución de Stage 1 no carga ni enlaza
+Python. También verifica que los errores sintácticos y semánticos detengan la
+compilación antes de producir un ejecutable.
+
+Esto completa el **compilador Stage 1 para C-Forge Core 0.4**, pero todavía no
+constituye autoalojamiento: el subconjunto que Stage 1 acepta como entrada aún
+no cubre todas las construcciones usadas por sus propias fuentes. Esa paridad,
+la compilación Stage 2/3 y la reproducibilidad pertenecen a B5.
 
 Construcción manual:
 
@@ -8475,6 +8485,12 @@ clang++ -std=c++17 -O2 bootstrap/stage0/cforge_bootstrap.cpp \
   -o build/cforge-bootstrap
 ./build/cforge-bootstrap bootstrap/fixtures/minimal.cfv -o build/minimal
 ./build/minimal
+
+python3 herramientas/generar_stage1.py
+./build/cforge-bootstrap bootstrap/stage1/cforge_stage1.cfv \
+  -o build/cforge-stage1
+./build/cforge-stage1 bootstrap/fixtures/minimal.cfv -o build/minimal-stage1
+./build/minimal-stage1
 ```
 
 La salida debe ser:
@@ -10106,7 +10122,967 @@ funcion emitir_programa_core(programa: cualquiera): cualquiera {
     retornar ResultadoEmisionCore(verdadero, codigo, [])
 }
 )CFV45DATA"},
-        {R"CFV46DATA(bootstrap/stage0/cforge_bootstrap.cpp)CFV46DATA", R"CFV47DATA(// C-Forge Stage 0 Bootstrap
+        {R"CFV46DATA(bootstrap/core_driver.cfv)CFV46DATA", R"CFV47DATA(// Controlador principal de C-Forge Core Stage 1 — Bootstrap B4.
+// Conecta lexer -> parser -> semántica/ownership -> emisor -> clang++.
+
+estructura ResultadoCompilacionCore {
+    valido: booleano
+    codigo: texto
+    errores: lista
+}
+
+funcion compilar_fuente_stage1(fuente: texto): cualquiera {
+    sea tokens: lista = tokenizar_core(fuente)
+    sea programa: cualquiera = parsear_tokens_core(tokens)
+    sea semantica: cualquiera = analizar_semantica_core(programa)
+    si (no semantica.valido) {
+        retornar ResultadoCompilacionCore(
+            falso,
+            "",
+            semantica.errores
+        )
+    }
+    sea emision: cualquiera = emitir_programa_core(programa)
+    retornar ResultadoCompilacionCore(
+        emision.valido,
+        emision.codigo,
+        emision.errores
+    )
+}
+
+funcion diagnosticos_stage1(resultado: cualquiera): texto {
+    sea errores: lista = resultado.errores
+    sea salida: texto = ""
+    sea indice: numero = 0
+    mientras (indice < longitud(errores)) {
+        si (indice > 0) {
+            salida = salida + "\n"
+        }
+        salida = salida + errores[indice]
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+sea argumentos_stage1: lista = argumentos_programa()
+afirmar(
+    longitud(argumentos_stage1) == 4,
+    "uso: cforge-stage1 archivo.cfv -o ejecutable"
+)
+afirmar(
+    argumentos_stage1[2] == "-o",
+    "uso: cforge-stage1 archivo.cfv -o ejecutable"
+)
+
+sea entrada_stage1: texto = argumentos_stage1[1]
+sea salida_stage1: texto = argumentos_stage1[3]
+sea fuente_stage1: texto = leer_archivo(entrada_stage1)
+sea resultado_stage1: cualquiera = compilar_fuente_stage1(fuente_stage1)
+afirmar(
+    resultado_stage1.valido,
+    diagnosticos_stage1(resultado_stage1)
+)
+
+sea temporal_stage1: texto = salida_stage1 + ".stage1.cpp"
+escribir_archivo(temporal_stage1, resultado_stage1.codigo)
+sea nativo_stage1: booleano =
+    compilar_cpp_nativo(temporal_stage1, salida_stage1)
+eliminar_archivo(temporal_stage1)
+afirmar(
+    nativo_stage1,
+    "el backend C++ no pudo producir el ejecutable nativo"
+)
+mostrar("C-Forge Stage 1 creó: " + salida_stage1)
+)CFV47DATA"},
+        {R"CFV48DATA(bootstrap/stage1/cforge_stage1.cfv)CFV48DATA", R"CFV49DATA(// C-Forge Stage 1 Bootstrap B4.
+// Archivo generado únicamente a partir de componentes escritos en .cfv.
+
+// ===== bootstrap/core_lexer.cfv =====
+// Primer componente del compilador de C-Forge escrito en C-Forge.
+// Alcance congelado: lexer de C-Forge Core Bootstrap 0.1.
+
+estructura TokenCore {
+    tipo: texto
+    lexema: texto
+    linea: numero
+}
+
+funcion es_espacio(caracter: texto): booleano {
+    retornar caracter == " " o caracter == "\t" o caracter == "\r"
+}
+
+funcion es_digito(caracter: texto): booleano {
+    retornar caracter >= "0" y caracter <= "9"
+}
+
+funcion es_letra(caracter: texto): booleano {
+    retornar (caracter >= "a" y caracter <= "z") o
+        (caracter >= "A" y caracter <= "Z") o caracter == "_"
+}
+
+funcion es_identificador(caracter: texto): booleano {
+    retornar es_letra(caracter) o es_digito(caracter)
+}
+
+funcion tokenizar_core(fuente: texto): cualquiera {
+    sea tokens: lista = []
+    sea posicion: numero = 0
+    sea linea: numero = 1
+
+    mientras (posicion < longitud(fuente)) {
+        sea actual: texto = fuente[posicion]
+
+        si (actual == "\n") {
+            linea = linea + 1
+            posicion = posicion + 1
+        } sino {
+            si (es_espacio(actual)) {
+                posicion = posicion + 1
+            } sino {
+                si (actual == "/" y posicion + 1 < longitud(fuente) y fuente[posicion + 1] == "/") {
+                    mientras (posicion < longitud(fuente) y fuente[posicion] != "\n") {
+                        posicion = posicion + 1
+                    }
+                } sino {
+                    si (es_letra(actual)) {
+                        sea inicio: numero = posicion
+                        mientras (posicion < longitud(fuente) y es_identificador(fuente[posicion])) {
+                            posicion = posicion + 1
+                        }
+                        sea lexema: texto = ""
+                        sea cursor: numero = inicio
+                        mientras (cursor < posicion) {
+                            lexema = lexema + fuente[cursor]
+                            cursor = cursor + 1
+                        }
+                        agregar(tokens, TokenCore("IDENT", lexema, linea))
+                    } sino {
+                        si (es_digito(actual)) {
+                            sea inicio_numero: numero = posicion
+                            mientras (posicion < longitud(fuente) y es_digito(fuente[posicion])) {
+                                posicion = posicion + 1
+                            }
+                            sea numero_texto: texto = ""
+                            sea cursor_numero: numero = inicio_numero
+                            mientras (cursor_numero < posicion) {
+                                numero_texto = numero_texto + fuente[cursor_numero]
+                                cursor_numero = cursor_numero + 1
+                            }
+                            agregar(tokens, TokenCore("NUMBER", numero_texto, linea))
+                        } sino {
+                            si (actual == "\"") {
+                                sea linea_texto: numero = linea
+                                sea literal: texto = "\""
+                                posicion = posicion + 1
+                                sea cerrado: booleano = falso
+                                mientras (posicion < longitud(fuente) y no cerrado) {
+                                    sea parte: texto = fuente[posicion]
+                                    literal = literal + parte
+                                    posicion = posicion + 1
+                                    si (parte == "\\" y posicion < longitud(fuente)) {
+                                        literal = literal + fuente[posicion]
+                                        posicion = posicion + 1
+                                    } sino {
+                                        si (parte == "\"") {
+                                            cerrado = verdadero
+                                        } sino {
+                                            si (parte == "\n") {
+                                                linea = linea + 1
+                                            }
+                                        }
+                                    }
+                                }
+                                afirmar(cerrado, "texto sin cerrar en línea " + a_texto(linea_texto))
+                                agregar(tokens, TokenCore("STRING", literal, linea_texto))
+                            } sino {
+                                sea simbolo: texto = actual
+                                posicion = posicion + 1
+                                si (posicion < longitud(fuente)) {
+                                    sea par: texto = simbolo + fuente[posicion]
+                                    si (par == "==" o par == "!=" o par == ">=" o par == "<=") {
+                                        simbolo = par
+                                        posicion = posicion + 1
+                                    }
+                                }
+                                agregar(tokens, TokenCore("SYMBOL", simbolo, linea))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    agregar(tokens, TokenCore("EOF", "", linea))
+    retornar tokens
+}
+
+sea muestra: texto = "sea respuesta: numero = 40 + 2\nmostrar(respuesta)\n"
+sea resultado: lista = tokenizar_core(muestra)
+
+// ===== bootstrap/core_ast.cfv =====
+// AST canónico de C-Forge Core Bootstrap 0.4.
+// No contiene objetos del runtime anfitrión: solo textos, números y listas.
+
+estructura NodoASTCore {
+    tipo: texto
+    valor: texto
+    linea: numero
+    hijos: lista
+}
+
+funcion nodo_ast_core(tipo: texto, valor: texto, linea: numero): cualquiera {
+    retornar NodoASTCore(tipo, valor, linea, [])
+}
+
+funcion nodo_ast_core_con_hijos(
+    tipo: texto,
+    valor: texto,
+    linea: numero,
+    hijos: lista
+): cualquiera {
+    retornar NodoASTCore(tipo, valor, linea, hijos)
+}
+
+funcion escapar_ast_core(valor: texto): texto {
+    sea salida: texto = ""
+    sea posicion: numero = 0
+    mientras (posicion < longitud(valor)) {
+        sea caracter: texto = valor[posicion]
+        si (caracter == "\\") {
+            salida = salida + "\\\\"
+        } sino {
+            si (caracter == "\n") {
+                salida = salida + "\\n"
+            } sino {
+                si (caracter == "\r") {
+                    salida = salida + "\\r"
+                } sino {
+                    si (caracter == "\t") {
+                        salida = salida + "\\t"
+                    } sino {
+                        si (caracter == "[" o caracter == "]" o caracter == ":" o caracter == "@") {
+                            salida = salida + "\\" + caracter
+                        } sino {
+                            salida = salida + caracter
+                        }
+                    }
+                }
+            }
+        }
+        posicion = posicion + 1
+    }
+    retornar salida
+}
+
+// Formato estable Core AST 1:
+// tipo:largo:valor@linea[hijo,hijo]
+// El largo corresponde al valor original y evita interpretaciones ambiguas.
+funcion ast_core_canonico(nodo: cualquiera): texto {
+    sea salida: texto = nodo.tipo + ":" + a_texto(longitud(nodo.valor)) + ":" +
+        escapar_ast_core(nodo.valor) + "@" + a_texto(nodo.linea) + "["
+    sea hijos: lista = nodo.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(hijos)) {
+        si (indice > 0) {
+            salida = salida + ","
+        }
+        salida = salida + ast_core_canonico(hijos[indice])
+        indice = indice + 1
+    }
+    retornar salida + "]"
+}
+
+// ===== bootstrap/core_parser.cfv =====
+// Parser recursivo descendente de C-Forge Core Bootstrap 0.4.
+// Requiere TokenCore de core_lexer.cfv y NodoASTCore de core_ast.cfv.
+
+clase EstadoParserCore {
+    campo tokens: lista
+    campo posicion: numero
+
+    metodo actual(): cualquiera {
+        sea tokens_actuales: lista = este.tokens
+        sea posicion_actual: numero = este.posicion
+        retornar tokens_actuales[posicion_actual]
+    }
+
+    metodo anterior(): cualquiera {
+        sea tokens_actuales: lista = este.tokens
+        sea posicion_actual: numero = este.posicion
+        retornar tokens_actuales[posicion_actual - 1]
+    }
+
+    metodo finalizado(): booleano {
+        sea token: cualquiera = este.actual()
+        retornar token.tipo == "EOF"
+    }
+
+    metodo avanzar(): cualquiera {
+        si (no este.finalizado()) {
+            este.posicion = este.posicion + 1
+        }
+        retornar este.anterior()
+    }
+}
+
+funcion token_actual_core(estado: cualquiera): cualquiera {
+    retornar estado.actual()
+}
+
+funcion token_anterior_core(estado: cualquiera): cualquiera {
+    retornar estado.anterior()
+}
+
+funcion esta_al_final_core(estado: cualquiera): booleano {
+    sea token: cualquiera = token_actual_core(estado)
+    retornar token.tipo == "EOF"
+}
+
+funcion avanzar_parser_core(estado: cualquiera): cualquiera {
+    retornar estado.avanzar()
+}
+
+funcion comprobar_lexema_core(estado: cualquiera, lexema: texto): booleano {
+    sea token: cualquiera = token_actual_core(estado)
+    retornar token.lexema == lexema
+}
+
+funcion tomar_lexema_core(estado: cualquiera, lexema: texto): booleano {
+    si (comprobar_lexema_core(estado, lexema)) {
+        avanzar_parser_core(estado)
+        retornar verdadero
+    }
+    retornar falso
+}
+
+funcion requerir_lexema_core(
+    estado: cualquiera,
+    lexema: texto,
+    mensaje: texto
+): cualquiera {
+    sea token: cualquiera = token_actual_core(estado)
+    afirmar(token.lexema == lexema, mensaje + " en línea " + a_texto(token.linea))
+    retornar avanzar_parser_core(estado)
+}
+
+funcion requerir_tipo_core(
+    estado: cualquiera,
+    tipo: texto,
+    mensaje: texto
+): cualquiera {
+    sea token: cualquiera = token_actual_core(estado)
+    afirmar(token.tipo == tipo, mensaje + " en línea " + a_texto(token.linea))
+    retornar avanzar_parser_core(estado)
+}
+
+funcion primaria_parser_core(estado: cualquiera): cualquiera {
+    sea token: cualquiera = token_actual_core(estado)
+    si (token.tipo == "NUMBER") {
+        avanzar_parser_core(estado)
+        retornar nodo_ast_core("Numero", token.lexema, token.linea)
+    }
+    si (token.tipo == "STRING") {
+        avanzar_parser_core(estado)
+        retornar nodo_ast_core("Texto", token.lexema, token.linea)
+    }
+    si (token.tipo == "IDENT") {
+        avanzar_parser_core(estado)
+        si (token.lexema == "mover" y tomar_lexema_core(estado, "(")) {
+            sea movido: cualquiera = expresion_parser_core(estado)
+            requerir_lexema_core(
+                estado, ")", "se esperaba ')' después de mover"
+            )
+            retornar nodo_ast_core_con_hijos(
+                "Mover", "mover", token.linea, [movido]
+            )
+        }
+        retornar nodo_ast_core("Identificador", token.lexema, token.linea)
+    }
+    si (tomar_lexema_core(estado, "(")) {
+        sea expresion: cualquiera = expresion_parser_core(estado)
+        requerir_lexema_core(estado, ")", "se esperaba ')' después de la expresión")
+        retornar expresion
+    }
+    afirmar(falso, "expresión inválida en línea " + a_texto(token.linea))
+    retornar nodo_ast_core("Inalcanzable", "", token.linea)
+}
+
+funcion producto_parser_core(estado: cualquiera): cualquiera {
+    sea expresion: cualquiera = primaria_parser_core(estado)
+    mientras (comprobar_lexema_core(estado, "*") o comprobar_lexema_core(estado, "/")) {
+        sea operador: cualquiera = avanzar_parser_core(estado)
+        sea derecho: cualquiera = primaria_parser_core(estado)
+        expresion = nodo_ast_core_con_hijos(
+            "Binario", operador.lexema, operador.linea, [expresion, derecho]
+        )
+    }
+    retornar expresion
+}
+
+funcion expresion_parser_core(estado: cualquiera): cualquiera {
+    sea expresion: cualquiera = producto_parser_core(estado)
+    mientras (comprobar_lexema_core(estado, "+") o comprobar_lexema_core(estado, "-")) {
+        sea operador: cualquiera = avanzar_parser_core(estado)
+        sea derecho: cualquiera = producto_parser_core(estado)
+        expresion = nodo_ast_core_con_hijos(
+            "Binario", operador.lexema, operador.linea, [expresion, derecho]
+        )
+    }
+    retornar expresion
+}
+
+funcion declaracion_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "sea", "se esperaba la declaración 'sea'"
+    )
+    sea nombre: cualquiera = requerir_tipo_core(
+        estado, "IDENT", "se esperaba el nombre de la variable"
+    )
+    sea tipo_declarado: texto = ""
+    si (tomar_lexema_core(estado, ":")) {
+        sea token_tipo: cualquiera = requerir_tipo_core(
+            estado, "IDENT", "se esperaba el tipo de la variable"
+        )
+        tipo_declarado = token_tipo.lexema
+    }
+    requerir_lexema_core(estado, "=", "se esperaba '=' en la declaración")
+    sea valor: cualquiera = expresion_parser_core(estado)
+    tomar_lexema_core(estado, ";")
+    retornar nodo_ast_core_con_hijos(
+        "Declaracion", nombre.lexema + ":" + tipo_declarado,
+        palabra.linea, [valor]
+    )
+}
+
+funcion impresion_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = avanzar_parser_core(estado)
+    requerir_lexema_core(estado, "(", "se esperaba '(' después de mostrar")
+    sea valor: cualquiera = expresion_parser_core(estado)
+    requerir_lexema_core(estado, ")", "se esperaba ')' después del valor")
+    tomar_lexema_core(estado, ";")
+    retornar nodo_ast_core_con_hijos(
+        "Mostrar", palabra.lexema, palabra.linea, [valor]
+    )
+}
+
+funcion sentencia_parser_core(estado: cualquiera): cualquiera {
+    si (comprobar_lexema_core(estado, "sea")) {
+        retornar declaracion_parser_core(estado)
+    }
+    si (comprobar_lexema_core(estado, "mostrar") o comprobar_lexema_core(estado, "print")) {
+        retornar impresion_parser_core(estado)
+    }
+    sea token: cualquiera = token_actual_core(estado)
+    afirmar(
+        falso,
+        "sentencia Core desconocida '" + token.lexema +
+        "' en línea " + a_texto(token.linea)
+    )
+    retornar nodo_ast_core("Inalcanzable", "", token.linea)
+}
+
+funcion parsear_tokens_core(tokens: lista): cualquiera {
+    sea estado: cualquiera = EstadoParserCore(tokens, 0)
+    sea sentencias: lista = []
+    mientras (no esta_al_final_core(estado)) {
+        agregar(sentencias, sentencia_parser_core(estado))
+    }
+    sea eof: cualquiera = token_actual_core(estado)
+    retornar nodo_ast_core_con_hijos("Programa", "Core-0.4", eof.linea, sentencias)
+}
+
+funcion parsear_fuente_core(fuente: texto): cualquiera {
+    retornar parsear_tokens_core(tokenizar_core(fuente))
+}
+
+// ===== bootstrap/core_semantics.cfv =====
+// Analizador de tipos y ownership de C-Forge Core Bootstrap 0.4.
+// Opera únicamente sobre NodoASTCore y no depende del runtime anfitrión.
+
+clase SimboloCore {
+    campo nombre: texto
+    campo tipo: texto
+    campo movido: booleano
+
+    metodo marcar_movido() {
+        este.movido = verdadero
+    }
+}
+
+estructura ResultadoSemanticoCore {
+    valido: booleano
+    errores: lista
+}
+
+funcion diagnostico_core(
+    codigo: texto,
+    linea: numero,
+    mensaje: texto
+): texto {
+    retornar codigo + " línea " + a_texto(linea) + ": " + mensaje
+}
+
+funcion indice_dos_puntos_core(valor: texto): numero {
+    sea posicion: numero = 0
+    mientras (posicion < longitud(valor)) {
+        si (valor[posicion] == ":") {
+            retornar posicion
+        }
+        posicion = posicion + 1
+    }
+    retornar -1
+}
+
+funcion segmento_core(
+    valor: texto,
+    inicio: numero,
+    final: numero
+): texto {
+    sea salida: texto = ""
+    sea posicion: numero = inicio
+    mientras (posicion < final) {
+        salida = salida + valor[posicion]
+        posicion = posicion + 1
+    }
+    retornar salida
+}
+
+funcion nombre_declaracion_core(valor: texto): texto {
+    sea separador: numero = indice_dos_puntos_core(valor)
+    si (separador < 0) {
+        retornar valor
+    }
+    retornar segmento_core(valor, 0, separador)
+}
+
+funcion tipo_declaracion_core(valor: texto): texto {
+    sea separador: numero = indice_dos_puntos_core(valor)
+    si (separador < 0) {
+        retornar ""
+    }
+    retornar segmento_core(valor, separador + 1, longitud(valor))
+}
+
+funcion buscar_simbolo_core(simbolos: lista, nombre: texto): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(simbolos)) {
+        sea simbolo: cualquiera = simbolos[indice]
+        si (simbolo.nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion tipo_identificador_core(
+    nodo: cualquiera,
+    simbolos: lista,
+    errores: lista
+): texto {
+    sea indice: numero = buscar_simbolo_core(simbolos, nodo.valor)
+    si (indice < 0) {
+        agregar(
+            errores,
+            diagnostico_core(
+                "CFB2002", nodo.linea,
+                "variable no declarada '" + nodo.valor + "'"
+            )
+        )
+        retornar "error"
+    }
+    sea simbolo: cualquiera = simbolos[indice]
+    si (simbolo.movido) {
+        agregar(
+            errores,
+            diagnostico_core(
+                "CFB2003", nodo.linea,
+                "uso después de mover '" + nodo.valor + "'"
+            )
+        )
+        retornar "error"
+    }
+    retornar simbolo.tipo
+}
+
+funcion tipo_expresion_core(
+    nodo: cualquiera,
+    simbolos: lista,
+    errores: lista
+): texto {
+    si (nodo.tipo == "Numero") {
+        retornar "numero"
+    }
+    si (nodo.tipo == "Texto") {
+        retornar "texto"
+    }
+    si (nodo.tipo == "Identificador") {
+        retornar tipo_identificador_core(nodo, simbolos, errores)
+    }
+    si (nodo.tipo == "Mover") {
+        sea hijos_mover: lista = nodo.hijos
+        sea objetivo: cualquiera = hijos_mover[0]
+        si (objetivo.tipo != "Identificador") {
+            agregar(
+                errores,
+                diagnostico_core(
+                    "CFB2004", nodo.linea,
+                    "mover requiere una variable identificable"
+                )
+            )
+            retornar "error"
+        }
+        sea indice: numero = buscar_simbolo_core(simbolos, objetivo.valor)
+        sea tipo_objetivo: texto =
+            tipo_identificador_core(objetivo, simbolos, errores)
+        si (indice >= 0 y tipo_objetivo == "texto") {
+            sea simbolo: cualquiera = simbolos[indice]
+            simbolo.marcar_movido()
+        }
+        retornar tipo_objetivo
+    }
+    si (nodo.tipo == "Binario") {
+        sea hijos_binarios: lista = nodo.hijos
+        sea tipo_izquierdo: texto =
+            tipo_expresion_core(hijos_binarios[0], simbolos, errores)
+        sea tipo_derecho: texto =
+            tipo_expresion_core(hijos_binarios[1], simbolos, errores)
+        si (tipo_izquierdo == "error" o tipo_derecho == "error") {
+            retornar "error"
+        }
+        si (nodo.valor == "+") {
+            si (tipo_izquierdo == tipo_derecho y
+                (tipo_izquierdo == "numero" o tipo_izquierdo == "texto")) {
+                retornar tipo_izquierdo
+            }
+        } sino {
+            si (tipo_izquierdo == "numero" y tipo_derecho == "numero") {
+                retornar "numero"
+            }
+        }
+        agregar(
+            errores,
+            diagnostico_core(
+                "CFB2001", nodo.linea,
+                "operador '" + nodo.valor + "' incompatible con " +
+                tipo_izquierdo + " y " + tipo_derecho
+            )
+        )
+        retornar "error"
+    }
+    agregar(
+        errores,
+        diagnostico_core(
+            "CFB2099", nodo.linea,
+            "nodo de expresión desconocido '" + nodo.tipo + "'"
+        )
+    )
+    retornar "error"
+}
+
+funcion analizar_sentencia_core(
+    nodo: cualquiera,
+    simbolos: lista,
+    errores: lista
+) {
+    sea hijos: lista = nodo.hijos
+    si (nodo.tipo == "Declaracion") {
+        sea nombre: texto = nombre_declaracion_core(nodo.valor)
+        sea declarado: texto = tipo_declaracion_core(nodo.valor)
+        si (buscar_simbolo_core(simbolos, nombre) >= 0) {
+            agregar(
+                errores,
+                diagnostico_core(
+                    "CFB2005", nodo.linea,
+                    "variable duplicada '" + nombre + "'"
+                )
+            )
+            retornar errores
+        }
+        sea inferido: texto =
+            tipo_expresion_core(hijos[0], simbolos, errores)
+        sea tipo_final: texto = inferido
+        si (declarado != "") {
+            tipo_final = declarado
+            si (inferido != "error" y declarado != inferido) {
+                agregar(
+                    errores,
+                    diagnostico_core(
+                        "CFB2001", nodo.linea,
+                        "la variable '" + nombre + "' requiere " +
+                        declarado + " pero recibió " + inferido
+                    )
+                )
+            }
+        }
+        agregar(simbolos, SimboloCore(nombre, tipo_final, falso))
+        retornar errores
+    }
+    si (nodo.tipo == "Mostrar") {
+        tipo_expresion_core(hijos[0], simbolos, errores)
+        retornar errores
+    }
+    agregar(
+        errores,
+        diagnostico_core(
+            "CFB2098", nodo.linea,
+            "sentencia desconocida '" + nodo.tipo + "'"
+        )
+    )
+}
+
+funcion analizar_semantica_core(programa: cualquiera): cualquiera {
+    sea simbolos: lista = []
+    sea errores: lista = []
+    sea sentencias: lista = programa.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(sentencias)) {
+        analizar_sentencia_core(sentencias[indice], simbolos, errores)
+        indice = indice + 1
+    }
+    retornar ResultadoSemanticoCore(longitud(errores) == 0, errores)
+}
+
+funcion diagnosticos_semanticos_core(resultado: cualquiera): texto {
+    sea errores: lista = resultado.errores
+    sea salida: texto = ""
+    sea indice: numero = 0
+    mientras (indice < longitud(errores)) {
+        si (indice > 0) {
+            salida = salida + "\n"
+        }
+        salida = salida + errores[indice]
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+// ===== bootstrap/core_emitter.cfv =====
+// Emisor nativo de C-Forge Core Bootstrap 0.4.
+// Recibe el AST canónico validado por B2 y genera una unidad C++17 completa.
+
+estructura ResultadoEmisionCore {
+    valido: booleano
+    codigo: texto
+    errores: lista
+}
+
+funcion nombre_cpp_core(nombre: texto): texto {
+    retornar "cfv_" + nombre
+}
+
+funcion encabezado_cpp_core(): texto {
+    retornar
+        "#include <cmath>\n" +
+        "#include <iomanip>\n" +
+        "#include <iostream>\n" +
+        "#include <sstream>\n" +
+        "#include <stdexcept>\n" +
+        "#include <string>\n" +
+        "#include <variant>\n\n" +
+        "struct Valor {\n" +
+        "    std::variant<double, std::string> dato;\n" +
+        "    explicit Valor(double valor) : dato(valor) {}\n" +
+        "    explicit Valor(std::string valor) : dato(std::move(valor)) {}\n" +
+        "};\n\n" +
+        "static double numero(const Valor& valor) {\n" +
+        "    if (const auto* n = std::get_if<double>(&valor.dato)) return *n;\n" +
+        "    throw std::runtime_error(\"se esperaba numero\");\n" +
+        "}\n" +
+        "static Valor sumar(const Valor& a, const Valor& b) {\n" +
+        "    if (const auto* x = std::get_if<double>(&a.dato)) {\n" +
+        "        if (const auto* y = std::get_if<double>(&b.dato)) return Valor(*x + *y);\n" +
+        "    }\n" +
+        "    if (const auto* x = std::get_if<std::string>(&a.dato)) {\n" +
+        "        if (const auto* y = std::get_if<std::string>(&b.dato)) return Valor(*x + *y);\n" +
+        "    }\n" +
+        "    throw std::runtime_error(\"tipos incompatibles para +\");\n" +
+        "}\n" +
+        "static Valor restar(const Valor& a, const Valor& b) {\n" +
+        "    return Valor(numero(a) - numero(b));\n" +
+        "}\n" +
+        "static Valor multiplicar(const Valor& a, const Valor& b) {\n" +
+        "    return Valor(numero(a) * numero(b));\n" +
+        "}\n" +
+        "static Valor dividir(const Valor& a, const Valor& b) {\n" +
+        "    const double divisor = numero(b);\n" +
+        "    if (divisor == 0) throw std::runtime_error(\"division por cero\");\n" +
+        "    return Valor(numero(a) / divisor);\n" +
+        "}\n" +
+        "static Valor mover_core(const Valor& valor) { return valor; }\n" +
+        "static void mostrar_core(const Valor& valor) {\n" +
+        "    if (const auto* texto = std::get_if<std::string>(&valor.dato)) {\n" +
+        "        std::cout << *texto << '\\n';\n" +
+        "        return;\n" +
+        "    }\n" +
+        "    const double n = numero(valor);\n" +
+        "    if (std::floor(n) == n) {\n" +
+        "        std::cout << static_cast<long long>(n) << '\\n';\n" +
+        "    } else {\n" +
+        "        std::ostringstream salida;\n" +
+        "        salida << std::setprecision(15) << n;\n" +
+        "        std::cout << salida.str() << '\\n';\n" +
+        "    }\n" +
+        "}\n\n" +
+        "int main() {\n" +
+        "    try {\n"
+}
+
+funcion pie_cpp_core(): texto {
+    retornar
+        "        return 0;\n" +
+        "    } catch (const std::exception& error) {\n" +
+        "        std::cerr << \"[C-Forge Core Runtime Error] \" << error.what() << '\\n';\n" +
+        "        return 1;\n" +
+        "    }\n" +
+        "}\n"
+}
+
+funcion emitir_expresion_core(nodo: cualquiera): texto {
+    si (nodo.tipo == "Numero") {
+        retornar "Valor(" + nodo.valor + ")"
+    }
+    si (nodo.tipo == "Texto") {
+        retornar "Valor(std::string(" + nodo.valor + "))"
+    }
+    si (nodo.tipo == "Identificador") {
+        retornar nombre_cpp_core(nodo.valor)
+    }
+    sea hijos: lista = nodo.hijos
+    si (nodo.tipo == "Mover") {
+        retornar "mover_core(" + emitir_expresion_core(hijos[0]) + ")"
+    }
+    si (nodo.tipo == "Binario") {
+        sea izquierdo: texto = emitir_expresion_core(hijos[0])
+        sea derecho: texto = emitir_expresion_core(hijos[1])
+        si (nodo.valor == "+") {
+            retornar "sumar(" + izquierdo + ", " + derecho + ")"
+        }
+        si (nodo.valor == "-") {
+            retornar "restar(" + izquierdo + ", " + derecho + ")"
+        }
+        si (nodo.valor == "*") {
+            retornar "multiplicar(" + izquierdo + ", " + derecho + ")"
+        }
+        si (nodo.valor == "/") {
+            retornar "dividir(" + izquierdo + ", " + derecho + ")"
+        }
+    }
+    afirmar(
+        falso,
+        "B3 no puede emitir el nodo de expresión '" + nodo.tipo + "'"
+    )
+    retornar ""
+}
+
+funcion emitir_sentencia_core(nodo: cualquiera): texto {
+    sea hijos: lista = nodo.hijos
+    si (nodo.tipo == "Declaracion") {
+        sea nombre: texto = nombre_declaracion_core(nodo.valor)
+        retornar
+            "        Valor " + nombre_cpp_core(nombre) + " = " +
+            emitir_expresion_core(hijos[0]) + ";\n"
+    }
+    si (nodo.tipo == "Mostrar") {
+        retornar
+            "        mostrar_core(" +
+            emitir_expresion_core(hijos[0]) + ");\n"
+    }
+    afirmar(falso, "B3 no puede emitir la sentencia '" + nodo.tipo + "'")
+    retornar ""
+}
+
+funcion emitir_programa_core(programa: cualquiera): cualquiera {
+    sea semantica: cualquiera = analizar_semantica_core(programa)
+    si (no semantica.valido) {
+        retornar ResultadoEmisionCore(falso, "", semantica.errores)
+    }
+    sea codigo: texto = encabezado_cpp_core()
+    sea sentencias: lista = programa.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(sentencias)) {
+        codigo = codigo + emitir_sentencia_core(sentencias[indice])
+        indice = indice + 1
+    }
+    codigo = codigo + pie_cpp_core()
+    retornar ResultadoEmisionCore(verdadero, codigo, [])
+}
+
+// ===== bootstrap/core_driver.cfv =====
+// Controlador principal de C-Forge Core Stage 1 — Bootstrap B4.
+// Conecta lexer -> parser -> semántica/ownership -> emisor -> clang++.
+
+estructura ResultadoCompilacionCore {
+    valido: booleano
+    codigo: texto
+    errores: lista
+}
+
+funcion compilar_fuente_stage1(fuente: texto): cualquiera {
+    sea tokens: lista = tokenizar_core(fuente)
+    sea programa: cualquiera = parsear_tokens_core(tokens)
+    sea semantica: cualquiera = analizar_semantica_core(programa)
+    si (no semantica.valido) {
+        retornar ResultadoCompilacionCore(
+            falso,
+            "",
+            semantica.errores
+        )
+    }
+    sea emision: cualquiera = emitir_programa_core(programa)
+    retornar ResultadoCompilacionCore(
+        emision.valido,
+        emision.codigo,
+        emision.errores
+    )
+}
+
+funcion diagnosticos_stage1(resultado: cualquiera): texto {
+    sea errores: lista = resultado.errores
+    sea salida: texto = ""
+    sea indice: numero = 0
+    mientras (indice < longitud(errores)) {
+        si (indice > 0) {
+            salida = salida + "\n"
+        }
+        salida = salida + errores[indice]
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+sea argumentos_stage1: lista = argumentos_programa()
+afirmar(
+    longitud(argumentos_stage1) == 4,
+    "uso: cforge-stage1 archivo.cfv -o ejecutable"
+)
+afirmar(
+    argumentos_stage1[2] == "-o",
+    "uso: cforge-stage1 archivo.cfv -o ejecutable"
+)
+
+sea entrada_stage1: texto = argumentos_stage1[1]
+sea salida_stage1: texto = argumentos_stage1[3]
+sea fuente_stage1: texto = leer_archivo(entrada_stage1)
+sea resultado_stage1: cualquiera = compilar_fuente_stage1(fuente_stage1)
+afirmar(
+    resultado_stage1.valido,
+    diagnosticos_stage1(resultado_stage1)
+)
+
+sea temporal_stage1: texto = salida_stage1 + ".stage1.cpp"
+escribir_archivo(temporal_stage1, resultado_stage1.codigo)
+sea nativo_stage1: booleano =
+    compilar_cpp_nativo(temporal_stage1, salida_stage1)
+eliminar_archivo(temporal_stage1)
+afirmar(
+    nativo_stage1,
+    "el backend C++ no pudo producir el ejecutable nativo"
+)
+mostrar("C-Forge Stage 1 creó: " + salida_stage1)
+)CFV49DATA"},
+        {R"CFV50DATA(bootstrap/stage0/cforge_bootstrap.cpp)CFV50DATA", R"CFV51DATA(// C-Forge Stage 0 Bootstrap
 // Compilador mínimo alojado exclusivamente en C++17. No carga Python, JVM,
 // .NET, Node ni ningún runtime extranjero.
 
@@ -10416,6 +11392,9 @@ private:
 
     static std::string prologue() {
         return R"CPP(#include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -10505,7 +11484,12 @@ public:
                        << "(Value, const std::vector<Value>&);\n";
         }
         return runtime() + prototypes.str() + declarations.str() +
-               "int main() {\n    try {\n" + body.str() +
+               "int main(int argc, char** argv) {\n"
+               "    try {\n"
+               "        cfv_process_args.clear();\n"
+               "        for (int index = 0; index < argc; ++index) {\n"
+               "            cfv_process_args.emplace_back(std::string(argv[index]));\n"
+               "        }\n" + body.str() +
                "        return 0;\n"
                "    } catch (const std::exception& error) {\n"
                "        std::cerr << \"[C-Forge Core Runtime Error] \""
@@ -10886,6 +11870,24 @@ private:
             if (args.size() != 2) fail(name, "afirmar requiere dos argumentos");
             return "cfv_assert(" + args[0] + ", " + args[1] + ")";
         }
+        if (name.text == "argumentos_programa") {
+            if (!args.empty()) fail(name, "argumentos_programa no recibe argumentos");
+            return "cfv_arguments()";
+        }
+        if (name.text == "leer_archivo") {
+            return "cfv_read_file(" + one(name, args) + ")";
+        }
+        if (name.text == "escribir_archivo") {
+            if (args.size() != 2) fail(name, "escribir_archivo requiere dos argumentos");
+            return "cfv_write_file(" + args[0] + ", " + args[1] + ")";
+        }
+        if (name.text == "eliminar_archivo") {
+            return "cfv_remove_file(" + one(name, args) + ")";
+        }
+        if (name.text == "compilar_cpp_nativo") {
+            if (args.size() != 2) fail(name, "compilar_cpp_nativo requiere dos argumentos");
+            return "cfv_compile_cpp(" + args[0] + ", " + args[1] + ")";
+        }
         if (!contains(functions_, name.text)) {
             fail(name, "función desconocida '" + name.text + "'");
         }
@@ -10938,6 +11940,9 @@ private:
 
     static std::string runtime() {
         return R"CPP(#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -10962,6 +11967,7 @@ struct Value {
     explicit Value(std::shared_ptr<List> value) : data(std::move(value)) {}
     explicit Value(std::shared_ptr<Object> value) : data(std::move(value)) {}
 };
+static std::vector<Value> cfv_process_args;
 static Value cfv_number(double value) { return Value(value); }
 static Value cfv_text(std::string value) { return Value(std::move(value)); }
 static Value cfv_bool(bool value) { return Value(value); }
@@ -11087,6 +12093,53 @@ static Value cfv_assert(const Value& condition, const Value& message) {
     if (!cfv_truth(condition)) throw std::runtime_error(cfv_format(message));
     return Value();
 }
+static std::string cfv_required_text(const Value& value,
+                                     const std::string& function) {
+    if (const auto* text = std::get_if<std::string>(&value.data)) return *text;
+    throw std::runtime_error(function + " requiere texto");
+}
+static Value cfv_arguments() {
+    return cfv_list(cfv_process_args);
+}
+static Value cfv_read_file(const Value& path_value) {
+    const std::string path = cfv_required_text(path_value, "leer_archivo");
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) throw std::runtime_error("no se pudo abrir " + path);
+    return Value(std::string(std::istreambuf_iterator<char>(stream),
+                             std::istreambuf_iterator<char>()));
+}
+static Value cfv_write_file(const Value& path_value, const Value& content_value) {
+    const std::string path = cfv_required_text(path_value, "escribir_archivo");
+    const std::string content =
+        cfv_required_text(content_value, "escribir_archivo");
+    std::ofstream stream(path, std::ios::binary);
+    if (!stream) throw std::runtime_error("no se pudo escribir " + path);
+    stream << content;
+    if (!stream) throw std::runtime_error("escritura incompleta en " + path);
+    return Value(true);
+}
+static Value cfv_remove_file(const Value& path_value) {
+    const std::string path = cfv_required_text(path_value, "eliminar_archivo");
+    return Value(std::remove(path.c_str()) == 0);
+}
+static std::string cfv_shell_quote(const std::string& value) {
+    std::string quoted = "'";
+    for (const char byte : value) {
+        if (byte == '\'') quoted += "'\\''";
+        else quoted.push_back(byte);
+    }
+    return quoted + "'";
+}
+static Value cfv_compile_cpp(const Value& source_value, const Value& output_value) {
+    const std::string source =
+        cfv_required_text(source_value, "compilar_cpp_nativo");
+    const std::string output =
+        cfv_required_text(output_value, "compilar_cpp_nativo");
+    const std::string command =
+        "clang++ -std=c++17 -O2 " + cfv_shell_quote(source) +
+        " -o " + cfv_shell_quote(output);
+    return Value(std::system(command.c_str()) == 0);
+}
 static Value cfv_arg(const std::vector<Value>& args, std::size_t index,
                      const std::string& function) {
     if (index >= args.size()) throw std::runtime_error(function + ": faltan argumentos");
@@ -11155,15 +12208,15 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-)CFV47DATA"},
-        {R"CFV48DATA(bootstrap/fixtures/minimal.cfv)CFV48DATA", R"CFV49DATA(// Programa aceptado por C-Forge Stage 0.
+)CFV51DATA"},
+        {R"CFV52DATA(bootstrap/fixtures/minimal.cfv)CFV52DATA", R"CFV53DATA(// Programa aceptado por C-Forge Stage 0.
 sea proyecto: texto = "C-Forge"
 sea base: numero = 40
 sea resultado: numero = base + 2
 mostrar(proyecto + " Core Bootstrap")
 mostrar(resultado)
-)CFV49DATA"},
-        {R"CFV50DATA(bootstrap/fixtures/parser_b1_driver.cfv)CFV50DATA", R"CFV51DATA(// Driver B1. Se concatena después de core_lexer, core_ast y core_parser.
+)CFV53DATA"},
+        {R"CFV54DATA(bootstrap/fixtures/parser_b1_driver.cfv)CFV54DATA", R"CFV55DATA(// Driver B1. Se concatena después de core_lexer, core_ast y core_parser.
 sea fuente_b1: texto =
     "sea respuesta: numero = 40 + 2 * 3\n" +
     "mostrar(respuesta)\n"
@@ -11182,8 +12235,8 @@ sea fuente_asociatividad_b1: texto =
 sea programa_asociatividad_b1: cualquiera =
     parsear_fuente_core(fuente_asociatividad_b1)
 mostrar(ast_core_canonico(programa_asociatividad_b1))
-)CFV51DATA"},
-        {R"CFV52DATA(bootstrap/fixtures/semantics_b2_driver.cfv)CFV52DATA", R"CFV53DATA(// Corpus normativo B2. Se concatena tras lexer, AST, parser y semántica.
+)CFV55DATA"},
+        {R"CFV56DATA(bootstrap/fixtures/semantics_b2_driver.cfv)CFV56DATA", R"CFV57DATA(// Corpus normativo B2. Se concatena tras lexer, AST, parser y semántica.
 
 sea fuente_valida_b2: texto =
     "sea titulo: texto = \"C-Forge\"\n" +
@@ -11212,8 +12265,8 @@ sea fuente_movida_b2: texto =
 sea resultado_movida_b2: cualquiera =
     analizar_semantica_core(parsear_fuente_core(fuente_movida_b2))
 mostrar(diagnosticos_semanticos_core(resultado_movida_b2))
-)CFV53DATA"},
-        {R"CFV54DATA(bootstrap/fixtures/emitter_b3_driver.cfv)CFV54DATA", R"CFV55DATA(// Driver del emisor B3. Su única salida es una unidad C++17 compilable.
+)CFV57DATA"},
+        {R"CFV58DATA(bootstrap/fixtures/emitter_b3_driver.cfv)CFV58DATA", R"CFV59DATA(// Driver del emisor B3. Su única salida es una unidad C++17 compilable.
 sea fuente_b3: texto =
     "sea nombre: texto = \"C-Forge\"\n" +
     "sea nombre_movido: texto = mover(nombre)\n" +
@@ -11225,16 +12278,16 @@ sea programa_b3: cualquiera = parsear_fuente_core(fuente_b3)
 sea emision_b3: cualquiera = emitir_programa_core(programa_b3)
 afirmar(emision_b3.valido, diagnosticos_semanticos_core(emision_b3))
 mostrar(emision_b3.codigo)
-)CFV55DATA"},
-        {R"CFV56DATA(registry/index.json)CFV56DATA", R"CFV57DATA({
+)CFV59DATA"},
+        {R"CFV60DATA(registry/index.json)CFV60DATA", R"CFV61DATA({
   "format": 2,
   "registry": "C-Forge Community Registry",
   "publishers": {},
   "revocations": [],
   "packages": {}
 }
-)CFV57DATA"},
-        {R"CFV58DATA(registry/README.md)CFV58DATA", R"CFV59DATA(# Registro público de paquetes C-Forge
+)CFV61DATA"},
+        {R"CFV62DATA(registry/README.md)CFV62DATA", R"CFV63DATA(# Registro público de paquetes C-Forge
 
 Este directorio define el índice público, auditable y versionado del gestor `cforge pkg`.
 Cada versión del formato 2 debe publicar una URL HTTPS, el SHA-256 exacto del
@@ -11261,8 +12314,8 @@ que cada paquete señale un publicador `active` y que su `key_id` esté autoriza
 por esa cuenta. Esta fase usa
 identidades de GitHub y revisión por pull request; todavía no existe un servicio
 central de inicio de sesión, recuperación de cuenta ni publicación automática.
-)CFV59DATA"},
-        {R"CFV60DATA(include/cforgev_ffi.h)CFV60DATA", R"CFV61DATA(#ifndef CFORGEV_FFI_H
+)CFV63DATA"},
+        {R"CFV64DATA(include/cforgev_ffi.h)CFV64DATA", R"CFV65DATA(#ifndef CFORGEV_FFI_H
 #define CFORGEV_FFI_H
 
 #include <stddef.h>
@@ -11407,8 +12460,8 @@ CFV_EXPORT int cfv_register_function_v2(const char* name, CfvForeignFunctionV2 f
 #endif
 
 #endif
-)CFV61DATA"},
-        {R"CFV62DATA(include/cforge_shared_arena.h)CFV62DATA", R"CFV63DATA(#ifndef CFORGE_SHARED_ARENA_H
+)CFV65DATA"},
+        {R"CFV66DATA(include/cforge_shared_arena.h)CFV66DATA", R"CFV67DATA(#ifndef CFORGE_SHARED_ARENA_H
 #define CFORGE_SHARED_ARENA_H
 
 #include <atomic>
@@ -11758,8 +12811,8 @@ private:
 }  // namespace cforge::arena
 
 #endif
-)CFV63DATA"},
-        {R"CFV64DATA(herramientas/cforgev_ffi_runner.cpp)CFV64DATA", R"CFV65DATA(#include "cforgev_ffi.h"
+)CFV67DATA"},
+        {R"CFV68DATA(herramientas/cforgev_ffi_runner.cpp)CFV68DATA", R"CFV69DATA(#include "cforgev_ffi.h"
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -11807,8 +12860,8 @@ int main(int argc, char** argv) {
     if (result.release) result.release(result.owner);
     return 0;
 }
-)CFV65DATA"},
-        {R"CFV66DATA(herramientas/cforge_cli.cpp)CFV66DATA", R"CFV67DATA(#include <cerrno>
+)CFV69DATA"},
+        {R"CFV70DATA(herramientas/cforge_cli.cpp)CFV70DATA", R"CFV71DATA(#include <cerrno>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -11879,8 +12932,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-)CFV67DATA"},
-        {R"CFV68DATA(herramientas/vscode-cforgev/package.json)CFV68DATA", R"CFV69DATA({
+)CFV71DATA"},
+        {R"CFV72DATA(herramientas/vscode-cforgev/package.json)CFV72DATA", R"CFV73DATA({
   "name": "cforgev-language",
   "displayName": "C-Forge Language Support",
   "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
@@ -11980,8 +13033,8 @@ int main(int argc, char** argv) {
     ]
   }
 }
-)CFV69DATA"},
-        {R"CFV70DATA(herramientas/vscode-cforgev/extension.js)CFV70DATA", R"CFV71DATA("use strict";
+)CFV73DATA"},
+        {R"CFV74DATA(herramientas/vscode-cforgev/extension.js)CFV74DATA", R"CFV75DATA("use strict";
 
 const vscode = require("vscode");
 const { execFile, spawn } = require("child_process");
@@ -12227,8 +13280,8 @@ function activate(context) {
 async function deactivate() { if (languageServer) await languageServer.stop(); }
 
 module.exports = { activate, deactivate };
-)CFV71DATA"},
-        {R"CFV72DATA(herramientas/vscode-cforgev/language-configuration.json)CFV72DATA", R"CFV73DATA({
+)CFV75DATA"},
+        {R"CFV76DATA(herramientas/vscode-cforgev/language-configuration.json)CFV76DATA", R"CFV77DATA({
   "comments": { "lineComment": "//" },
   "brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
   "autoClosingPairs": [
@@ -12238,8 +13291,8 @@ module.exports = { activate, deactivate };
     { "open": "\"", "close": "\"" }
   ]
 }
-)CFV73DATA"},
-        {R"CFV74DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV74DATA", R"CFV75DATA({
+)CFV77DATA"},
+        {R"CFV78DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV78DATA", R"CFV79DATA({
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "C-Forge",
   "scopeName": "source.cforgev",
@@ -12285,7 +13338,7 @@ module.exports = { activate, deactivate };
     ] }
   }
 }
-)CFV75DATA"}
+)CFV79DATA"}
     };
     return resources;
 }

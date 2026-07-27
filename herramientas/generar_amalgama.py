@@ -33,6 +33,8 @@ RESOURCES = {
     "bootstrap/core_parser.cfv": ROOT / "bootstrap" / "core_parser.cfv",
     "bootstrap/core_semantics.cfv": ROOT / "bootstrap" / "core_semantics.cfv",
     "bootstrap/core_emitter.cfv": ROOT / "bootstrap" / "core_emitter.cfv",
+    "bootstrap/core_driver.cfv": ROOT / "bootstrap" / "core_driver.cfv",
+    "bootstrap/stage1/cforge_stage1.cfv": ROOT / "bootstrap" / "stage1" / "cforge_stage1.cfv",
     "bootstrap/stage0/cforge_bootstrap.cpp": ROOT / "bootstrap" / "stage0" / "cforge_bootstrap.cpp",
     "bootstrap/fixtures/minimal.cfv": ROOT / "bootstrap" / "fixtures" / "minimal.cfv",
     "bootstrap/fixtures/parser_b1_driver.cfv": ROOT / "bootstrap" / "fixtures" / "parser_b1_driver.cfv",

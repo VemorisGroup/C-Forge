@@ -55,13 +55,13 @@ compile y ejecute el artefacto nativo sin invocar Python.
 | B1 | Parser escrito en C-Forge | **Cumplido:** AST canónico igual en Stage 0, intérprete y VM para la suite Core 0.2 |
 | B2 | Tipos y ownership escritos en C-Forge | **Cumplido:** tipos, variable no declarada y uso después de mover producen diagnósticos iguales en los tres motores |
 | B3 | Emisor nativo escrito en C-Forge | **Cumplido:** Stage 0 compila el emisor `.cfv`, que produce C++17 y un ejecutable nativo verificado |
-| B4 | Compilador Stage 1 | Compila todas sus propias fuentes `.cfv` |
-| B5 | Stage 2/3 | Artefactos reproducibles equivalentes |
+| B4 | Compilador Stage 1 | **Cumplido:** Stage 0 construye el compilador `.cfv`; este compila programas Core a ejecutables sin Python |
+| B5 | Stage 2/3 | Stage 1 compila sus propias fuentes y los artefactos de Stage 2/3 son reproducibles |
 | B6 | Runtime autónomo | Funciona sin runtimes externos instalados |
 
 ## Estado actual
 
-**B3 completado de forma verificable; B4 es el siguiente hito.**
+**B4 completado de forma verificable; B5 es el siguiente hito.**
 
 - `bootstrap/stage0/cforge_bootstrap.cpp` es el compilador inicial C++.
 - `bootstrap/fixtures/minimal.cfv` se convierte en un ejecutable de máquina real.
@@ -72,6 +72,10 @@ compile y ejecute el artefacto nativo sin invocar Python.
 - `bootstrap/core_semantics.cfv` implementa tipos y ownership Core.
 - `bootstrap/core_emitter.cfv` genera una unidad C++17 completa desde el AST
   aprobado por B2.
+- `bootstrap/core_driver.cfv` conecta automáticamente lexer, parser, análisis
+  semántico, ownership, emisión C++ y compilación nativa.
+- `bootstrap/stage1/cforge_stage1.cfv` es la unidad Stage 1 autocontenida,
+  escrita íntegramente en C-Forge y construible por Stage 0.
 - `docs/CORE-GRAMMAR-0.4.ebnf` congela exactamente el subconjunto aceptado.
 - `tests/test_bootstrap_b1.py` compila la unidad B1 con Stage 0 y exige que
   Stage 0, intérprete y VM emitan bytes idénticos para el AST canónico.
@@ -83,9 +87,15 @@ después de mover. Préstamos, tiempos de vida, regiones, clases del usuario,
 módulos y el resto del lenguaje se añadirán solo cuando los hitos posteriores
 los necesiten y posean pruebas normativas.
 
-La prueba B3 compila el emisor con Stage 0, compara el C++ generado por Stage 0,
-intérprete y VM, compila ese C++ con el compilador del sistema y ejecuta el
-binario resultante. Un AST rechazado por B2 nunca se convierte en C++.
+La prueba B4 construye Stage 1 con Stage 0 y usa ese nuevo binario para compilar
+un programa `.cfv` Core completo. La ejecución de Stage 1 no carga ni enlaza
+Python. También verifica que los errores sintácticos y semánticos detengan la
+compilación antes de producir un ejecutable.
+
+Esto completa el **compilador Stage 1 para C-Forge Core 0.4**, pero todavía no
+constituye autoalojamiento: el subconjunto que Stage 1 acepta como entrada aún
+no cubre todas las construcciones usadas por sus propias fuentes. Esa paridad,
+la compilación Stage 2/3 y la reproducibilidad pertenecen a B5.
 
 Construcción manual:
 
@@ -94,6 +104,12 @@ clang++ -std=c++17 -O2 bootstrap/stage0/cforge_bootstrap.cpp \
   -o build/cforge-bootstrap
 ./build/cforge-bootstrap bootstrap/fixtures/minimal.cfv -o build/minimal
 ./build/minimal
+
+python3 herramientas/generar_stage1.py
+./build/cforge-bootstrap bootstrap/stage1/cforge_stage1.cfv \
+  -o build/cforge-stage1
+./build/cforge-stage1 bootstrap/fixtures/minimal.cfv -o build/minimal-stage1
+./build/minimal-stage1
 ```
 
 La salida debe ser:

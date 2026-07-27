@@ -308,6 +308,9 @@ private:
 
     static std::string prologue() {
         return R"CPP(#include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -397,7 +400,12 @@ public:
                        << "(Value, const std::vector<Value>&);\n";
         }
         return runtime() + prototypes.str() + declarations.str() +
-               "int main() {\n    try {\n" + body.str() +
+               "int main(int argc, char** argv) {\n"
+               "    try {\n"
+               "        cfv_process_args.clear();\n"
+               "        for (int index = 0; index < argc; ++index) {\n"
+               "            cfv_process_args.emplace_back(std::string(argv[index]));\n"
+               "        }\n" + body.str() +
                "        return 0;\n"
                "    } catch (const std::exception& error) {\n"
                "        std::cerr << \"[C-Forge Core Runtime Error] \""
@@ -778,6 +786,24 @@ private:
             if (args.size() != 2) fail(name, "afirmar requiere dos argumentos");
             return "cfv_assert(" + args[0] + ", " + args[1] + ")";
         }
+        if (name.text == "argumentos_programa") {
+            if (!args.empty()) fail(name, "argumentos_programa no recibe argumentos");
+            return "cfv_arguments()";
+        }
+        if (name.text == "leer_archivo") {
+            return "cfv_read_file(" + one(name, args) + ")";
+        }
+        if (name.text == "escribir_archivo") {
+            if (args.size() != 2) fail(name, "escribir_archivo requiere dos argumentos");
+            return "cfv_write_file(" + args[0] + ", " + args[1] + ")";
+        }
+        if (name.text == "eliminar_archivo") {
+            return "cfv_remove_file(" + one(name, args) + ")";
+        }
+        if (name.text == "compilar_cpp_nativo") {
+            if (args.size() != 2) fail(name, "compilar_cpp_nativo requiere dos argumentos");
+            return "cfv_compile_cpp(" + args[0] + ", " + args[1] + ")";
+        }
         if (!contains(functions_, name.text)) {
             fail(name, "función desconocida '" + name.text + "'");
         }
@@ -830,6 +856,9 @@ private:
 
     static std::string runtime() {
         return R"CPP(#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -854,6 +883,7 @@ struct Value {
     explicit Value(std::shared_ptr<List> value) : data(std::move(value)) {}
     explicit Value(std::shared_ptr<Object> value) : data(std::move(value)) {}
 };
+static std::vector<Value> cfv_process_args;
 static Value cfv_number(double value) { return Value(value); }
 static Value cfv_text(std::string value) { return Value(std::move(value)); }
 static Value cfv_bool(bool value) { return Value(value); }
@@ -978,6 +1008,53 @@ static Value cfv_append(Value value, const Value& item) {
 static Value cfv_assert(const Value& condition, const Value& message) {
     if (!cfv_truth(condition)) throw std::runtime_error(cfv_format(message));
     return Value();
+}
+static std::string cfv_required_text(const Value& value,
+                                     const std::string& function) {
+    if (const auto* text = std::get_if<std::string>(&value.data)) return *text;
+    throw std::runtime_error(function + " requiere texto");
+}
+static Value cfv_arguments() {
+    return cfv_list(cfv_process_args);
+}
+static Value cfv_read_file(const Value& path_value) {
+    const std::string path = cfv_required_text(path_value, "leer_archivo");
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) throw std::runtime_error("no se pudo abrir " + path);
+    return Value(std::string(std::istreambuf_iterator<char>(stream),
+                             std::istreambuf_iterator<char>()));
+}
+static Value cfv_write_file(const Value& path_value, const Value& content_value) {
+    const std::string path = cfv_required_text(path_value, "escribir_archivo");
+    const std::string content =
+        cfv_required_text(content_value, "escribir_archivo");
+    std::ofstream stream(path, std::ios::binary);
+    if (!stream) throw std::runtime_error("no se pudo escribir " + path);
+    stream << content;
+    if (!stream) throw std::runtime_error("escritura incompleta en " + path);
+    return Value(true);
+}
+static Value cfv_remove_file(const Value& path_value) {
+    const std::string path = cfv_required_text(path_value, "eliminar_archivo");
+    return Value(std::remove(path.c_str()) == 0);
+}
+static std::string cfv_shell_quote(const std::string& value) {
+    std::string quoted = "'";
+    for (const char byte : value) {
+        if (byte == '\'') quoted += "'\\''";
+        else quoted.push_back(byte);
+    }
+    return quoted + "'";
+}
+static Value cfv_compile_cpp(const Value& source_value, const Value& output_value) {
+    const std::string source =
+        cfv_required_text(source_value, "compilar_cpp_nativo");
+    const std::string output =
+        cfv_required_text(output_value, "compilar_cpp_nativo");
+    const std::string command =
+        "clang++ -std=c++17 -O2 " + cfv_shell_quote(source) +
+        " -o " + cfv_shell_quote(output);
+    return Value(std::system(command.c_str()) == 0);
 }
 static Value cfv_arg(const std::vector<Value>& args, std::size_t index,
                      const std::string& function) {

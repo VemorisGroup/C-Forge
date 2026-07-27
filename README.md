@@ -97,10 +97,11 @@ print(datos.len())
 - **[Parcial]** WebAssembly emite WAT para un subconjunto, no para todo C-Forge.
 - **[Parcial]** Empaquetado para macOS, Linux y Windows; la validación física y
   los catálogos públicos aún no están completos.
-- **[Planeado]** Compilador autoalojado y núcleo autónomo. B3 ya posee lexer,
-  AST, parser, tipos/ownership y emisor nativo Core 0.4 escritos en C-Forge y
-  compilables por Stage 0; ensamblar Stage 1/2/3 y el runtime independiente
-  siguen pendientes; consulta [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md).
+- **[Planeado]** Compilador autoalojado y núcleo autónomo. B4 ya posee un
+  compilador Stage 1 escrito en C-Forge, construido por Stage 0 y capaz de
+  compilar programas Core sin Python. Stage 2/3 reproducible y el runtime
+  independiente siguen pendientes; consulta
+  [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md).
 - **[No certificado]** Uso bancario o crítico; requiere auditoría profesional,
   LTS, cumplimiento y evidencia externa.
 
@@ -136,7 +137,9 @@ Los hitos B1/B2 añaden [`core_ast.cfv`](bootstrap/core_ast.cfv),
 [`core_parser.cfv`](bootstrap/core_parser.cfv),
 [`core_semantics.cfv`](bootstrap/core_semantics.cfv) y la
 [`gramática Core 0.4`](docs/CORE-GRAMMAR-0.4.ebnf). B3 agrega
-[`core_emitter.cfv`](bootstrap/core_emitter.cfv). Sus pruebas ensamblan esas
+[`core_emitter.cfv`](bootstrap/core_emitter.cfv). B4 agrega
+[`core_driver.cfv`](bootstrap/core_driver.cfv) y la unidad autocontenida
+[`cforge_stage1.cfv`](bootstrap/stage1/cforge_stage1.cfv). Sus pruebas ensamblan esas
 fuentes con el lexer, las compilan mediante Stage 0, comparan AST, diagnósticos
 y C++ generado contra el intérprete y la VM, y ejecutan el binario final.
 
