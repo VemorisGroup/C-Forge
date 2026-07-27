@@ -120,6 +120,12 @@ externos durante la emisión. Sigue siendo un corte inicial: la compilación
 general conserva el backend C++ mientras se implementan los objetivos Mach-O,
 PE y el resto de la semántica Core.
 
+B6.3 añade el objetivo Mach-O ARM64. C-Forge construye directamente los
+segmentos, comandos de carga, opcodes y la firma ad hoc SHA-256. En macOS ARM64,
+la prueba bloquea `clang++`, ensamblador, enlazador, `codesign` y Python durante
+la emisión, y después ejecuta el binario resultante. El backend directo todavía
+cubre únicamente `mostrar("texto")`; no reemplaza aún al backend general.
+
 Construcción manual:
 
 ```bash

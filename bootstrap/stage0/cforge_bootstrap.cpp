@@ -810,6 +810,10 @@ private:
         if (name.text == "hacer_ejecutable") {
             return "cfv_make_executable(" + one(name, args) + ")";
         }
+        if (name.text == "sha256_rango") {
+            if (args.size() != 3) fail(name, "sha256_rango requiere tres argumentos");
+            return "cfv_sha256_range(" + args[0] + ", " + args[1] + ", " + args[2] + ")";
+        }
         if (name.text == "compilar_cpp_nativo") {
             if (args.size() != 2) fail(name, "compilar_cpp_nativo requiere dos argumentos");
             return "cfv_compile_cpp(" + args[0] + ", " + args[1] + ")";
@@ -880,6 +884,9 @@ private:
 #include <sys/stat.h>
 #include <variant>
 #include <vector>
+#if defined(__APPLE__)
+#include <CommonCrypto/CommonDigest.h>
+#endif
 
 struct Value;
 using List = std::vector<Value>;
@@ -1075,6 +1082,36 @@ static Value cfv_write_bytes(const Value& path_value, const Value& bytes_value) 
 static Value cfv_make_executable(const Value& path_value) {
     const std::string path = cfv_required_text(path_value, "hacer_ejecutable");
     return Value(::chmod(path.c_str(), 0755) == 0);
+}
+static Value cfv_sha256_range(const Value& bytes_value,
+                              const Value& start_value,
+                              const Value& count_value) {
+    const auto* bytes = std::get_if<std::shared_ptr<List>>(&bytes_value.data);
+    if (!bytes) throw std::runtime_error("sha256_rango requiere una lista");
+    const auto start = static_cast<std::size_t>(cfv_num(start_value));
+    const auto count = static_cast<std::size_t>(cfv_num(count_value));
+    if (start > (*bytes)->size() || count > (*bytes)->size() - start)
+        throw std::runtime_error("sha256_rango fuera de límites");
+    std::vector<unsigned char> input;
+    input.reserve(count);
+    for (std::size_t index = start; index < start + count; ++index) {
+        const double number = cfv_num((**bytes)[index]);
+        if (number < 0 || number > 255 || std::floor(number) != number)
+            throw std::runtime_error("byte fuera de rango");
+        input.push_back(static_cast<unsigned char>(number));
+    }
+#if defined(__APPLE__)
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH] = {};
+    CC_SHA256(input.data(), static_cast<CC_LONG>(input.size()), digest);
+    std::vector<Value> result;
+    result.reserve(CC_SHA256_DIGEST_LENGTH);
+    for (const unsigned char byte : digest)
+        result.emplace_back(static_cast<double>(byte));
+    return cfv_list(result);
+#else
+    throw std::runtime_error(
+        "sha256_rango todavía requiere el backend criptográfico del objetivo");
+#endif
 }
 static std::string cfv_shell_quote(const std::string& value) {
     std::string quoted = "'";

@@ -183,6 +183,12 @@ funcion emitir_llamada_core(
         retornar "cfv_make_executable(" +
             emitir_expresion_core(argumentos[0], contexto) + ")"
     }
+    si (nombre == "sha256_rango") {
+        retornar "cfv_sha256_range(" +
+            emitir_expresion_core(argumentos[0], contexto) + ", " +
+            emitir_expresion_core(argumentos[1], contexto) + ", " +
+            emitir_expresion_core(argumentos[2], contexto) + ")"
+    }
     si (nombre == "compilar_cpp_nativo") {
         retornar "cfv_compile_cpp(" +
             emitir_expresion_core(argumentos[0], contexto) + ", " +

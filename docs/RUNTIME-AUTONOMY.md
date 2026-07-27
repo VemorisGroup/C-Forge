@@ -52,3 +52,23 @@ Este es el primer corte vertical de compilación directa. Todavía no sustituye
 el backend general: solo acepta el programa mínimo `mostrar("texto")` y el
 formato inicial es ELF64/x86-64. Mach-O ARM64, PE x64, expresiones, variables,
 control de flujo y el runtime completo permanecen pendientes.
+
+## B6.3: Mach-O ARM64 ejecutable en macOS
+
+`bootstrap/direct/cforge_macho_arm64.cfv` implementa el objetivo nativo del Mac:
+
+- cabecera Mach-O de 64 bits para ARM64;
+- segmentos `__PAGEZERO`, `__TEXT` y `__LINKEDIT`;
+- comandos de carga para `dyld`, `libSystem`, `LC_MAIN` y UUID determinista;
+- instrucciones ARM64 que realizan `write` y `exit`;
+- firma ad hoc embebida con CodeDirectory SHA-256;
+- permisos de ejecución sin llamar a `chmod` externo.
+
+La firma también se genera dentro del runtime C-Forge; no se ejecuta
+`codesign`. La prueba bloquea compiladores, ensambladores, enlazadores,
+`codesign` y Python durante la emisión, valida la firma con macOS y ejecuta el
+resultado físicamente en Apple Silicon.
+
+B6.3 sigue limitado al programa mínimo `mostrar("texto")`. El siguiente trabajo
+es bajar el AST Core completo a instrucciones, añadir relocaciones internas y
+crear el objetivo PE x64 para Windows.
