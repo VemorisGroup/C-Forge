@@ -1,0 +1,17 @@
+funcion sumar(a: numero, b: numero): numero {
+    retornar a + b
+}
+
+sea valores = [10, 20, 30]
+valores[1] = sumar(valores[0], 32)
+
+sea prefijo = "C-FORGE-"
+prefijo = prefijo + "B6.7-OK"
+
+si (valores[1] == 42) {
+    si (longitud(valores) == 3) {
+        si (longitud(prefijo) == 15) {
+            mostrar(prefijo)
+        }
+    }
+}

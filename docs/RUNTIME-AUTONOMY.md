@@ -117,3 +117,46 @@ artefacto en macOS y lo ejecuta físicamente en un runner Windows x64.
 B6.5 es todavía un corte vertical mínimo: acepta `mostrar("texto")`. Variables,
 control de flujo y el frontend Core completo deben incorporarse al objetivo PE
 en una fase posterior.
+
+## B6.6: frontend Core completo sobre PE32+ x86-64
+
+`bootstrap/direct/cforge_pe_x64_core.cfv` conecta el lexer, parser y AST de
+C-Forge Core con el emisor PE. El ejecutable generado soporta:
+
+- variables numéricas y booleanas con almacenamiento local;
+- asignaciones y expresiones unarias;
+- suma, resta, multiplicación y división entera con signo;
+- comparaciones `==`, `!=`, `<`, `<=`, `>` y `>=`;
+- bloques `si`/`sino` y ciclos `mientras`;
+- salida literal mediante la API nativa de Windows.
+
+Las ramas relativas, llamadas por IAT y referencias a datos se resuelven en dos
+pasadas dentro del propio emisor. La imagen PE es determinista y se produce sin
+compilador, ensamblador, enlazador ni Python durante la emisión. Las pruebas
+locales validan las cabeceras y desensamblan las instrucciones; el CI ejecuta el
+artefacto físicamente en Windows x64 y compara su salida completa.
+
+B6.6 no cubre todavía funciones de usuario, colecciones, texto dinámico ni el
+runtime general. Esas características continúan marcadas como planificadas.
+
+## B6.7: funciones y valores nativos en ARM64 y PE x64
+
+Los dos backends Core directos incorporan ahora:
+
+- funciones con hasta cuatro parámetros, llamadas nativas y `retornar`;
+- marcos de pila independientes para cada llamada no recursiva;
+- listas numéricas contiguas, lectura y escritura mediante índices dinámicos;
+- consulta de longitud para listas y textos;
+- textos representados como el par `(puntero, longitud)`;
+- concatenación textual en buffers locales durante la ejecución;
+- salida de textos literales, variables y concatenados.
+
+El fixture `machine_runtime_b6.cfv` combina las características anteriores. Se
+ejecuta físicamente en macOS ARM64 y el CI transporta el PE determinista a un
+runner Windows x64 para ejecutarlo allí. Durante la emisión se bloquean
+compiladores, ensambladores, enlazadores y Python.
+
+El alcance sigue siendo parcial: todavía faltan recursión, más de cuatro
+parámetros, listas redimensionables, comprobación dinámica de límites,
+colecciones heterogéneas, liberación de memoria de larga duración y el runtime
+general de la biblioteca estándar.

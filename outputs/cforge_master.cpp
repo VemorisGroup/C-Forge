@@ -8380,8 +8380,8 @@ def reports_json(reports: list[ParityReport]) -> str:
       "id": "autonomous-runtime",
       "name": "Runtime autónomo sin dependencias externas",
       "status": "planned",
-      "scope": "Runtime, biblioteca estándar, enlazador y gestor de paquetes escritos en C-Forge sin necesitar Python, C++, JVM, .NET, Node ni LLVM en uso normal. B6.4 amplía Mach-O ARM64 y B6.5 añade emisión PE32+ x86-64 directa con ejecución física en CI Windows; la autonomía completa sigue planeada.",
-      "evidence": ["docs/BOOTSTRAP.md", "docs/RUNTIME-AUTONOMY.md", "bootstrap/fixtures/runtime_b6.cfv", "bootstrap/direct/cforge_elf_x64.cfv", "bootstrap/direct/cforge_macho_arm64.cfv", "bootstrap/direct/cforge_macho_arm64_core.cfv", "bootstrap/direct/cforge_macho_arm64_core_backend.cfv", "bootstrap/direct/cforge_pe_x64.cfv", "bootstrap/fixtures/machine_hello_b6.cfv", "bootstrap/fixtures/machine_control_b6.cfv", "bootstrap/fixtures/machine_hello_windows_b6.cfv", "herramientas/generar_macho_core.py", "tests/test_bootstrap_b6.py", "tests/test_bootstrap_b6_machine.py", "tests/test_bootstrap_b6_macho.py", "tests/test_bootstrap_b6_macho_core.py", "tests/test_bootstrap_b6_pe.py", ".github/workflows/ci.yml"]
+      "scope": "Runtime, biblioteca estándar, enlazador y gestor de paquetes escritos en C-Forge sin necesitar Python, C++, JVM, .NET, Node ni LLVM en uso normal. B6.7 añade funciones no recursivas, listas numéricas indexables y texto dinámico a los objetivos directos Mach-O ARM64 y PE x64. La autonomía completa sigue planeada.",
+      "evidence": ["docs/BOOTSTRAP.md", "docs/RUNTIME-AUTONOMY.md", "bootstrap/fixtures/runtime_b6.cfv", "bootstrap/direct/cforge_elf_x64.cfv", "bootstrap/direct/cforge_macho_arm64.cfv", "bootstrap/direct/cforge_macho_arm64_core.cfv", "bootstrap/direct/cforge_macho_arm64_core_backend.cfv", "bootstrap/direct/cforge_pe_x64.cfv", "bootstrap/direct/cforge_pe_x64_core.cfv", "bootstrap/direct/cforge_pe_x64_core_backend.cfv", "bootstrap/fixtures/machine_hello_b6.cfv", "bootstrap/fixtures/machine_control_b6.cfv", "bootstrap/fixtures/machine_hello_windows_b6.cfv", "bootstrap/fixtures/machine_control_windows_b6.cfv", "bootstrap/fixtures/machine_runtime_b6.cfv", "herramientas/generar_macho_core.py", "herramientas/generar_pe_core.py", "tests/test_bootstrap_b6.py", "tests/test_bootstrap_b6_machine.py", "tests/test_bootstrap_b6_macho.py", "tests/test_bootstrap_b6_macho_core.py", "tests/test_bootstrap_b6_pe.py", "tests/test_bootstrap_b6_pe_core.py", "tests/test_bootstrap_b6_runtime_values.py", ".github/workflows/ci.yml"]
     }
   ]
 }
@@ -8527,6 +8527,20 @@ instrucciones que llaman a `GetStdHandle`, `WriteFile` y `ExitProcess`. La
 emisión no ejecuta compilador, ensamblador, enlazador ni Python. Un trabajo de CI
 transporta el artefacto determinista y lo ejecuta en Windows x64. Esta primera
 fase PE cubre el programa mínimo `mostrar("texto")`.
+
+B6.6 conecta el frontend Core al objetivo PE32+/x86-64. El nuevo backend genera
+directamente variables locales, asignaciones, aritmética entera con signo,
+comparaciones, `si`/`sino` y `mientras`, además de salida literal. Sus saltos,
+datos e importaciones se resuelven dentro del emisor C-Forge. La validación
+local comprueba el archivo PE byte por byte y el CI lo ejecuta en Windows x64.
+Funciones, colecciones y el runtime general siguen fuera de este corte.
+
+B6.7 añade llamadas reales de funciones, parámetros y retornos a Mach-O ARM64
+y PE x64. También incorpora listas numéricas contiguas con indexación,
+asignación indexada y longitud, además de textos dinámicos representados como
+puntero y longitud con concatenación en tiempo de ejecución. El mismo fixture
+se ejecuta en macOS ARM64 y Windows x64. Recursión, crecimiento de colecciones,
+límites dinámicos y el runtime general siguen pendientes.
 
 Construcción manual:
 
@@ -14056,11 +14070,23 @@ funcion emitir_macho_arm64(mensaje_sin_salto: texto): lista {
 
 
 
-// Backend Core B6.4. Se concatena con lexer, AST, parser y biblioteca Mach-O.
+// Backend Core B6.7. Se concatena con lexer, AST, parser y biblioteca Mach-O.
 
 estructura SimboloARMCore {
     nombre: texto
     desplazamiento: numero
+}
+
+estructura ColeccionARMCore {
+    nombre: texto
+    desplazamiento: numero
+    longitud: numero
+}
+
+estructura TextoARMCore {
+    nombre: texto
+    puntero: numero
+    longitud: numero
 }
 
 estructura OperacionARMCore {
@@ -14074,11 +14100,22 @@ estructura DatoARMCore {
     bytes: lista
 }
 
+estructura FuncionARMCore {
+    nombre: texto
+    nodo: cualquiera
+    etiqueta: texto
+}
+
 estructura ContextoARMCore {
     operaciones: lista
     simbolos: lista
     datos: lista
     contador: numero
+    funciones: lista
+    retorno_actual: texto
+    colecciones: lista
+    textos: lista
+    siguiente_desplazamiento: numero
 }
 
 funcion operacion_arm(
@@ -14167,13 +14204,75 @@ funcion declarar_simbolo_arm(contexto: cualquiera, nombre: texto): numero {
         indice_simbolo_arm(contexto, nombre) < 0,
         "variable duplicada '" + nombre + "'"
     )
-    sea desplazamiento: numero = longitud(contexto.simbolos) * 8
-    afirmar(desplazamiento < 256, "demasiadas variables para B6.4")
+    sea desplazamiento: numero = contexto.siguiente_desplazamiento
+    contexto.siguiente_desplazamiento =
+        contexto.siguiente_desplazamiento + 8
+    afirmar(desplazamiento < 4096, "memoria local ARM64 agotada")
     agregar(
         contexto.simbolos,
         SimboloARMCore(nombre, desplazamiento)
     )
     retornar desplazamiento
+}
+
+funcion reservar_memoria_arm(
+    contexto: cualquiera,
+    cantidad: numero
+): numero {
+    sea desplazamiento: numero = contexto.siguiente_desplazamiento
+    contexto.siguiente_desplazamiento =
+        contexto.siguiente_desplazamiento + cantidad
+    afirmar(
+        contexto.siguiente_desplazamiento <= 4096,
+        "memoria dinámica local ARM64 agotada"
+    )
+    retornar desplazamiento
+}
+
+funcion indice_coleccion_arm(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.colecciones)) {
+        si (contexto.colecciones[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion buscar_coleccion_arm(
+    contexto: cualquiera,
+    nombre: texto
+): cualquiera {
+    sea indice: numero = indice_coleccion_arm(contexto, nombre)
+    afirmar(indice >= 0, "colección ARM64 desconocida '" + nombre + "'")
+    retornar contexto.colecciones[indice]
+}
+
+funcion indice_texto_arm(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.textos)) {
+        si (contexto.textos[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion buscar_texto_arm(
+    contexto: cualquiera,
+    nombre: texto
+): cualquiera {
+    sea indice: numero = indice_texto_arm(contexto, nombre)
+    afirmar(indice >= 0, "texto ARM64 desconocido '" + nombre + "'")
+    retornar contexto.textos[indice]
 }
 
 funcion desplazamiento_simbolo_arm(
@@ -14186,6 +14285,39 @@ funcion desplazamiento_simbolo_arm(
     retornar simbolos[indice].desplazamiento
 }
 
+funcion buscar_funcion_arm(
+    contexto: cualquiera,
+    nombre: texto
+): cualquiera {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.funciones)) {
+        si (contexto.funciones[indice].nombre == nombre) {
+            retornar contexto.funciones[indice]
+        }
+        indice = indice + 1
+    }
+    afirmar(falso, "función ARM64 desconocida '" + nombre + "'")
+    retornar contexto.funciones[0]
+}
+
+funcion emitir_argumentos_llamada_arm(
+    argumentos: lista,
+    contexto: cualquiera
+) {
+    afirmar(longitud(argumentos) <= 4, "B6.7 admite hasta cuatro parámetros")
+    sea indice: numero = 0
+    mientras (indice < longitud(argumentos)) {
+        emitir_expresion_arm(argumentos[indice], contexto)
+        palabra_arm(contexto, 4162785248)
+        indice = indice + 1
+    }
+    indice = longitud(argumentos)
+    mientras (indice > 0) {
+        indice = indice - 1
+        palabra_arm(contexto, 4165011424 + indice)
+    }
+}
+
 funcion emitir_mov_inmediato_arm(contexto: cualquiera, valor: numero) {
     emitir_mov_registro_arm(contexto, valor, 0)
 }
@@ -14195,7 +14327,7 @@ funcion emitir_mov_registro_arm(
     valor: numero,
     registro: numero
 ) {
-    afirmar(valor >= 0 y valor < 65536, "entero fuera del rango B6.4")
+    afirmar(valor >= 0 y valor < 65536, "entero fuera del rango B6.7")
     afirmar(registro >= 0 y registro < 32, "registro ARM64 inválido")
     palabra_arm(contexto, 3531603968 + valor * 32 + registro)
 }
@@ -14229,10 +14361,79 @@ funcion emitir_expresion_arm(nodo: cualquiera, contexto: cualquiera) {
         retornar 0
     }
     si (nodo.tipo == "Identificador") {
+        si (indice_texto_arm(contexto, nodo.valor) >= 0) {
+            afirmar(
+                falso,
+                "el texto '" + nodo.valor +
+                "' requiere una operación textual"
+            )
+        }
         emitir_cargar_variable_arm(
             contexto,
             desplazamiento_simbolo_arm(contexto, nodo.valor)
         )
+        retornar 0
+    }
+    si (nodo.tipo == "Indice") {
+        sea hijos_indice: lista = nodo.hijos
+        afirmar(
+            hijos_indice[0].tipo == "Identificador",
+            "B6.7 indexa una lista identificada"
+        )
+        sea coleccion: cualquiera =
+            buscar_coleccion_arm(contexto, hijos_indice[0].valor)
+        emitir_expresion_arm(hijos_indice[1], contexto)
+        palabra_arm(
+            contexto,
+            2432696929 + coleccion.desplazamiento * 1024
+        )
+        palabra_arm(contexto, 4167071776)
+        retornar 0
+    }
+    si (nodo.tipo == "Miembro" y nodo.valor == "length") {
+        sea base_miembro: lista = nodo.hijos
+        afirmar(
+            base_miembro[0].tipo == "Identificador",
+            "length requiere un identificador"
+        )
+        sea nombre_base: texto = base_miembro[0].valor
+        si (indice_coleccion_arm(contexto, nombre_base) >= 0) {
+            sea lista_base: cualquiera =
+                buscar_coleccion_arm(contexto, nombre_base)
+            emitir_mov_inmediato_arm(contexto, lista_base.longitud)
+            retornar 0
+        }
+        sea texto_base: cualquiera = buscar_texto_arm(contexto, nombre_base)
+        emitir_cargar_variable_arm(contexto, texto_base.longitud)
+        retornar 0
+    }
+    si (nodo.tipo == "Llamada") {
+        si (nodo.valor == "longitud") {
+            afirmar(longitud(nodo.hijos) == 1, "longitud requiere un valor")
+            sea argumento_longitud: cualquiera = nodo.hijos[0]
+            afirmar(
+                argumento_longitud.tipo == "Identificador",
+                "B6.7 longitud requiere un identificador"
+            )
+            sea nombre_longitud: texto = argumento_longitud.valor
+            si (indice_coleccion_arm(contexto, nombre_longitud) >= 0) {
+                sea lista_longitud: cualquiera =
+                    buscar_coleccion_arm(contexto, nombre_longitud)
+                emitir_mov_inmediato_arm(
+                    contexto, lista_longitud.longitud
+                )
+            } sino {
+                sea texto_longitud: cualquiera =
+                    buscar_texto_arm(contexto, nombre_longitud)
+                emitir_cargar_variable_arm(
+                    contexto, texto_longitud.longitud
+                )
+            }
+            retornar 0
+        }
+        sea funcion: cualquiera = buscar_funcion_arm(contexto, nodo.valor)
+        emitir_argumentos_llamada_arm(nodo.hijos, contexto)
+        operacion_arm(contexto, "bl", 0, funcion.etiqueta)
         retornar 0
     }
     si (nodo.tipo == "Unario") {
@@ -14270,34 +14471,93 @@ funcion emitir_expresion_arm(nodo: cualquiera, contexto: cualquiera) {
     }
     afirmar(
         falso,
-        "B6.4 no puede emitir expresión '" + nodo.tipo + "'"
+        "B6.7 no puede emitir expresión '" + nodo.tipo + "'"
     )
 }
 
 funcion registrar_texto_arm(contexto: cualquiera, texto: texto): texto {
     sea nombre: texto = nombre_unico_arm(contexto, "dato")
     sea bytes: lista = bytes_texto(texto)
-    agregar(bytes, 10)
     agregar(contexto.datos, DatoARMCore(nombre, bytes))
     retornar nombre
+}
+
+funcion emitir_texto_arm(nodo: cualquiera, contexto: cualquiera) {
+    si (nodo.tipo == "Texto") {
+        sea literal: texto = texto_ast_arm(nodo.valor)
+        sea nombre: texto = registrar_texto_arm(contexto, literal)
+        operacion_arm(contexto, "adr_dato", 0, nombre)
+        emitir_mov_registro_arm(
+            contexto, longitud(bytes_texto(literal)), 1
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Identificador") {
+        sea simbolo_texto: cualquiera =
+            buscar_texto_arm(contexto, nodo.valor)
+        emitir_cargar_variable_arm(contexto, simbolo_texto.puntero)
+        palabra_arm(
+            contexto,
+            4181721697 + (simbolo_texto.longitud / 8) * 1024
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Binario" y nodo.valor == "+") {
+        sea partes: lista = nodo.hijos
+        emitir_texto_arm(partes[0], contexto)
+        palabra_arm(contexto, 4162785248)
+        palabra_arm(contexto, 4162785249)
+        emitir_texto_arm(partes[1], contexto)
+        palabra_arm(contexto, 2852127714)
+        palabra_arm(contexto, 2852193251)
+        palabra_arm(contexto, 4165011425)
+        palabra_arm(contexto, 4165011424)
+        palabra_arm(contexto, 2332229668)
+        sea buffer: numero = reservar_memoria_arm(contexto, 256)
+        palabra_arm(contexto, 2432696933 + buffer * 1024)
+        palabra_arm(contexto, 2852455398)
+        sea copiar_izquierda: texto =
+            nombre_unico_arm(contexto, "texto_izquierdo")
+        sea copiar_derecha: texto =
+            nombre_unico_arm(contexto, "texto_derecho")
+        sea fin_izquierda: texto =
+            nombre_unico_arm(contexto, "fin_izquierdo")
+        sea fin_derecha: texto =
+            nombre_unico_arm(contexto, "fin_derecho")
+        etiqueta_arm(contexto, copiar_izquierda)
+        operacion_arm(contexto, "cbz", 1, fin_izquierda)
+        palabra_arm(contexto, 943723527)
+        palabra_arm(contexto, 939529383)
+        palabra_arm(contexto, 3506439201)
+        operacion_arm(contexto, "b", 0, copiar_izquierda)
+        etiqueta_arm(contexto, fin_izquierda)
+        etiqueta_arm(contexto, copiar_derecha)
+        operacion_arm(contexto, "cbz", 3, fin_derecha)
+        palabra_arm(contexto, 943723591)
+        palabra_arm(contexto, 939529383)
+        palabra_arm(contexto, 3506439267)
+        operacion_arm(contexto, "b", 0, copiar_derecha)
+        etiqueta_arm(contexto, fin_derecha)
+        palabra_arm(contexto, 2852520928)
+        palabra_arm(contexto, 2852389857)
+        retornar 0
+    }
+    afirmar(falso, "expresión textual ARM64 no soportada")
 }
 
 funcion emitir_mostrar_arm(nodo: cualquiera, contexto: cualquiera) {
     sea hijos: lista = nodo.hijos
     sea valor: cualquiera = hijos[0]
-    afirmar(
-        valor.tipo == "Texto",
-        "B6.4 mostrar todavía requiere un literal de texto"
-    )
-    sea literal: texto = texto_ast_arm(valor.valor)
-    sea nombre: texto = registrar_texto_arm(contexto, literal)
+    emitir_texto_arm(valor, contexto)
+    palabra_arm(contexto, 2852193250)
+    palabra_arm(contexto, 2852127713)
     emitir_mov_registro_arm(contexto, 1, 0)
-    operacion_arm(contexto, "adr_dato", 1, nombre)
-    emitir_mov_registro_arm(
-        contexto,
-        longitud(bytes_texto(literal)) + 1,
-        2
-    )
+    emitir_mov_registro_arm(contexto, 4, 16)
+    palabra_arm(contexto, 3556773889)
+    sea salto_linea: texto = registrar_texto_arm(contexto, "\n")
+    emitir_mov_registro_arm(contexto, 1, 0)
+    operacion_arm(contexto, "adr_dato", 1, salto_linea)
+    emitir_mov_registro_arm(contexto, 1, 2)
     emitir_mov_registro_arm(contexto, 4, 16)
     palabra_arm(contexto, 3556773889)
 }
@@ -14315,6 +14575,42 @@ funcion emitir_sentencia_arm(nodo: cualquiera, contexto: cualquiera) {
     sea hijos: lista = nodo.hijos
     si (nodo.tipo == "Declaracion") {
         sea nombre: texto = nombre_declaracion_arm(nodo.valor)
+        si (hijos[0].tipo == "Lista") {
+            sea elementos: lista = hijos[0].hijos
+            sea base: numero = contexto.siguiente_desplazamiento
+            sea elemento: numero = 0
+            mientras (elemento < longitud(elementos)) {
+                sea desplazamiento_elemento: numero =
+                    declarar_simbolo_arm(
+                        contexto,
+                        nombre + "#" + a_texto(elemento)
+                    )
+                emitir_expresion_arm(elementos[elemento], contexto)
+                emitir_guardar_variable_arm(
+                    contexto, desplazamiento_elemento
+                )
+                elemento = elemento + 1
+            }
+            agregar(
+                contexto.colecciones,
+                ColeccionARMCore(nombre, base, longitud(elementos))
+            )
+            retornar 0
+        }
+        si (hijos[0].tipo == "Texto") {
+            sea puntero: numero =
+                declarar_simbolo_arm(contexto, nombre + "#puntero")
+            sea largo: numero =
+                declarar_simbolo_arm(contexto, nombre + "#longitud")
+            emitir_texto_arm(hijos[0], contexto)
+            emitir_guardar_variable_arm(contexto, puntero)
+            palabra_arm(
+                contexto,
+                4177527393 + (largo / 8) * 1024
+            )
+            agregar(contexto.textos, TextoARMCore(nombre, puntero, largo))
+            retornar 0
+        }
         sea desplazamiento: numero = declarar_simbolo_arm(contexto, nombre)
         emitir_expresion_arm(hijos[0], contexto)
         emitir_guardar_variable_arm(contexto, desplazamiento)
@@ -14322,9 +14618,46 @@ funcion emitir_sentencia_arm(nodo: cualquiera, contexto: cualquiera) {
     }
     si (nodo.tipo == "Asignacion") {
         sea objetivo: cualquiera = hijos[0]
+        si (objetivo.tipo == "Indice") {
+            sea partes_indice: lista = objetivo.hijos
+            afirmar(
+                partes_indice[0].tipo == "Identificador",
+                "asignación indexada requiere una lista"
+            )
+            sea coleccion_objetivo: cualquiera =
+                buscar_coleccion_arm(
+                    contexto, partes_indice[0].valor
+                )
+            emitir_expresion_arm(hijos[1], contexto)
+            palabra_arm(contexto, 4162785248)
+            emitir_expresion_arm(partes_indice[1], contexto)
+            palabra_arm(contexto, 4165011426)
+            palabra_arm(
+                contexto,
+                2432696929 + coleccion_objetivo.desplazamiento * 1024
+            )
+            palabra_arm(contexto, 4162877474)
+            retornar 0
+        }
+        si (
+            objetivo.tipo == "Identificador" y
+            indice_texto_arm(contexto, objetivo.valor) >= 0
+        ) {
+            sea texto_objetivo: cualquiera =
+                buscar_texto_arm(contexto, objetivo.valor)
+            emitir_texto_arm(hijos[1], contexto)
+            emitir_guardar_variable_arm(
+                contexto, texto_objetivo.puntero
+            )
+            palabra_arm(
+                contexto,
+                4177527393 + (texto_objetivo.longitud / 8) * 1024
+            )
+            retornar 0
+        }
         afirmar(
             objetivo.tipo == "Identificador",
-            "B6.4 solo asigna variables"
+            "B6.7 solo asigna variables"
         )
         emitir_expresion_arm(hijos[1], contexto)
         emitir_guardar_variable_arm(
@@ -14364,10 +14697,27 @@ funcion emitir_sentencia_arm(nodo: cualquiera, contexto: cualquiera) {
         etiqueta_arm(contexto, etiqueta_fin)
         retornar 0
     }
+    si (nodo.tipo == "Retornar") {
+        afirmar(
+            contexto.retorno_actual != "",
+            "retornar fuera de una función"
+        )
+        si (longitud(hijos) > 0) {
+            emitir_expresion_arm(hijos[0], contexto)
+        } sino {
+            emitir_mov_inmediato_arm(contexto, 0)
+        }
+        operacion_arm(contexto, "b", 0, contexto.retorno_actual)
+        retornar 0
+    }
+    si (nodo.tipo == "Expresion") {
+        emitir_expresion_arm(hijos[0], contexto)
+        retornar 0
+    }
     si (nodo.tipo == "Vacia") {
         retornar 0
     }
-    afirmar(falso, "B6.4 no puede emitir sentencia '" + nodo.tipo + "'")
+    afirmar(falso, "B6.7 no puede emitir sentencia '" + nodo.tipo + "'")
 }
 
 funcion posicion_etiqueta_arm(
@@ -14456,13 +14806,26 @@ funcion resolver_operaciones_arm(contexto: cualquiera): lista {
             )
             posicion = posicion + 4
         }
+        si (operacion.tipo == "bl") {
+            sea destino_bl: numero =
+                posicion_etiqueta_arm(operaciones, operacion.nombre)
+            sea delta_bl: numero = (destino_bl - posicion) / 4
+            agregar_le_macho(
+                bytes,
+                2483027968 + inmediato_rama_arm(delta_bl, 26),
+                4
+            )
+            posicion = posicion + 4
+        }
         si (operacion.tipo == "cbz") {
             sea destino_cbz: numero =
                 posicion_etiqueta_arm(operaciones, operacion.nombre)
             sea delta_cbz: numero = (destino_cbz - posicion) / 4
             agregar_le_macho(
                 bytes,
-                3019898880 + inmediato_rama_arm(delta_cbz, 19) * 32,
+                3019898880 +
+                inmediato_rama_arm(delta_cbz, 19) * 32 +
+                operacion.valor,
                 4
             )
             posicion = posicion + 4
@@ -14576,26 +14939,103 @@ funcion empaquetar_core_macho(
 funcion compilar_core_macho(fuente: texto): lista {
     sea tokens: lista = tokenizar_core(fuente)
     sea programa: cualquiera = parsear_tokens_core(tokens)
-    sea contexto: cualquiera = ContextoARMCore([], [], [], 0)
-    palabra_arm(contexto, 3506701311)
-    palabra_arm(contexto, 2432697331)
+    sea contexto: cualquiera =
+        ContextoARMCore([], [], [], 0, [], "", [], [], 0)
     sea declaraciones: lista = programa.hijos
     sea indice: numero = 0
     mientras (indice < longitud(declaraciones)) {
-        sea nodo: cualquiera = declaraciones[indice]
-        afirmar(
-            nodo.tipo != "Funcion" y
-            nodo.tipo != "Clase" y
-            nodo.tipo != "Estructura",
-            "B6.4 todavía compila sentencias de nivel superior"
-        )
-        emitir_sentencia_arm(nodo, contexto)
+        si (declaraciones[indice].tipo == "Funcion") {
+            sea nombre_funcion: texto =
+                nombre_declaracion_arm(declaraciones[indice].valor)
+            agregar(
+                contexto.funciones,
+                FuncionARMCore(
+                    nombre_funcion,
+                    declaraciones[indice],
+                    "funcion_" + nombre_funcion
+                )
+            )
+        }
         indice = indice + 1
     }
-    palabra_arm(contexto, 2432959487)
+
+    palabra_arm(contexto, 3510634495)
+    palabra_arm(contexto, 2432697331)
+    indice = 0
+    mientras (indice < longitud(declaraciones)) {
+        sea nodo: cualquiera = declaraciones[indice]
+        afirmar(
+            nodo.tipo != "Clase" y
+            nodo.tipo != "Estructura",
+            "B6.7 todavía no compila clases ni estructuras"
+        )
+        si (nodo.tipo != "Funcion") {
+            emitir_sentencia_arm(nodo, contexto)
+        }
+        indice = indice + 1
+    }
+    palabra_arm(contexto, 2436892671)
     emitir_mov_registro_arm(contexto, 0, 0)
     emitir_mov_registro_arm(contexto, 1, 16)
     palabra_arm(contexto, 3556773889)
+
+    indice = 0
+    mientras (indice < longitud(contexto.funciones)) {
+        sea funcion: cualquiera = contexto.funciones[indice]
+        sea nodo_funcion: cualquiera = funcion.nodo
+        sea hijos_funcion: lista = nodo_funcion.hijos
+        sea simbolos_anteriores: lista = contexto.simbolos
+        sea retorno_anterior: texto = contexto.retorno_actual
+        sea colecciones_anteriores: lista = contexto.colecciones
+        sea textos_anteriores: lista = contexto.textos
+        sea desplazamiento_anterior: numero =
+            contexto.siguiente_desplazamiento
+        contexto.simbolos = []
+        contexto.colecciones = []
+        contexto.textos = []
+        contexto.siguiente_desplazamiento = 0
+        contexto.retorno_actual = funcion.etiqueta + "_retorno"
+
+        etiqueta_arm(contexto, funcion.etiqueta)
+        palabra_arm(contexto, 2847898621)
+        palabra_arm(contexto, 2432697341)
+        palabra_arm(contexto, 2847888371)
+        palabra_arm(contexto, 3510634495)
+        palabra_arm(contexto, 2432697331)
+        sea cantidad_parametros: numero = longitud(hijos_funcion) - 1
+        afirmar(cantidad_parametros <= 4, "demasiados parámetros ARM64")
+        sea parametro: numero = 0
+        mientras (parametro < cantidad_parametros) {
+            sea nombre_parametro: texto =
+                nombre_declaracion_arm(hijos_funcion[parametro].valor)
+            sea desplazamiento_parametro: numero =
+                declarar_simbolo_arm(contexto, nombre_parametro)
+            palabra_arm(
+                contexto,
+                4177527392 +
+                (desplazamiento_parametro / 8) * 1024 +
+                parametro
+            )
+            parametro = parametro + 1
+        }
+        emitir_bloque_arm(
+            hijos_funcion[longitud(hijos_funcion) - 1],
+            contexto
+        )
+        emitir_mov_inmediato_arm(contexto, 0)
+        etiqueta_arm(contexto, contexto.retorno_actual)
+        palabra_arm(contexto, 2436892671)
+        palabra_arm(contexto, 2831242227)
+        palabra_arm(contexto, 2831252477)
+        palabra_arm(contexto, 3596551104)
+
+        contexto.simbolos = simbolos_anteriores
+        contexto.colecciones = colecciones_anteriores
+        contexto.textos = textos_anteriores
+        contexto.siguiente_desplazamiento = desplazamiento_anterior
+        contexto.retorno_actual = retorno_anterior
+        indice = indice + 1
+    }
     sea codigo: lista = resolver_operaciones_arm(contexto)
     retornar empaquetar_core_macho(codigo, contexto.datos)
 }
@@ -14618,11 +15058,23 @@ afirmar(
 )
 mostrar("C-Forge emitió Mach-O ARM64 Core: " + argumentos_core_arm[3])
 )CFV55DATA"},
-        {R"CFV56DATA(bootstrap/direct/cforge_macho_arm64_core_backend.cfv)CFV56DATA", R"CFV57DATA(// Backend Core B6.4. Se concatena con lexer, AST, parser y biblioteca Mach-O.
+        {R"CFV56DATA(bootstrap/direct/cforge_macho_arm64_core_backend.cfv)CFV56DATA", R"CFV57DATA(// Backend Core B6.7. Se concatena con lexer, AST, parser y biblioteca Mach-O.
 
 estructura SimboloARMCore {
     nombre: texto
     desplazamiento: numero
+}
+
+estructura ColeccionARMCore {
+    nombre: texto
+    desplazamiento: numero
+    longitud: numero
+}
+
+estructura TextoARMCore {
+    nombre: texto
+    puntero: numero
+    longitud: numero
 }
 
 estructura OperacionARMCore {
@@ -14636,11 +15088,22 @@ estructura DatoARMCore {
     bytes: lista
 }
 
+estructura FuncionARMCore {
+    nombre: texto
+    nodo: cualquiera
+    etiqueta: texto
+}
+
 estructura ContextoARMCore {
     operaciones: lista
     simbolos: lista
     datos: lista
     contador: numero
+    funciones: lista
+    retorno_actual: texto
+    colecciones: lista
+    textos: lista
+    siguiente_desplazamiento: numero
 }
 
 funcion operacion_arm(
@@ -14729,13 +15192,75 @@ funcion declarar_simbolo_arm(contexto: cualquiera, nombre: texto): numero {
         indice_simbolo_arm(contexto, nombre) < 0,
         "variable duplicada '" + nombre + "'"
     )
-    sea desplazamiento: numero = longitud(contexto.simbolos) * 8
-    afirmar(desplazamiento < 256, "demasiadas variables para B6.4")
+    sea desplazamiento: numero = contexto.siguiente_desplazamiento
+    contexto.siguiente_desplazamiento =
+        contexto.siguiente_desplazamiento + 8
+    afirmar(desplazamiento < 4096, "memoria local ARM64 agotada")
     agregar(
         contexto.simbolos,
         SimboloARMCore(nombre, desplazamiento)
     )
     retornar desplazamiento
+}
+
+funcion reservar_memoria_arm(
+    contexto: cualquiera,
+    cantidad: numero
+): numero {
+    sea desplazamiento: numero = contexto.siguiente_desplazamiento
+    contexto.siguiente_desplazamiento =
+        contexto.siguiente_desplazamiento + cantidad
+    afirmar(
+        contexto.siguiente_desplazamiento <= 4096,
+        "memoria dinámica local ARM64 agotada"
+    )
+    retornar desplazamiento
+}
+
+funcion indice_coleccion_arm(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.colecciones)) {
+        si (contexto.colecciones[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion buscar_coleccion_arm(
+    contexto: cualquiera,
+    nombre: texto
+): cualquiera {
+    sea indice: numero = indice_coleccion_arm(contexto, nombre)
+    afirmar(indice >= 0, "colección ARM64 desconocida '" + nombre + "'")
+    retornar contexto.colecciones[indice]
+}
+
+funcion indice_texto_arm(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.textos)) {
+        si (contexto.textos[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion buscar_texto_arm(
+    contexto: cualquiera,
+    nombre: texto
+): cualquiera {
+    sea indice: numero = indice_texto_arm(contexto, nombre)
+    afirmar(indice >= 0, "texto ARM64 desconocido '" + nombre + "'")
+    retornar contexto.textos[indice]
 }
 
 funcion desplazamiento_simbolo_arm(
@@ -14748,6 +15273,39 @@ funcion desplazamiento_simbolo_arm(
     retornar simbolos[indice].desplazamiento
 }
 
+funcion buscar_funcion_arm(
+    contexto: cualquiera,
+    nombre: texto
+): cualquiera {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.funciones)) {
+        si (contexto.funciones[indice].nombre == nombre) {
+            retornar contexto.funciones[indice]
+        }
+        indice = indice + 1
+    }
+    afirmar(falso, "función ARM64 desconocida '" + nombre + "'")
+    retornar contexto.funciones[0]
+}
+
+funcion emitir_argumentos_llamada_arm(
+    argumentos: lista,
+    contexto: cualquiera
+) {
+    afirmar(longitud(argumentos) <= 4, "B6.7 admite hasta cuatro parámetros")
+    sea indice: numero = 0
+    mientras (indice < longitud(argumentos)) {
+        emitir_expresion_arm(argumentos[indice], contexto)
+        palabra_arm(contexto, 4162785248)
+        indice = indice + 1
+    }
+    indice = longitud(argumentos)
+    mientras (indice > 0) {
+        indice = indice - 1
+        palabra_arm(contexto, 4165011424 + indice)
+    }
+}
+
 funcion emitir_mov_inmediato_arm(contexto: cualquiera, valor: numero) {
     emitir_mov_registro_arm(contexto, valor, 0)
 }
@@ -14757,7 +15315,7 @@ funcion emitir_mov_registro_arm(
     valor: numero,
     registro: numero
 ) {
-    afirmar(valor >= 0 y valor < 65536, "entero fuera del rango B6.4")
+    afirmar(valor >= 0 y valor < 65536, "entero fuera del rango B6.7")
     afirmar(registro >= 0 y registro < 32, "registro ARM64 inválido")
     palabra_arm(contexto, 3531603968 + valor * 32 + registro)
 }
@@ -14791,10 +15349,79 @@ funcion emitir_expresion_arm(nodo: cualquiera, contexto: cualquiera) {
         retornar 0
     }
     si (nodo.tipo == "Identificador") {
+        si (indice_texto_arm(contexto, nodo.valor) >= 0) {
+            afirmar(
+                falso,
+                "el texto '" + nodo.valor +
+                "' requiere una operación textual"
+            )
+        }
         emitir_cargar_variable_arm(
             contexto,
             desplazamiento_simbolo_arm(contexto, nodo.valor)
         )
+        retornar 0
+    }
+    si (nodo.tipo == "Indice") {
+        sea hijos_indice: lista = nodo.hijos
+        afirmar(
+            hijos_indice[0].tipo == "Identificador",
+            "B6.7 indexa una lista identificada"
+        )
+        sea coleccion: cualquiera =
+            buscar_coleccion_arm(contexto, hijos_indice[0].valor)
+        emitir_expresion_arm(hijos_indice[1], contexto)
+        palabra_arm(
+            contexto,
+            2432696929 + coleccion.desplazamiento * 1024
+        )
+        palabra_arm(contexto, 4167071776)
+        retornar 0
+    }
+    si (nodo.tipo == "Miembro" y nodo.valor == "length") {
+        sea base_miembro: lista = nodo.hijos
+        afirmar(
+            base_miembro[0].tipo == "Identificador",
+            "length requiere un identificador"
+        )
+        sea nombre_base: texto = base_miembro[0].valor
+        si (indice_coleccion_arm(contexto, nombre_base) >= 0) {
+            sea lista_base: cualquiera =
+                buscar_coleccion_arm(contexto, nombre_base)
+            emitir_mov_inmediato_arm(contexto, lista_base.longitud)
+            retornar 0
+        }
+        sea texto_base: cualquiera = buscar_texto_arm(contexto, nombre_base)
+        emitir_cargar_variable_arm(contexto, texto_base.longitud)
+        retornar 0
+    }
+    si (nodo.tipo == "Llamada") {
+        si (nodo.valor == "longitud") {
+            afirmar(longitud(nodo.hijos) == 1, "longitud requiere un valor")
+            sea argumento_longitud: cualquiera = nodo.hijos[0]
+            afirmar(
+                argumento_longitud.tipo == "Identificador",
+                "B6.7 longitud requiere un identificador"
+            )
+            sea nombre_longitud: texto = argumento_longitud.valor
+            si (indice_coleccion_arm(contexto, nombre_longitud) >= 0) {
+                sea lista_longitud: cualquiera =
+                    buscar_coleccion_arm(contexto, nombre_longitud)
+                emitir_mov_inmediato_arm(
+                    contexto, lista_longitud.longitud
+                )
+            } sino {
+                sea texto_longitud: cualquiera =
+                    buscar_texto_arm(contexto, nombre_longitud)
+                emitir_cargar_variable_arm(
+                    contexto, texto_longitud.longitud
+                )
+            }
+            retornar 0
+        }
+        sea funcion: cualquiera = buscar_funcion_arm(contexto, nodo.valor)
+        emitir_argumentos_llamada_arm(nodo.hijos, contexto)
+        operacion_arm(contexto, "bl", 0, funcion.etiqueta)
         retornar 0
     }
     si (nodo.tipo == "Unario") {
@@ -14832,34 +15459,93 @@ funcion emitir_expresion_arm(nodo: cualquiera, contexto: cualquiera) {
     }
     afirmar(
         falso,
-        "B6.4 no puede emitir expresión '" + nodo.tipo + "'"
+        "B6.7 no puede emitir expresión '" + nodo.tipo + "'"
     )
 }
 
 funcion registrar_texto_arm(contexto: cualquiera, texto: texto): texto {
     sea nombre: texto = nombre_unico_arm(contexto, "dato")
     sea bytes: lista = bytes_texto(texto)
-    agregar(bytes, 10)
     agregar(contexto.datos, DatoARMCore(nombre, bytes))
     retornar nombre
+}
+
+funcion emitir_texto_arm(nodo: cualquiera, contexto: cualquiera) {
+    si (nodo.tipo == "Texto") {
+        sea literal: texto = texto_ast_arm(nodo.valor)
+        sea nombre: texto = registrar_texto_arm(contexto, literal)
+        operacion_arm(contexto, "adr_dato", 0, nombre)
+        emitir_mov_registro_arm(
+            contexto, longitud(bytes_texto(literal)), 1
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Identificador") {
+        sea simbolo_texto: cualquiera =
+            buscar_texto_arm(contexto, nodo.valor)
+        emitir_cargar_variable_arm(contexto, simbolo_texto.puntero)
+        palabra_arm(
+            contexto,
+            4181721697 + (simbolo_texto.longitud / 8) * 1024
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Binario" y nodo.valor == "+") {
+        sea partes: lista = nodo.hijos
+        emitir_texto_arm(partes[0], contexto)
+        palabra_arm(contexto, 4162785248)
+        palabra_arm(contexto, 4162785249)
+        emitir_texto_arm(partes[1], contexto)
+        palabra_arm(contexto, 2852127714)
+        palabra_arm(contexto, 2852193251)
+        palabra_arm(contexto, 4165011425)
+        palabra_arm(contexto, 4165011424)
+        palabra_arm(contexto, 2332229668)
+        sea buffer: numero = reservar_memoria_arm(contexto, 256)
+        palabra_arm(contexto, 2432696933 + buffer * 1024)
+        palabra_arm(contexto, 2852455398)
+        sea copiar_izquierda: texto =
+            nombre_unico_arm(contexto, "texto_izquierdo")
+        sea copiar_derecha: texto =
+            nombre_unico_arm(contexto, "texto_derecho")
+        sea fin_izquierda: texto =
+            nombre_unico_arm(contexto, "fin_izquierdo")
+        sea fin_derecha: texto =
+            nombre_unico_arm(contexto, "fin_derecho")
+        etiqueta_arm(contexto, copiar_izquierda)
+        operacion_arm(contexto, "cbz", 1, fin_izquierda)
+        palabra_arm(contexto, 943723527)
+        palabra_arm(contexto, 939529383)
+        palabra_arm(contexto, 3506439201)
+        operacion_arm(contexto, "b", 0, copiar_izquierda)
+        etiqueta_arm(contexto, fin_izquierda)
+        etiqueta_arm(contexto, copiar_derecha)
+        operacion_arm(contexto, "cbz", 3, fin_derecha)
+        palabra_arm(contexto, 943723591)
+        palabra_arm(contexto, 939529383)
+        palabra_arm(contexto, 3506439267)
+        operacion_arm(contexto, "b", 0, copiar_derecha)
+        etiqueta_arm(contexto, fin_derecha)
+        palabra_arm(contexto, 2852520928)
+        palabra_arm(contexto, 2852389857)
+        retornar 0
+    }
+    afirmar(falso, "expresión textual ARM64 no soportada")
 }
 
 funcion emitir_mostrar_arm(nodo: cualquiera, contexto: cualquiera) {
     sea hijos: lista = nodo.hijos
     sea valor: cualquiera = hijos[0]
-    afirmar(
-        valor.tipo == "Texto",
-        "B6.4 mostrar todavía requiere un literal de texto"
-    )
-    sea literal: texto = texto_ast_arm(valor.valor)
-    sea nombre: texto = registrar_texto_arm(contexto, literal)
+    emitir_texto_arm(valor, contexto)
+    palabra_arm(contexto, 2852193250)
+    palabra_arm(contexto, 2852127713)
     emitir_mov_registro_arm(contexto, 1, 0)
-    operacion_arm(contexto, "adr_dato", 1, nombre)
-    emitir_mov_registro_arm(
-        contexto,
-        longitud(bytes_texto(literal)) + 1,
-        2
-    )
+    emitir_mov_registro_arm(contexto, 4, 16)
+    palabra_arm(contexto, 3556773889)
+    sea salto_linea: texto = registrar_texto_arm(contexto, "\n")
+    emitir_mov_registro_arm(contexto, 1, 0)
+    operacion_arm(contexto, "adr_dato", 1, salto_linea)
+    emitir_mov_registro_arm(contexto, 1, 2)
     emitir_mov_registro_arm(contexto, 4, 16)
     palabra_arm(contexto, 3556773889)
 }
@@ -14877,6 +15563,42 @@ funcion emitir_sentencia_arm(nodo: cualquiera, contexto: cualquiera) {
     sea hijos: lista = nodo.hijos
     si (nodo.tipo == "Declaracion") {
         sea nombre: texto = nombre_declaracion_arm(nodo.valor)
+        si (hijos[0].tipo == "Lista") {
+            sea elementos: lista = hijos[0].hijos
+            sea base: numero = contexto.siguiente_desplazamiento
+            sea elemento: numero = 0
+            mientras (elemento < longitud(elementos)) {
+                sea desplazamiento_elemento: numero =
+                    declarar_simbolo_arm(
+                        contexto,
+                        nombre + "#" + a_texto(elemento)
+                    )
+                emitir_expresion_arm(elementos[elemento], contexto)
+                emitir_guardar_variable_arm(
+                    contexto, desplazamiento_elemento
+                )
+                elemento = elemento + 1
+            }
+            agregar(
+                contexto.colecciones,
+                ColeccionARMCore(nombre, base, longitud(elementos))
+            )
+            retornar 0
+        }
+        si (hijos[0].tipo == "Texto") {
+            sea puntero: numero =
+                declarar_simbolo_arm(contexto, nombre + "#puntero")
+            sea largo: numero =
+                declarar_simbolo_arm(contexto, nombre + "#longitud")
+            emitir_texto_arm(hijos[0], contexto)
+            emitir_guardar_variable_arm(contexto, puntero)
+            palabra_arm(
+                contexto,
+                4177527393 + (largo / 8) * 1024
+            )
+            agregar(contexto.textos, TextoARMCore(nombre, puntero, largo))
+            retornar 0
+        }
         sea desplazamiento: numero = declarar_simbolo_arm(contexto, nombre)
         emitir_expresion_arm(hijos[0], contexto)
         emitir_guardar_variable_arm(contexto, desplazamiento)
@@ -14884,9 +15606,46 @@ funcion emitir_sentencia_arm(nodo: cualquiera, contexto: cualquiera) {
     }
     si (nodo.tipo == "Asignacion") {
         sea objetivo: cualquiera = hijos[0]
+        si (objetivo.tipo == "Indice") {
+            sea partes_indice: lista = objetivo.hijos
+            afirmar(
+                partes_indice[0].tipo == "Identificador",
+                "asignación indexada requiere una lista"
+            )
+            sea coleccion_objetivo: cualquiera =
+                buscar_coleccion_arm(
+                    contexto, partes_indice[0].valor
+                )
+            emitir_expresion_arm(hijos[1], contexto)
+            palabra_arm(contexto, 4162785248)
+            emitir_expresion_arm(partes_indice[1], contexto)
+            palabra_arm(contexto, 4165011426)
+            palabra_arm(
+                contexto,
+                2432696929 + coleccion_objetivo.desplazamiento * 1024
+            )
+            palabra_arm(contexto, 4162877474)
+            retornar 0
+        }
+        si (
+            objetivo.tipo == "Identificador" y
+            indice_texto_arm(contexto, objetivo.valor) >= 0
+        ) {
+            sea texto_objetivo: cualquiera =
+                buscar_texto_arm(contexto, objetivo.valor)
+            emitir_texto_arm(hijos[1], contexto)
+            emitir_guardar_variable_arm(
+                contexto, texto_objetivo.puntero
+            )
+            palabra_arm(
+                contexto,
+                4177527393 + (texto_objetivo.longitud / 8) * 1024
+            )
+            retornar 0
+        }
         afirmar(
             objetivo.tipo == "Identificador",
-            "B6.4 solo asigna variables"
+            "B6.7 solo asigna variables"
         )
         emitir_expresion_arm(hijos[1], contexto)
         emitir_guardar_variable_arm(
@@ -14926,10 +15685,27 @@ funcion emitir_sentencia_arm(nodo: cualquiera, contexto: cualquiera) {
         etiqueta_arm(contexto, etiqueta_fin)
         retornar 0
     }
+    si (nodo.tipo == "Retornar") {
+        afirmar(
+            contexto.retorno_actual != "",
+            "retornar fuera de una función"
+        )
+        si (longitud(hijos) > 0) {
+            emitir_expresion_arm(hijos[0], contexto)
+        } sino {
+            emitir_mov_inmediato_arm(contexto, 0)
+        }
+        operacion_arm(contexto, "b", 0, contexto.retorno_actual)
+        retornar 0
+    }
+    si (nodo.tipo == "Expresion") {
+        emitir_expresion_arm(hijos[0], contexto)
+        retornar 0
+    }
     si (nodo.tipo == "Vacia") {
         retornar 0
     }
-    afirmar(falso, "B6.4 no puede emitir sentencia '" + nodo.tipo + "'")
+    afirmar(falso, "B6.7 no puede emitir sentencia '" + nodo.tipo + "'")
 }
 
 funcion posicion_etiqueta_arm(
@@ -15018,13 +15794,26 @@ funcion resolver_operaciones_arm(contexto: cualquiera): lista {
             )
             posicion = posicion + 4
         }
+        si (operacion.tipo == "bl") {
+            sea destino_bl: numero =
+                posicion_etiqueta_arm(operaciones, operacion.nombre)
+            sea delta_bl: numero = (destino_bl - posicion) / 4
+            agregar_le_macho(
+                bytes,
+                2483027968 + inmediato_rama_arm(delta_bl, 26),
+                4
+            )
+            posicion = posicion + 4
+        }
         si (operacion.tipo == "cbz") {
             sea destino_cbz: numero =
                 posicion_etiqueta_arm(operaciones, operacion.nombre)
             sea delta_cbz: numero = (destino_cbz - posicion) / 4
             agregar_le_macho(
                 bytes,
-                3019898880 + inmediato_rama_arm(delta_cbz, 19) * 32,
+                3019898880 +
+                inmediato_rama_arm(delta_cbz, 19) * 32 +
+                operacion.valor,
                 4
             )
             posicion = posicion + 4
@@ -15138,26 +15927,103 @@ funcion empaquetar_core_macho(
 funcion compilar_core_macho(fuente: texto): lista {
     sea tokens: lista = tokenizar_core(fuente)
     sea programa: cualquiera = parsear_tokens_core(tokens)
-    sea contexto: cualquiera = ContextoARMCore([], [], [], 0)
-    palabra_arm(contexto, 3506701311)
-    palabra_arm(contexto, 2432697331)
+    sea contexto: cualquiera =
+        ContextoARMCore([], [], [], 0, [], "", [], [], 0)
     sea declaraciones: lista = programa.hijos
     sea indice: numero = 0
     mientras (indice < longitud(declaraciones)) {
-        sea nodo: cualquiera = declaraciones[indice]
-        afirmar(
-            nodo.tipo != "Funcion" y
-            nodo.tipo != "Clase" y
-            nodo.tipo != "Estructura",
-            "B6.4 todavía compila sentencias de nivel superior"
-        )
-        emitir_sentencia_arm(nodo, contexto)
+        si (declaraciones[indice].tipo == "Funcion") {
+            sea nombre_funcion: texto =
+                nombre_declaracion_arm(declaraciones[indice].valor)
+            agregar(
+                contexto.funciones,
+                FuncionARMCore(
+                    nombre_funcion,
+                    declaraciones[indice],
+                    "funcion_" + nombre_funcion
+                )
+            )
+        }
         indice = indice + 1
     }
-    palabra_arm(contexto, 2432959487)
+
+    palabra_arm(contexto, 3510634495)
+    palabra_arm(contexto, 2432697331)
+    indice = 0
+    mientras (indice < longitud(declaraciones)) {
+        sea nodo: cualquiera = declaraciones[indice]
+        afirmar(
+            nodo.tipo != "Clase" y
+            nodo.tipo != "Estructura",
+            "B6.7 todavía no compila clases ni estructuras"
+        )
+        si (nodo.tipo != "Funcion") {
+            emitir_sentencia_arm(nodo, contexto)
+        }
+        indice = indice + 1
+    }
+    palabra_arm(contexto, 2436892671)
     emitir_mov_registro_arm(contexto, 0, 0)
     emitir_mov_registro_arm(contexto, 1, 16)
     palabra_arm(contexto, 3556773889)
+
+    indice = 0
+    mientras (indice < longitud(contexto.funciones)) {
+        sea funcion: cualquiera = contexto.funciones[indice]
+        sea nodo_funcion: cualquiera = funcion.nodo
+        sea hijos_funcion: lista = nodo_funcion.hijos
+        sea simbolos_anteriores: lista = contexto.simbolos
+        sea retorno_anterior: texto = contexto.retorno_actual
+        sea colecciones_anteriores: lista = contexto.colecciones
+        sea textos_anteriores: lista = contexto.textos
+        sea desplazamiento_anterior: numero =
+            contexto.siguiente_desplazamiento
+        contexto.simbolos = []
+        contexto.colecciones = []
+        contexto.textos = []
+        contexto.siguiente_desplazamiento = 0
+        contexto.retorno_actual = funcion.etiqueta + "_retorno"
+
+        etiqueta_arm(contexto, funcion.etiqueta)
+        palabra_arm(contexto, 2847898621)
+        palabra_arm(contexto, 2432697341)
+        palabra_arm(contexto, 2847888371)
+        palabra_arm(contexto, 3510634495)
+        palabra_arm(contexto, 2432697331)
+        sea cantidad_parametros: numero = longitud(hijos_funcion) - 1
+        afirmar(cantidad_parametros <= 4, "demasiados parámetros ARM64")
+        sea parametro: numero = 0
+        mientras (parametro < cantidad_parametros) {
+            sea nombre_parametro: texto =
+                nombre_declaracion_arm(hijos_funcion[parametro].valor)
+            sea desplazamiento_parametro: numero =
+                declarar_simbolo_arm(contexto, nombre_parametro)
+            palabra_arm(
+                contexto,
+                4177527392 +
+                (desplazamiento_parametro / 8) * 1024 +
+                parametro
+            )
+            parametro = parametro + 1
+        }
+        emitir_bloque_arm(
+            hijos_funcion[longitud(hijos_funcion) - 1],
+            contexto
+        )
+        emitir_mov_inmediato_arm(contexto, 0)
+        etiqueta_arm(contexto, contexto.retorno_actual)
+        palabra_arm(contexto, 2436892671)
+        palabra_arm(contexto, 2831242227)
+        palabra_arm(contexto, 2831252477)
+        palabra_arm(contexto, 3596551104)
+
+        contexto.simbolos = simbolos_anteriores
+        contexto.colecciones = colecciones_anteriores
+        contexto.textos = textos_anteriores
+        contexto.siguiente_desplazamiento = desplazamiento_anterior
+        contexto.retorno_actual = retorno_anterior
+        indice = indice + 1
+    }
     sea codigo: lista = resolver_operaciones_arm(contexto)
     retornar empaquetar_core_macho(codigo, contexto.datos)
 }
@@ -15453,7 +16319,3379 @@ afirmar(
 )
 mostrar("C-Forge emitió PE32+ x86-64: " + argumentos_pe[3])
 )CFV59DATA"},
-        {R"CFV60DATA(bootstrap/fixtures/machine_control_b6.cfv)CFV60DATA", R"CFV61DATA(sea contador: numero = 0
+        {R"CFV60DATA(bootstrap/direct/cforge_pe_x64_core.cfv)CFV60DATA", R"CFV61DATA(// Primer componente del compilador de C-Forge escrito en C-Forge.
+// Alcance congelado: lexer de C-Forge Core Bootstrap 0.5.
+
+estructura TokenCore {
+    tipo: texto
+    lexema: texto
+    linea: numero
+}
+
+funcion es_espacio(caracter: texto): booleano {
+    retornar caracter == " " o caracter == "\t" o caracter == "\r"
+}
+
+funcion es_digito(caracter: texto): booleano {
+    retornar caracter >= "0" y caracter <= "9"
+}
+
+funcion es_letra(caracter: texto): booleano {
+    retornar (caracter >= "a" y caracter <= "z") o
+        (caracter >= "A" y caracter <= "Z") o caracter == "_"
+}
+
+funcion es_identificador(caracter: texto): booleano {
+    retornar es_letra(caracter) o es_digito(caracter)
+}
+
+funcion tokenizar_core(fuente: texto): cualquiera {
+    sea tokens: lista = []
+    sea posicion: numero = 0
+    sea linea: numero = 1
+
+    mientras (posicion < longitud(fuente)) {
+        sea actual: texto = fuente[posicion]
+
+        si (actual == "\n") {
+            linea = linea + 1
+            posicion = posicion + 1
+        } sino {
+            si (es_espacio(actual)) {
+                posicion = posicion + 1
+            } sino {
+                si (actual == "/" y posicion + 1 < longitud(fuente) y fuente[posicion + 1] == "/") {
+                    mientras (posicion < longitud(fuente) y fuente[posicion] != "\n") {
+                        posicion = posicion + 1
+                    }
+                } sino {
+                    si (es_letra(actual)) {
+                        sea inicio: numero = posicion
+                        mientras (posicion < longitud(fuente) y es_identificador(fuente[posicion])) {
+                            posicion = posicion + 1
+                        }
+                        sea lexema: texto = ""
+                        sea cursor: numero = inicio
+                        mientras (cursor < posicion) {
+                            lexema = lexema + fuente[cursor]
+                            cursor = cursor + 1
+                        }
+                        agregar(tokens, TokenCore("IDENT", lexema, linea))
+                    } sino {
+                        si (es_digito(actual)) {
+                            sea inicio_numero: numero = posicion
+                            mientras (posicion < longitud(fuente) y es_digito(fuente[posicion])) {
+                                posicion = posicion + 1
+                            }
+                            sea numero_texto: texto = ""
+                            sea cursor_numero: numero = inicio_numero
+                            mientras (cursor_numero < posicion) {
+                                numero_texto = numero_texto + fuente[cursor_numero]
+                                cursor_numero = cursor_numero + 1
+                            }
+                            agregar(tokens, TokenCore("NUMBER", numero_texto, linea))
+                        } sino {
+                            si (actual == "\"") {
+                                sea linea_texto: numero = linea
+                                sea literal: texto = "\""
+                                posicion = posicion + 1
+                                sea cerrado: booleano = falso
+                                mientras (posicion < longitud(fuente) y no cerrado) {
+                                    sea parte: texto = fuente[posicion]
+                                    literal = literal + parte
+                                    posicion = posicion + 1
+                                    si (parte == "\\" y posicion < longitud(fuente)) {
+                                        literal = literal + fuente[posicion]
+                                        posicion = posicion + 1
+                                    } sino {
+                                        si (parte == "\"") {
+                                            cerrado = verdadero
+                                        } sino {
+                                            si (parte == "\n") {
+                                                linea = linea + 1
+                                            }
+                                        }
+                                    }
+                                }
+                                afirmar(cerrado, "texto sin cerrar en línea " + a_texto(linea_texto))
+                                agregar(tokens, TokenCore("STRING", literal, linea_texto))
+                            } sino {
+                                sea simbolo: texto = actual
+                                posicion = posicion + 1
+                                si (posicion < longitud(fuente)) {
+                                    sea par: texto = simbolo + fuente[posicion]
+                                    si (par == "==" o par == "!=" o par == ">=" o par == "<=") {
+                                        simbolo = par
+                                        posicion = posicion + 1
+                                    }
+                                }
+                                agregar(tokens, TokenCore("SYMBOL", simbolo, linea))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    agregar(tokens, TokenCore("EOF", "", linea))
+    retornar tokens
+}
+
+
+
+// AST canónico de C-Forge Core Bootstrap 0.5.
+// No contiene objetos del runtime anfitrión: solo textos, números y listas.
+
+estructura NodoASTCore {
+    tipo: texto
+    valor: texto
+    linea: numero
+    hijos: cualquiera
+}
+
+funcion nodo_ast_core(tipo: texto, valor: texto, linea: numero): cualquiera {
+    retornar NodoASTCore(tipo, valor, linea, [])
+}
+
+funcion nodo_ast_core_con_hijos(
+    tipo: texto,
+    valor: texto,
+    linea: numero,
+    hijos: cualquiera
+): cualquiera {
+    retornar NodoASTCore(tipo, valor, linea, hijos)
+}
+
+funcion escapar_ast_core(valor: texto): texto {
+    sea salida: texto = ""
+    sea posicion: numero = 0
+    mientras (posicion < longitud(valor)) {
+        sea caracter: texto = valor[posicion]
+        si (caracter == "\\") {
+            salida = salida + "\\\\"
+        } sino {
+            si (caracter == "\n") {
+                salida = salida + "\\n"
+            } sino {
+                si (caracter == "\r") {
+                    salida = salida + "\\r"
+                } sino {
+                    si (caracter == "\t") {
+                        salida = salida + "\\t"
+                    } sino {
+                        si (caracter == "[" o caracter == "]" o caracter == ":" o caracter == "@") {
+                            salida = salida + "\\" + caracter
+                        } sino {
+                            salida = salida + caracter
+                        }
+                    }
+                }
+            }
+        }
+        posicion = posicion + 1
+    }
+    retornar salida
+}
+
+// Formato estable Core AST 1:
+// tipo:largo:valor@linea[hijo,hijo]
+// El largo corresponde al valor original y evita interpretaciones ambiguas.
+funcion ast_core_canonico(nodo: cualquiera): texto {
+    sea salida: texto = nodo.tipo + ":" + a_texto(longitud(nodo.valor)) + ":" +
+        escapar_ast_core(nodo.valor) + "@" + a_texto(nodo.linea) + "["
+    sea hijos: lista = nodo.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(hijos)) {
+        si (indice > 0) {
+            salida = salida + ","
+        }
+        salida = salida + ast_core_canonico(hijos[indice])
+        indice = indice + 1
+    }
+    retornar salida + "]"
+}
+
+
+// Parser recursivo descendente de C-Forge Core Bootstrap 0.5.
+// Core 0.5 cubre las construcciones utilizadas por el compilador Stage 1.
+
+clase EstadoParserCore {
+    campo tokens: lista
+    campo posicion: numero
+
+    metodo actual(): cualquiera {
+        sea tokens_actuales: lista = este.tokens
+        sea posicion_actual: numero = este.posicion
+        retornar tokens_actuales[posicion_actual]
+    }
+
+    metodo anterior(): cualquiera {
+        sea tokens_actuales: lista = este.tokens
+        sea posicion_anterior: numero = este.posicion - 1
+        retornar tokens_actuales[posicion_anterior]
+    }
+
+    metodo finalizado(): booleano {
+        sea token: cualquiera = este.actual()
+        retornar token.tipo == "EOF"
+    }
+
+    metodo avanzar(): cualquiera {
+        si (no este.finalizado()) {
+            sea posicion_actual: numero = este.posicion
+            este.posicion = posicion_actual + 1
+        }
+        retornar este.anterior()
+    }
+}
+
+funcion token_actual_core(estado: cualquiera): cualquiera {
+    retornar estado.actual()
+}
+
+funcion token_anterior_core(estado: cualquiera): cualquiera {
+    retornar estado.anterior()
+}
+
+funcion esta_al_final_core(estado: cualquiera): booleano {
+    sea token: cualquiera = token_actual_core(estado)
+    retornar token.tipo == "EOF"
+}
+
+funcion avanzar_parser_core(estado: cualquiera): cualquiera {
+    retornar estado.avanzar()
+}
+
+funcion comprobar_lexema_core(estado: cualquiera, lexema: texto): booleano {
+    sea token: cualquiera = token_actual_core(estado)
+    retornar token.lexema == lexema
+}
+
+funcion tomar_lexema_core(estado: cualquiera, lexema: texto): booleano {
+    si (comprobar_lexema_core(estado, lexema)) {
+        avanzar_parser_core(estado)
+        retornar verdadero
+    }
+    retornar falso
+}
+
+funcion requerir_lexema_core(
+    estado: cualquiera,
+    lexema: texto,
+    mensaje: texto
+): cualquiera {
+    sea token: cualquiera = token_actual_core(estado)
+    afirmar(token.lexema == lexema, mensaje + " en línea " + a_texto(token.linea))
+    retornar avanzar_parser_core(estado)
+}
+
+funcion requerir_tipo_core(
+    estado: cualquiera,
+    tipo: texto,
+    mensaje: texto
+): cualquiera {
+    sea token: cualquiera = token_actual_core(estado)
+    afirmar(token.tipo == tipo, mensaje + " en línea " + a_texto(token.linea))
+    retornar avanzar_parser_core(estado)
+}
+
+funcion tipo_parser_core(estado: cualquiera): texto {
+    sea token: cualquiera = requerir_tipo_core(
+        estado, "IDENT", "se esperaba un tipo"
+    )
+    retornar token.lexema
+}
+
+funcion lista_argumentos_parser_core(
+    estado: cualquiera,
+    cierre: texto
+): cualquiera {
+    sea argumentos: lista = []
+    si (no comprobar_lexema_core(estado, cierre)) {
+        agregar(argumentos, expresion_parser_core(estado))
+        mientras (tomar_lexema_core(estado, ",")) {
+            agregar(argumentos, expresion_parser_core(estado))
+        }
+    }
+    requerir_lexema_core(estado, cierre, "se esperaba '" + cierre + "'")
+    retornar argumentos
+}
+
+funcion primaria_parser_core(estado: cualquiera): cualquiera {
+    sea token: cualquiera = token_actual_core(estado)
+    si (token.tipo == "NUMBER") {
+        avanzar_parser_core(estado)
+        retornar nodo_ast_core("Numero", token.lexema, token.linea)
+    }
+    si (token.tipo == "STRING") {
+        avanzar_parser_core(estado)
+        retornar nodo_ast_core("Texto", token.lexema, token.linea)
+    }
+    si (token.lexema == "verdadero" o token.lexema == "falso") {
+        avanzar_parser_core(estado)
+        retornar nodo_ast_core("Booleano", token.lexema, token.linea)
+    }
+    si (tomar_lexema_core(estado, "[")) {
+        retornar nodo_ast_core_con_hijos(
+            "Lista", "lista", token.linea,
+            lista_argumentos_parser_core(estado, "]")
+        )
+    }
+    si (token.tipo == "IDENT") {
+        avanzar_parser_core(estado)
+        si (tomar_lexema_core(estado, "(")) {
+            sea argumentos: lista = lista_argumentos_parser_core(estado, ")")
+            si (token.lexema == "mover") {
+                afirmar(
+                    longitud(argumentos) == 1,
+                    "mover requiere un argumento en línea " + a_texto(token.linea)
+                )
+                retornar nodo_ast_core_con_hijos(
+                    "Mover", "mover", token.linea, argumentos
+                )
+            }
+            retornar nodo_ast_core_con_hijos(
+                "Llamada", token.lexema, token.linea, argumentos
+            )
+        }
+        retornar nodo_ast_core("Identificador", token.lexema, token.linea)
+    }
+    si (tomar_lexema_core(estado, "(")) {
+        sea expresion: cualquiera = expresion_parser_core(estado)
+        requerir_lexema_core(estado, ")", "se esperaba ')' después de la expresión")
+        retornar expresion
+    }
+    afirmar(falso, "expresión inválida en línea " + a_texto(token.linea))
+    retornar nodo_ast_core("Inalcanzable", "", token.linea)
+}
+
+funcion postfix_parser_core(estado: cualquiera): cualquiera {
+    sea expresion: cualquiera = primaria_parser_core(estado)
+    sea continuar: booleano = verdadero
+    mientras (continuar) {
+        si (tomar_lexema_core(estado, "[")) {
+            sea indice: cualquiera = expresion_parser_core(estado)
+            requerir_lexema_core(estado, "]", "se esperaba ']'")
+            expresion = nodo_ast_core_con_hijos(
+                "Indice", "[]", expresion.linea, [expresion, indice]
+            )
+        } sino {
+            si (tomar_lexema_core(estado, ".")) {
+                sea miembro: cualquiera = requerir_tipo_core(
+                    estado, "IDENT", "se esperaba el miembro"
+                )
+                si (tomar_lexema_core(estado, "(")) {
+                    sea argumentos: lista =
+                        lista_argumentos_parser_core(estado, ")")
+                    sea hijos: lista = [expresion]
+                    sea indice_argumento: numero = 0
+                    mientras (indice_argumento < longitud(argumentos)) {
+                        agregar(hijos, argumentos[indice_argumento])
+                        indice_argumento = indice_argumento + 1
+                    }
+                    expresion = nodo_ast_core_con_hijos(
+                        "LlamadaMetodo", miembro.lexema,
+                        miembro.linea, hijos
+                    )
+                } sino {
+                    expresion = nodo_ast_core_con_hijos(
+                        "Miembro", miembro.lexema,
+                        miembro.linea, [expresion]
+                    )
+                }
+            } sino {
+                continuar = falso
+            }
+        }
+    }
+    retornar expresion
+}
+
+funcion unaria_parser_core(estado: cualquiera): cualquiera {
+    si (comprobar_lexema_core(estado, "no") o
+        comprobar_lexema_core(estado, "-")) {
+        sea operador: cualquiera = avanzar_parser_core(estado)
+        retornar nodo_ast_core_con_hijos(
+            "Unario", operador.lexema, operador.linea,
+            [unaria_parser_core(estado)]
+        )
+    }
+    retornar postfix_parser_core(estado)
+}
+
+funcion producto_parser_core(estado: cualquiera): cualquiera {
+    sea expresion: cualquiera = unaria_parser_core(estado)
+    mientras (
+        comprobar_lexema_core(estado, "*") o
+        comprobar_lexema_core(estado, "/") o
+        comprobar_lexema_core(estado, "%")
+    ) {
+        sea operador: cualquiera = avanzar_parser_core(estado)
+        sea derecho: cualquiera = unaria_parser_core(estado)
+        expresion = nodo_ast_core_con_hijos(
+            "Binario", operador.lexema, operador.linea,
+            [expresion, derecho]
+        )
+    }
+    retornar expresion
+}
+
+funcion suma_parser_core(estado: cualquiera): cualquiera {
+    sea expresion: cualquiera = producto_parser_core(estado)
+    mientras (
+        comprobar_lexema_core(estado, "+") o
+        comprobar_lexema_core(estado, "-")
+    ) {
+        sea operador: cualquiera = avanzar_parser_core(estado)
+        sea derecho: cualquiera = producto_parser_core(estado)
+        expresion = nodo_ast_core_con_hijos(
+            "Binario", operador.lexema, operador.linea,
+            [expresion, derecho]
+        )
+    }
+    retornar expresion
+}
+
+funcion comparacion_parser_core(estado: cualquiera): cualquiera {
+    sea expresion: cualquiera = suma_parser_core(estado)
+    mientras (
+        comprobar_lexema_core(estado, "<") o
+        comprobar_lexema_core(estado, "<=") o
+        comprobar_lexema_core(estado, ">") o
+        comprobar_lexema_core(estado, ">=")
+    ) {
+        sea operador: cualquiera = avanzar_parser_core(estado)
+        sea derecho: cualquiera = suma_parser_core(estado)
+        expresion = nodo_ast_core_con_hijos(
+            "Binario", operador.lexema, operador.linea,
+            [expresion, derecho]
+        )
+    }
+    retornar expresion
+}
+
+funcion igualdad_parser_core(estado: cualquiera): cualquiera {
+    sea expresion: cualquiera = comparacion_parser_core(estado)
+    mientras (
+        comprobar_lexema_core(estado, "==") o
+        comprobar_lexema_core(estado, "!=")
+    ) {
+        sea operador: cualquiera = avanzar_parser_core(estado)
+        sea derecho: cualquiera = comparacion_parser_core(estado)
+        expresion = nodo_ast_core_con_hijos(
+            "Binario", operador.lexema, operador.linea,
+            [expresion, derecho]
+        )
+    }
+    retornar expresion
+}
+
+funcion conjuncion_parser_core(estado: cualquiera): cualquiera {
+    sea expresion: cualquiera = igualdad_parser_core(estado)
+    mientras (tomar_lexema_core(estado, "y")) {
+        sea derecho: cualquiera = igualdad_parser_core(estado)
+        expresion = nodo_ast_core_con_hijos(
+            "Binario", "y", expresion.linea, [expresion, derecho]
+        )
+    }
+    retornar expresion
+}
+
+funcion expresion_parser_core(estado: cualquiera): cualquiera {
+    sea expresion: cualquiera = conjuncion_parser_core(estado)
+    mientras (tomar_lexema_core(estado, "o")) {
+        sea derecho: cualquiera = conjuncion_parser_core(estado)
+        expresion = nodo_ast_core_con_hijos(
+            "Binario", "o", expresion.linea, [expresion, derecho]
+        )
+    }
+    retornar expresion
+}
+
+funcion bloque_parser_core(estado: cualquiera): cualquiera {
+    sea apertura: cualquiera = requerir_lexema_core(
+        estado, "{", "se esperaba '{'"
+    )
+    sea sentencias: lista = []
+    mientras (
+        no comprobar_lexema_core(estado, "}") y
+        no esta_al_final_core(estado)
+    ) {
+        agregar(sentencias, sentencia_parser_core(estado))
+    }
+    requerir_lexema_core(estado, "}", "se esperaba '}'")
+    retornar nodo_ast_core_con_hijos(
+        "Bloque", "bloque", apertura.linea, sentencias
+    )
+}
+
+funcion declaracion_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "sea", "se esperaba la declaración 'sea'"
+    )
+    sea nombre: cualquiera = requerir_tipo_core(
+        estado, "IDENT", "se esperaba el nombre de la variable"
+    )
+    sea tipo_declarado: texto = ""
+    si (tomar_lexema_core(estado, ":")) {
+        tipo_declarado = tipo_parser_core(estado)
+    }
+    requerir_lexema_core(estado, "=", "se esperaba '=' en la declaración")
+    sea valor: cualquiera = expresion_parser_core(estado)
+    tomar_lexema_core(estado, ";")
+    retornar nodo_ast_core_con_hijos(
+        "Declaracion", nombre.lexema + ":" + tipo_declarado,
+        palabra.linea, [valor]
+    )
+}
+
+funcion impresion_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = avanzar_parser_core(estado)
+    requerir_lexema_core(estado, "(", "se esperaba '(' después de mostrar")
+    sea valor: cualquiera = expresion_parser_core(estado)
+    requerir_lexema_core(estado, ")", "se esperaba ')' después del valor")
+    tomar_lexema_core(estado, ";")
+    retornar nodo_ast_core_con_hijos(
+        "Mostrar", palabra.lexema, palabra.linea, [valor]
+    )
+}
+
+funcion sentencia_si_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "si", "se esperaba 'si'"
+    )
+    requerir_lexema_core(estado, "(", "se esperaba '(' después de si")
+    sea condicion: cualquiera = expresion_parser_core(estado)
+    requerir_lexema_core(estado, ")", "se esperaba ')' después de condición")
+    sea hijos: lista = [condicion, bloque_parser_core(estado)]
+    si (tomar_lexema_core(estado, "sino")) {
+        agregar(hijos, bloque_parser_core(estado))
+    }
+    retornar nodo_ast_core_con_hijos("Si", "si", palabra.linea, hijos)
+}
+
+funcion sentencia_mientras_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "mientras", "se esperaba 'mientras'"
+    )
+    requerir_lexema_core(estado, "(", "se esperaba '(' después de mientras")
+    sea condicion: cualquiera = expresion_parser_core(estado)
+    requerir_lexema_core(estado, ")", "se esperaba ')' después de condición")
+    retornar nodo_ast_core_con_hijos(
+        "Mientras", "mientras", palabra.linea,
+        [condicion, bloque_parser_core(estado)]
+    )
+}
+
+funcion sentencia_retorno_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "retornar", "se esperaba 'retornar'"
+    )
+    sea hijos: lista = []
+    si (
+        no comprobar_lexema_core(estado, "}") y
+        no comprobar_lexema_core(estado, ";")
+    ) {
+        agregar(hijos, expresion_parser_core(estado))
+    }
+    tomar_lexema_core(estado, ";")
+    retornar nodo_ast_core_con_hijos(
+        "Retornar", "retornar", palabra.linea, hijos
+    )
+}
+
+funcion sentencia_parser_core(estado: cualquiera): cualquiera {
+    si (comprobar_lexema_core(estado, "sea")) {
+        retornar declaracion_parser_core(estado)
+    }
+    si (
+        comprobar_lexema_core(estado, "mostrar") o
+        comprobar_lexema_core(estado, "print")
+    ) {
+        retornar impresion_parser_core(estado)
+    }
+    si (comprobar_lexema_core(estado, "si")) {
+        retornar sentencia_si_parser_core(estado)
+    }
+    si (comprobar_lexema_core(estado, "mientras")) {
+        retornar sentencia_mientras_parser_core(estado)
+    }
+    si (comprobar_lexema_core(estado, "retornar")) {
+        retornar sentencia_retorno_parser_core(estado)
+    }
+    si (tomar_lexema_core(estado, ";")) {
+        sea vacia: cualquiera = token_anterior_core(estado)
+        retornar nodo_ast_core("Vacia", "vacia", vacia.linea)
+    }
+    sea expresion: cualquiera = expresion_parser_core(estado)
+    si (tomar_lexema_core(estado, "=")) {
+        sea valor: cualquiera = expresion_parser_core(estado)
+        tomar_lexema_core(estado, ";")
+        retornar nodo_ast_core_con_hijos(
+            "Asignacion", "=", expresion.linea, [expresion, valor]
+        )
+    }
+    tomar_lexema_core(estado, ";")
+    retornar nodo_ast_core_con_hijos(
+        "Expresion", "expresion", expresion.linea, [expresion]
+    )
+}
+
+funcion parametros_parser_core(estado: cualquiera): cualquiera {
+    sea parametros: lista = []
+    requerir_lexema_core(estado, "(", "se esperaba '('")
+    si (no comprobar_lexema_core(estado, ")")) {
+        sea nombre: cualquiera = requerir_tipo_core(
+            estado, "IDENT", "se esperaba el parámetro"
+        )
+        sea tipo: texto = ""
+        si (tomar_lexema_core(estado, ":")) {
+            tipo = tipo_parser_core(estado)
+        }
+        agregar(
+            parametros,
+            nodo_ast_core("Parametro", nombre.lexema + ":" + tipo, nombre.linea)
+        )
+        mientras (tomar_lexema_core(estado, ",")) {
+            nombre = requerir_tipo_core(
+                estado, "IDENT", "se esperaba el parámetro"
+            )
+            tipo = ""
+            si (tomar_lexema_core(estado, ":")) {
+                tipo = tipo_parser_core(estado)
+            }
+            agregar(
+                parametros,
+                nodo_ast_core("Parametro", nombre.lexema + ":" + tipo, nombre.linea)
+            )
+        }
+    }
+    requerir_lexema_core(estado, ")", "se esperaba ')'")
+    retornar parametros
+}
+
+funcion funcion_parser_core(
+    estado: cualquiera,
+    clase_metodo: booleano
+): cualquiera {
+    sea palabra: cualquiera = avanzar_parser_core(estado)
+    sea nombre: cualquiera = requerir_tipo_core(
+        estado, "IDENT", "se esperaba el nombre de la función"
+    )
+    sea hijos: lista = parametros_parser_core(estado)
+    sea retorno: texto = ""
+    si (tomar_lexema_core(estado, ":")) {
+        retorno = tipo_parser_core(estado)
+    }
+    agregar(hijos, bloque_parser_core(estado))
+    sea tipo_nodo: texto = "Funcion"
+    si (clase_metodo) {
+        tipo_nodo = "Metodo"
+    }
+    retornar nodo_ast_core_con_hijos(
+        tipo_nodo, nombre.lexema + ":" + retorno, palabra.linea, hijos
+    )
+}
+
+funcion estructura_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "estructura", "se esperaba 'estructura'"
+    )
+    sea nombre: cualquiera = requerir_tipo_core(
+        estado, "IDENT", "se esperaba el nombre de la estructura"
+    )
+    requerir_lexema_core(estado, "{", "se esperaba '{'")
+    sea campos: lista = []
+    mientras (no comprobar_lexema_core(estado, "}")) {
+        sea campo: cualquiera = requerir_tipo_core(
+            estado, "IDENT", "se esperaba el campo"
+        )
+        requerir_lexema_core(estado, ":", "se esperaba ':'")
+        sea tipo: texto = tipo_parser_core(estado)
+        tomar_lexema_core(estado, ";")
+        agregar(
+            campos,
+            nodo_ast_core("Campo", campo.lexema + ":" + tipo, campo.linea)
+        )
+    }
+    requerir_lexema_core(estado, "}", "se esperaba '}'")
+    retornar nodo_ast_core_con_hijos(
+        "Estructura", nombre.lexema, palabra.linea, campos
+    )
+}
+
+funcion clase_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "clase", "se esperaba 'clase'"
+    )
+    sea nombre: cualquiera = requerir_tipo_core(
+        estado, "IDENT", "se esperaba el nombre de la clase"
+    )
+    requerir_lexema_core(estado, "{", "se esperaba '{'")
+    sea miembros: lista = []
+    mientras (no comprobar_lexema_core(estado, "}")) {
+        si (tomar_lexema_core(estado, "campo")) {
+            sea campo: cualquiera = requerir_tipo_core(
+                estado, "IDENT", "se esperaba el campo"
+            )
+            requerir_lexema_core(estado, ":", "se esperaba ':'")
+            sea tipo: texto = tipo_parser_core(estado)
+            tomar_lexema_core(estado, ";")
+            agregar(
+                miembros,
+                nodo_ast_core("Campo", campo.lexema + ":" + tipo, campo.linea)
+            )
+        } sino {
+            afirmar(
+                comprobar_lexema_core(estado, "metodo"),
+                "se esperaba campo o método"
+            )
+            agregar(miembros, funcion_parser_core(estado, verdadero))
+        }
+    }
+    requerir_lexema_core(estado, "}", "se esperaba '}'")
+    retornar nodo_ast_core_con_hijos(
+        "Clase", nombre.lexema, palabra.linea, miembros
+    )
+}
+
+funcion declaracion_superior_parser_core(estado: cualquiera): cualquiera {
+    si (comprobar_lexema_core(estado, "estructura")) {
+        retornar estructura_parser_core(estado)
+    }
+    si (comprobar_lexema_core(estado, "clase")) {
+        retornar clase_parser_core(estado)
+    }
+    si (comprobar_lexema_core(estado, "funcion")) {
+        retornar funcion_parser_core(estado, falso)
+    }
+    retornar sentencia_parser_core(estado)
+}
+
+funcion parsear_tokens_core(tokens: lista): cualquiera {
+    sea estado: cualquiera = EstadoParserCore(tokens, 0)
+    sea declaraciones: lista = []
+    mientras (no esta_al_final_core(estado)) {
+        agregar(declaraciones, declaracion_superior_parser_core(estado))
+    }
+    sea eof: cualquiera = token_actual_core(estado)
+    retornar nodo_ast_core_con_hijos(
+        "Programa", "Core-0.5", eof.linea, declaraciones
+    )
+}
+
+funcion parsear_fuente_core(fuente: texto): cualquiera {
+    retornar parsear_tokens_core(tokenizar_core(fuente))
+}
+
+
+// C-Forge B6.5 — emisor directo PE32+/x86-64 para Windows.
+// Genera cabeceras, secciones, importaciones y código máquina sin invocar
+// compilador, ensamblador, enlazador ni herramientas de Python.
+
+funcion agregar_le_pe(bytes: lista, valor_inicial: numero, cantidad: numero) {
+    sea valor: numero = valor_inicial
+    sea indice: numero = 0
+    mientras (indice < cantidad) {
+        sea byte: numero = valor % 256
+        agregar(bytes, byte)
+        valor = (valor - byte) / 256
+        indice = indice + 1
+    }
+}
+
+funcion agregar_ceros_pe(bytes: lista, cantidad: numero) {
+    sea indice: numero = 0
+    mientras (indice < cantidad) {
+        agregar(bytes, 0)
+        indice = indice + 1
+    }
+}
+
+funcion agregar_lista_pe(destino: lista, origen: lista) {
+    sea indice: numero = 0
+    mientras (indice < longitud(origen)) {
+        agregar(destino, origen[indice])
+        indice = indice + 1
+    }
+}
+
+funcion completar_pe(bytes: lista, tamano: numero) {
+    afirmar(longitud(bytes) <= tamano, "bloque PE excede su tamaño")
+    agregar_ceros_pe(bytes, tamano - longitud(bytes))
+}
+
+funcion nombre_seccion_pe(bytes: lista, nombre: texto) {
+    sea datos: lista = bytes_texto(nombre)
+    afirmar(longitud(datos) <= 8, "nombre de sección PE demasiado largo")
+    agregar_lista_pe(bytes, datos)
+    agregar_ceros_pe(bytes, 8 - longitud(datos))
+}
+
+funcion primer_literal_pe(fuente: texto): texto {
+    sea resultado: texto = ""
+    sea dentro: booleano = falso
+    sea terminado: booleano = falso
+    sea indice: numero = 0
+    mientras (indice < longitud(fuente) y no terminado) {
+        sea caracter: texto = fuente[indice]
+        si (caracter == "\"") {
+            si (dentro) {
+                terminado = verdadero
+            } sino {
+                dentro = verdadero
+            }
+        } sino {
+            si (dentro) {
+                resultado = resultado + caracter
+            }
+        }
+        indice = indice + 1
+    }
+    afirmar(terminado, "B6.5 requiere mostrar(\"texto\")")
+    retornar resultado
+}
+
+funcion desplazamiento_relativo_pe(
+    destino_rva: numero,
+    siguiente_rva: numero
+): numero {
+    sea delta: numero = destino_rva - siguiente_rva
+    si (delta < 0) {
+        retornar 4294967296 + delta
+    }
+    retornar delta
+}
+
+funcion codigo_x64_pe(tamano_mensaje: numero): lista {
+    afirmar(tamano_mensaje < 4294967296, "mensaje PE demasiado grande")
+    sea codigo: lista = [
+        72, 131, 236, 56,
+        185, 245, 255, 255, 255,
+        255, 21
+    ]
+    agregar_le_pe(codigo, desplazamiento_relativo_pe(12288, 4111), 4)
+    agregar_lista_pe(codigo, [72, 137, 193, 72, 141, 21])
+    agregar_le_pe(codigo, desplazamiento_relativo_pe(12352, 4121), 4)
+    agregar_lista_pe(codigo, [65, 184])
+    agregar_le_pe(codigo, tamano_mensaje, 4)
+    agregar_lista_pe(codigo, [76, 141, 13])
+    agregar_le_pe(codigo, desplazamiento_relativo_pe(12416, 4134), 4)
+    agregar_lista_pe(codigo, [
+        72, 199, 68, 36, 32, 0, 0, 0, 0,
+        255, 21
+    ])
+    agregar_le_pe(codigo, desplazamiento_relativo_pe(12296, 4149), 4)
+    agregar_lista_pe(codigo, [49, 201, 255, 21])
+    agregar_le_pe(codigo, desplazamiento_relativo_pe(12304, 4157), 4)
+    agregar(codigo, 204)
+    retornar codigo
+}
+
+funcion encabezado_seccion_pe(
+    imagen: lista,
+    nombre: texto,
+    tamano_virtual: numero,
+    rva: numero,
+    posicion_archivo: numero,
+    caracteristicas: numero
+) {
+    nombre_seccion_pe(imagen, nombre)
+    agregar_le_pe(imagen, tamano_virtual, 4)
+    agregar_le_pe(imagen, rva, 4)
+    agregar_le_pe(imagen, 512, 4)
+    agregar_le_pe(imagen, posicion_archivo, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, caracteristicas, 4)
+}
+
+funcion agregar_nombre_importado_pe(
+    bytes: lista,
+    posicion: numero,
+    nombre: texto
+) {
+    completar_pe(bytes, posicion)
+    agregar_le_pe(bytes, 0, 2)
+    agregar_lista_pe(bytes, bytes_texto(nombre))
+    agregar(bytes, 0)
+}
+
+funcion seccion_importaciones_pe(): lista {
+    sea datos: lista = []
+
+    // IMAGE_IMPORT_DESCRIPTOR para KERNEL32.dll y descriptor terminador.
+    agregar_le_pe(datos, 8256, 4)
+    agregar_le_pe(datos, 0, 4)
+    agregar_le_pe(datos, 0, 4)
+    agregar_le_pe(datos, 8320, 4)
+    agregar_le_pe(datos, 12288, 4)
+    agregar_ceros_pe(datos, 20)
+
+    // Import Lookup Table: GetStdHandle, WriteFile, ExitProcess.
+    completar_pe(datos, 64)
+    agregar_le_pe(datos, 8352, 8)
+    agregar_le_pe(datos, 8368, 8)
+    agregar_le_pe(datos, 8384, 8)
+    agregar_le_pe(datos, 0, 8)
+
+    completar_pe(datos, 128)
+    agregar_lista_pe(datos, bytes_texto("KERNEL32.dll"))
+    agregar(datos, 0)
+
+    agregar_nombre_importado_pe(datos, 160, "GetStdHandle")
+    agregar_nombre_importado_pe(datos, 176, "WriteFile")
+    agregar_nombre_importado_pe(datos, 192, "ExitProcess")
+    completar_pe(datos, 512)
+    retornar datos
+}
+
+funcion seccion_datos_pe(mensaje_sin_salto: texto): lista {
+    sea datos: lista = []
+
+    // Import Address Table; el cargador de Windows reemplaza estos RVAs.
+    agregar_le_pe(datos, 8352, 8)
+    agregar_le_pe(datos, 8368, 8)
+    agregar_le_pe(datos, 8384, 8)
+    agregar_le_pe(datos, 0, 8)
+
+    completar_pe(datos, 64)
+    agregar_lista_pe(datos, bytes_texto(mensaje_sin_salto))
+    agregar(datos, 13)
+    agregar(datos, 10)
+
+    completar_pe(datos, 128)
+    agregar_le_pe(datos, 0, 4)
+    completar_pe(datos, 512)
+    retornar datos
+}
+
+funcion emitir_pe_x64(mensaje_sin_salto: texto): lista {
+    sea mensaje: lista = bytes_texto(mensaje_sin_salto)
+    agregar(mensaje, 13)
+    agregar(mensaje, 10)
+    sea codigo: lista = codigo_x64_pe(longitud(mensaje))
+    afirmar(longitud(codigo) <= 512, "código PE excede .text")
+
+    sea imagen: lista = [77, 90]
+    agregar_ceros_pe(imagen, 58)
+    agregar_le_pe(imagen, 128, 4)
+    completar_pe(imagen, 128)
+
+    agregar_lista_pe(imagen, [80, 69, 0, 0])
+    agregar_le_pe(imagen, 34404, 2)
+    agregar_le_pe(imagen, 3, 2)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 240, 2)
+    agregar_le_pe(imagen, 34, 2)
+
+    // IMAGE_OPTIONAL_HEADER64.
+    agregar_le_pe(imagen, 523, 2)
+    agregar(imagen, 1)
+    agregar(imagen, 0)
+    agregar_le_pe(imagen, 512, 4)
+    agregar_le_pe(imagen, 1024, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 4096, 4)
+    agregar_le_pe(imagen, 4096, 4)
+    agregar_le_pe(imagen, 5368709120, 8)
+    agregar_le_pe(imagen, 4096, 4)
+    agregar_le_pe(imagen, 512, 4)
+    agregar_le_pe(imagen, 6, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 6, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 16384, 4)
+    agregar_le_pe(imagen, 512, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 3, 2)
+    agregar_le_pe(imagen, 33024, 2)
+    agregar_le_pe(imagen, 1048576, 8)
+    agregar_le_pe(imagen, 4096, 8)
+    agregar_le_pe(imagen, 1048576, 8)
+    agregar_le_pe(imagen, 4096, 8)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 16, 4)
+
+    // Dieciséis directorios de datos. Importación e IAT son los únicos activos.
+    agregar_le_pe(imagen, 0, 8)
+    agregar_le_pe(imagen, 8192, 4)
+    agregar_le_pe(imagen, 40, 4)
+    agregar_ceros_pe(imagen, 80)
+    agregar_le_pe(imagen, 12288, 4)
+    agregar_le_pe(imagen, 32, 4)
+    agregar_ceros_pe(imagen, 24)
+
+    encabezado_seccion_pe(imagen, ".text", longitud(codigo), 4096, 512, 1610612768)
+    encabezado_seccion_pe(imagen, ".rdata", 512, 8192, 1024, 1073741888)
+    encabezado_seccion_pe(imagen, ".data", 512, 12288, 1536, 3221225536)
+    afirmar(longitud(imagen) == 512, "cabeceras PE inválidas")
+
+    agregar_lista_pe(imagen, codigo)
+    completar_pe(imagen, 1024)
+    agregar_lista_pe(imagen, seccion_importaciones_pe())
+    agregar_lista_pe(imagen, seccion_datos_pe(mensaje_sin_salto))
+    afirmar(longitud(imagen) == 2048, "imagen PE inválida")
+    retornar imagen
+}
+
+
+
+// Backend Core B6.7. Se concatena con lexer, AST, parser y biblioteca PE.
+
+estructura SimboloPECore {
+    nombre: texto
+    desplazamiento: numero
+}
+
+estructura ColeccionPECore {
+    nombre: texto
+    desplazamiento: numero
+    longitud: numero
+}
+
+estructura TextoPECore {
+    nombre: texto
+    puntero: numero
+    longitud: numero
+}
+
+estructura OperacionPECore {
+    tipo: texto
+    bytes: lista
+    nombre: texto
+    valor: numero
+}
+
+estructura DatoPECore {
+    nombre: texto
+    bytes: lista
+}
+
+estructura FuncionPECore {
+    nombre: texto
+    nodo: cualquiera
+    etiqueta: texto
+}
+
+estructura ContextoPECore {
+    operaciones: lista
+    simbolos: lista
+    datos: lista
+    contador: numero
+    funciones: lista
+    retorno_actual: texto
+    colecciones: lista
+    textos: lista
+    siguiente_desplazamiento: numero
+}
+
+funcion operacion_bytes_pe(contexto: cualquiera, bytes: lista) {
+    agregar(
+        contexto.operaciones,
+        OperacionPECore("bytes", bytes, "", 0)
+    )
+}
+
+funcion operacion_control_pe(
+    contexto: cualquiera,
+    tipo: texto,
+    nombre: texto,
+    valor: numero
+) {
+    agregar(
+        contexto.operaciones,
+        OperacionPECore(tipo, [], nombre, valor)
+    )
+}
+
+funcion etiqueta_core_pe(contexto: cualquiera, nombre: texto) {
+    operacion_control_pe(contexto, "etiqueta", nombre, 0)
+}
+
+funcion nombre_unico_core_pe(
+    contexto: cualquiera,
+    prefijo: texto
+): texto {
+    sea nombre: texto = prefijo + "_" + a_texto(contexto.contador)
+    contexto.contador = contexto.contador + 1
+    retornar nombre
+}
+
+funcion nombre_declaracion_core_pe(valor: texto): texto {
+    sea nombre: texto = ""
+    sea indice: numero = 0
+    mientras (indice < longitud(valor) y valor[indice] != ":") {
+        nombre = nombre + valor[indice]
+        indice = indice + 1
+    }
+    retornar nombre
+}
+
+funcion digito_core_pe(caracter: texto): numero {
+    si (caracter == "0") { retornar 0 }
+    si (caracter == "1") { retornar 1 }
+    si (caracter == "2") { retornar 2 }
+    si (caracter == "3") { retornar 3 }
+    si (caracter == "4") { retornar 4 }
+    si (caracter == "5") { retornar 5 }
+    si (caracter == "6") { retornar 6 }
+    si (caracter == "7") { retornar 7 }
+    si (caracter == "8") { retornar 8 }
+    si (caracter == "9") { retornar 9 }
+    afirmar(falso, "literal numérico PE inválido")
+    retornar 0
+}
+
+funcion numero_ast_core_pe(valor: texto): numero {
+    sea resultado: numero = 0
+    sea indice: numero = 0
+    mientras (indice < longitud(valor)) {
+        resultado = resultado * 10 + digito_core_pe(valor[indice])
+        indice = indice + 1
+    }
+    retornar resultado
+}
+
+funcion texto_ast_core_pe(valor: texto): texto {
+    afirmar(longitud(valor) >= 2, "literal de texto PE inválido")
+    sea resultado: texto = ""
+    sea indice: numero = 1
+    mientras (indice + 1 < longitud(valor)) {
+        resultado = resultado + valor[indice]
+        indice = indice + 1
+    }
+    retornar resultado
+}
+
+funcion indice_simbolo_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea simbolos: lista = contexto.simbolos
+    sea indice: numero = 0
+    mientras (indice < longitud(simbolos)) {
+        si (simbolos[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion declarar_simbolo_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    afirmar(
+        indice_simbolo_core_pe(contexto, nombre) < 0,
+        "variable PE duplicada '" + nombre + "'"
+    )
+    contexto.siguiente_desplazamiento =
+        contexto.siguiente_desplazamiento - 8
+    sea desplazamiento: numero = contexto.siguiente_desplazamiento
+    afirmar(desplazamiento >= -4096, "memoria local PE agotada")
+    agregar(
+        contexto.simbolos,
+        SimboloPECore(nombre, desplazamiento)
+    )
+    retornar desplazamiento
+}
+
+funcion reservar_memoria_core_pe(
+    contexto: cualquiera,
+    cantidad: numero
+): numero {
+    contexto.siguiente_desplazamiento =
+        contexto.siguiente_desplazamiento - cantidad
+    afirmar(
+        contexto.siguiente_desplazamiento >= -4096,
+        "memoria dinámica local PE agotada"
+    )
+    retornar contexto.siguiente_desplazamiento
+}
+
+funcion buscar_coleccion_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): cualquiera {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.colecciones)) {
+        si (contexto.colecciones[indice].nombre == nombre) {
+            retornar contexto.colecciones[indice]
+        }
+        indice = indice + 1
+    }
+    afirmar(falso, "colección PE desconocida '" + nombre + "'")
+    retornar contexto.colecciones[0]
+}
+
+funcion indice_coleccion_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.colecciones)) {
+        si (contexto.colecciones[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion buscar_texto_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): cualquiera {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.textos)) {
+        si (contexto.textos[indice].nombre == nombre) {
+            retornar contexto.textos[indice]
+        }
+        indice = indice + 1
+    }
+    afirmar(falso, "texto PE desconocido '" + nombre + "'")
+    retornar contexto.textos[0]
+}
+
+funcion indice_texto_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.textos)) {
+        si (contexto.textos[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion desplazamiento_simbolo_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea indice: numero = indice_simbolo_core_pe(contexto, nombre)
+    afirmar(indice >= 0, "variable PE desconocida '" + nombre + "'")
+    sea simbolos: lista = contexto.simbolos
+    retornar simbolos[indice].desplazamiento
+}
+
+funcion buscar_funcion_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): cualquiera {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.funciones)) {
+        si (contexto.funciones[indice].nombre == nombre) {
+            retornar contexto.funciones[indice]
+        }
+        indice = indice + 1
+    }
+    afirmar(falso, "función PE desconocida '" + nombre + "'")
+    retornar contexto.funciones[0]
+}
+
+funcion emitir_argumentos_llamada_core_pe(
+    argumentos: lista,
+    contexto: cualquiera
+) {
+    afirmar(longitud(argumentos) <= 4, "B6.7 admite hasta cuatro parámetros")
+    sea indice: numero = 0
+    mientras (indice < longitud(argumentos)) {
+        emitir_expresion_core_pe(argumentos[indice], contexto)
+        operacion_bytes_pe(contexto, [80])
+        indice = indice + 1
+    }
+    indice = longitud(argumentos)
+    mientras (indice > 0) {
+        indice = indice - 1
+        si (indice == 0) { operacion_bytes_pe(contexto, [89]) }
+        si (indice == 1) { operacion_bytes_pe(contexto, [90]) }
+        si (indice == 2) { operacion_bytes_pe(contexto, [65, 88]) }
+        si (indice == 3) { operacion_bytes_pe(contexto, [65, 89]) }
+    }
+}
+
+funcion entero_32_core_pe(valor: numero): numero {
+    si (valor < 0) {
+        retornar 4294967296 + valor
+    }
+    retornar valor
+}
+
+funcion bytes_mov_rax_core_pe(valor: numero): lista {
+    afirmar(valor >= 0 y valor < 2147483648, "entero fuera del rango B6.7")
+    sea bytes: lista = [72, 184]
+    agregar_le_pe(bytes, valor, 8)
+    retornar bytes
+}
+
+funcion emitir_cargar_variable_core_pe(
+    contexto: cualquiera,
+    desplazamiento: numero
+) {
+    sea bytes: lista = [72, 139, 133]
+    agregar_le_pe(bytes, entero_32_core_pe(desplazamiento), 4)
+    operacion_bytes_pe(contexto, bytes)
+}
+
+funcion emitir_guardar_variable_core_pe(
+    contexto: cualquiera,
+    desplazamiento: numero
+) {
+    sea bytes: lista = [72, 137, 133]
+    agregar_le_pe(bytes, entero_32_core_pe(desplazamiento), 4)
+    operacion_bytes_pe(contexto, bytes)
+}
+
+funcion emitir_comparacion_core_pe(
+    contexto: cualquiera,
+    operador: texto
+) {
+    sea condicion: numero = 0
+    si (operador == "==") { condicion = 148 }
+    si (operador == "!=") { condicion = 149 }
+    si (operador == "<") { condicion = 156 }
+    si (operador == "<=") { condicion = 158 }
+    si (operador == ">") { condicion = 159 }
+    si (operador == ">=") { condicion = 157 }
+    afirmar(condicion > 0, "comparación PE desconocida")
+    operacion_bytes_pe(contexto, [72, 57, 193, 15, condicion, 192])
+    operacion_bytes_pe(contexto, [72, 15, 182, 192])
+}
+
+funcion emitir_expresion_core_pe(nodo: cualquiera, contexto: cualquiera) {
+    si (nodo.tipo == "Numero") {
+        operacion_bytes_pe(
+            contexto,
+            bytes_mov_rax_core_pe(numero_ast_core_pe(nodo.valor))
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Booleano") {
+        si (nodo.valor == "verdadero") {
+            operacion_bytes_pe(contexto, bytes_mov_rax_core_pe(1))
+        } sino {
+            operacion_bytes_pe(contexto, bytes_mov_rax_core_pe(0))
+        }
+        retornar 0
+    }
+    si (nodo.tipo == "Identificador") {
+        si (indice_texto_core_pe(contexto, nodo.valor) >= 0) {
+            afirmar(
+                falso,
+                "el texto '" + nodo.valor +
+                "' requiere una operación textual"
+            )
+        }
+        emitir_cargar_variable_core_pe(
+            contexto,
+            desplazamiento_simbolo_core_pe(contexto, nodo.valor)
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Indice") {
+        sea hijos_indice: lista = nodo.hijos
+        afirmar(
+            hijos_indice[0].tipo == "Identificador",
+            "B6.7 indexa una lista identificada"
+        )
+        sea coleccion: cualquiera = buscar_coleccion_core_pe(
+            contexto, hijos_indice[0].valor
+        )
+        emitir_expresion_core_pe(hijos_indice[1], contexto)
+        operacion_bytes_pe(contexto, [72, 247, 216])
+        sea direccion_lista: lista = [72, 141, 141]
+        agregar_le_pe(
+            direccion_lista,
+            entero_32_core_pe(coleccion.desplazamiento),
+            4
+        )
+        operacion_bytes_pe(contexto, direccion_lista)
+        operacion_bytes_pe(contexto, [72, 139, 4, 193])
+        retornar 0
+    }
+    si (nodo.tipo == "Miembro" y nodo.valor == "length") {
+        sea base_miembro: lista = nodo.hijos
+        afirmar(
+            base_miembro[0].tipo == "Identificador",
+            "length requiere un identificador"
+        )
+        sea nombre_base: texto = base_miembro[0].valor
+        si (indice_coleccion_core_pe(contexto, nombre_base) >= 0) {
+            sea lista_base: cualquiera =
+                buscar_coleccion_core_pe(contexto, nombre_base)
+            operacion_bytes_pe(
+                contexto,
+                bytes_mov_rax_core_pe(lista_base.longitud)
+            )
+            retornar 0
+        }
+        sea texto_base: cualquiera =
+            buscar_texto_core_pe(contexto, nombre_base)
+        emitir_cargar_variable_core_pe(contexto, texto_base.longitud)
+        retornar 0
+    }
+    si (nodo.tipo == "Llamada") {
+        si (nodo.valor == "longitud") {
+            afirmar(longitud(nodo.hijos) == 1, "longitud requiere un valor")
+            sea argumento_longitud: cualquiera = nodo.hijos[0]
+            afirmar(
+                argumento_longitud.tipo == "Identificador",
+                "B6.7 longitud requiere un identificador"
+            )
+            sea nombre_longitud: texto = argumento_longitud.valor
+            si (indice_coleccion_core_pe(contexto, nombre_longitud) >= 0) {
+                sea lista_longitud: cualquiera =
+                    buscar_coleccion_core_pe(contexto, nombre_longitud)
+                operacion_bytes_pe(
+                    contexto,
+                    bytes_mov_rax_core_pe(lista_longitud.longitud)
+                )
+            } sino {
+                sea texto_longitud: cualquiera =
+                    buscar_texto_core_pe(contexto, nombre_longitud)
+                emitir_cargar_variable_core_pe(
+                    contexto, texto_longitud.longitud
+                )
+            }
+            retornar 0
+        }
+        sea funcion: cualquiera =
+            buscar_funcion_core_pe(contexto, nodo.valor)
+        emitir_argumentos_llamada_core_pe(nodo.hijos, contexto)
+        operacion_control_pe(contexto, "call_rel", funcion.etiqueta, 0)
+        retornar 0
+    }
+    si (nodo.tipo == "Unario") {
+        sea hijos_unarios: lista = nodo.hijos
+        emitir_expresion_core_pe(hijos_unarios[0], contexto)
+        si (nodo.valor == "-") {
+            operacion_bytes_pe(contexto, [72, 247, 216])
+            retornar 0
+        }
+        si (nodo.valor == "no") {
+            operacion_bytes_pe(contexto, [
+                72, 133, 192, 15, 148, 192, 72, 15, 182, 192
+            ])
+            retornar 0
+        }
+    }
+    si (nodo.tipo == "Binario") {
+        sea hijos: lista = nodo.hijos
+        emitir_expresion_core_pe(hijos[0], contexto)
+        operacion_bytes_pe(contexto, [80])
+        emitir_expresion_core_pe(hijos[1], contexto)
+        operacion_bytes_pe(contexto, [89])
+
+        si (nodo.valor == "+") {
+            operacion_bytes_pe(contexto, [72, 1, 200])
+            retornar 0
+        }
+        si (nodo.valor == "-") {
+            operacion_bytes_pe(contexto, [72, 41, 193, 72, 137, 200])
+            retornar 0
+        }
+        si (nodo.valor == "*") {
+            operacion_bytes_pe(contexto, [72, 15, 175, 193])
+            retornar 0
+        }
+        si (nodo.valor == "/") {
+            operacion_bytes_pe(contexto, [
+                73, 137, 194, 72, 137, 200, 72, 153, 73, 247, 250
+            ])
+            retornar 0
+        }
+        emitir_comparacion_core_pe(contexto, nodo.valor)
+        retornar 0
+    }
+    afirmar(
+        falso,
+        "B6.7 no puede emitir expresión '" + nodo.tipo + "'"
+    )
+}
+
+funcion registrar_texto_core_pe(
+    contexto: cualquiera,
+    literal: texto
+): texto {
+    sea nombre: texto = nombre_unico_core_pe(contexto, "dato")
+    sea bytes: lista = bytes_texto(literal)
+    agregar(contexto.datos, DatoPECore(nombre, bytes))
+    retornar nombre
+}
+
+funcion emitir_texto_core_pe(nodo: cualquiera, contexto: cualquiera) {
+    si (nodo.tipo == "Texto") {
+        sea literal: texto = texto_ast_core_pe(nodo.valor)
+        sea nombre: texto = registrar_texto_core_pe(contexto, literal)
+        operacion_control_pe(contexto, "lea_dato_rax", nombre, 0)
+        sea mover_longitud: lista = [72, 186]
+        agregar_le_pe(mover_longitud, longitud(bytes_texto(literal)), 8)
+        operacion_bytes_pe(contexto, mover_longitud)
+        retornar 0
+    }
+    si (nodo.tipo == "Identificador") {
+        sea simbolo_texto: cualquiera =
+            buscar_texto_core_pe(contexto, nodo.valor)
+        emitir_cargar_variable_core_pe(contexto, simbolo_texto.puntero)
+        sea cargar_longitud: lista = [72, 139, 149]
+        agregar_le_pe(
+            cargar_longitud,
+            entero_32_core_pe(simbolo_texto.longitud),
+            4
+        )
+        operacion_bytes_pe(contexto, cargar_longitud)
+        retornar 0
+    }
+    si (nodo.tipo == "Binario" y nodo.valor == "+") {
+        sea partes: lista = nodo.hijos
+        emitir_texto_core_pe(partes[0], contexto)
+        operacion_bytes_pe(contexto, [80, 82])
+        emitir_texto_core_pe(partes[1], contexto)
+        operacion_bytes_pe(contexto, [73, 137, 194, 73, 137, 211])
+        operacion_bytes_pe(contexto, [65, 88, 89])
+        sea buffer: numero = reservar_memoria_core_pe(contexto, 256)
+        sea direccion_buffer: lista = [76, 141, 141]
+        agregar_le_pe(
+            direccion_buffer,
+            entero_32_core_pe(buffer),
+            4
+        )
+        operacion_bytes_pe(contexto, direccion_buffer)
+        operacion_bytes_pe(contexto, [75, 141, 20, 24])
+        sea inicio_buffer: lista = [72, 141, 133]
+        agregar_le_pe(
+            inicio_buffer,
+            entero_32_core_pe(buffer),
+            4
+        )
+        operacion_bytes_pe(contexto, inicio_buffer)
+        sea copiar_izquierda: texto =
+            nombre_unico_core_pe(contexto, "texto_izquierdo")
+        sea copiar_derecha: texto =
+            nombre_unico_core_pe(contexto, "texto_derecho")
+        sea fin_izquierda: texto =
+            nombre_unico_core_pe(contexto, "fin_izquierdo")
+        sea fin_derecha: texto =
+            nombre_unico_core_pe(contexto, "fin_derecho")
+        etiqueta_core_pe(contexto, copiar_izquierda)
+        operacion_bytes_pe(contexto, [77, 133, 192])
+        operacion_control_pe(contexto, "jz", fin_izquierda, 0)
+        operacion_bytes_pe(contexto, [138, 1, 65, 136, 1])
+        operacion_bytes_pe(contexto, [72, 255, 193, 73, 255, 193, 73, 255, 200])
+        operacion_control_pe(contexto, "jmp", copiar_izquierda, 0)
+        etiqueta_core_pe(contexto, fin_izquierda)
+        etiqueta_core_pe(contexto, copiar_derecha)
+        operacion_bytes_pe(contexto, [77, 133, 219])
+        operacion_control_pe(contexto, "jz", fin_derecha, 0)
+        operacion_bytes_pe(contexto, [65, 138, 2, 65, 136, 1])
+        operacion_bytes_pe(contexto, [73, 255, 194, 73, 255, 193, 73, 255, 203])
+        operacion_control_pe(contexto, "jmp", copiar_derecha, 0)
+        etiqueta_core_pe(contexto, fin_derecha)
+        retornar 0
+    }
+    afirmar(falso, "expresión textual PE no soportada")
+}
+
+funcion emitir_mostrar_core_pe(nodo: cualquiera, contexto: cualquiera) {
+    sea hijos: lista = nodo.hijos
+    sea valor: cualquiera = hijos[0]
+    emitir_texto_core_pe(valor, contexto)
+    sea temporal_puntero: numero = reservar_memoria_core_pe(contexto, 8)
+    sea temporal_longitud: numero = reservar_memoria_core_pe(contexto, 8)
+    emitir_guardar_variable_core_pe(contexto, temporal_puntero)
+    sea guardar_longitud: lista = [72, 137, 149]
+    agregar_le_pe(
+        guardar_longitud,
+        entero_32_core_pe(temporal_longitud),
+        4
+    )
+    operacion_bytes_pe(contexto, guardar_longitud)
+    operacion_bytes_pe(contexto, [
+        72, 131, 236, 48,
+        185, 245, 255, 255, 255
+    ])
+    operacion_control_pe(contexto, "call_iat", "", 0)
+    operacion_bytes_pe(contexto, [72, 137, 193])
+    sea cargar_puntero: lista = [72, 139, 149]
+    agregar_le_pe(
+        cargar_puntero,
+        entero_32_core_pe(temporal_puntero),
+        4
+    )
+    operacion_bytes_pe(contexto, cargar_puntero)
+    sea cargar_tamano: lista = [68, 139, 133]
+    agregar_le_pe(
+        cargar_tamano,
+        entero_32_core_pe(temporal_longitud),
+        4
+    )
+    operacion_bytes_pe(contexto, cargar_tamano)
+    operacion_control_pe(contexto, "lea_written_r9", "", 0)
+    operacion_bytes_pe(contexto, [
+        72, 199, 68, 36, 32, 0, 0, 0, 0
+    ])
+    operacion_control_pe(contexto, "call_iat", "", 1)
+    sea salto_linea: texto = registrar_texto_core_pe(contexto, "\r\n")
+    operacion_bytes_pe(contexto, [185, 245, 255, 255, 255])
+    operacion_control_pe(contexto, "call_iat", "", 0)
+    operacion_bytes_pe(contexto, [72, 137, 193])
+    operacion_control_pe(contexto, "lea_dato_rdx", salto_linea, 0)
+    operacion_bytes_pe(contexto, [65, 184, 2, 0, 0, 0])
+    operacion_control_pe(contexto, "lea_written_r9", "", 0)
+    operacion_bytes_pe(contexto, [
+        72, 199, 68, 36, 32, 0, 0, 0, 0
+    ])
+    operacion_control_pe(contexto, "call_iat", "", 1)
+    operacion_bytes_pe(contexto, [72, 131, 196, 48])
+}
+
+funcion emitir_bloque_core_pe(nodo: cualquiera, contexto: cualquiera) {
+    sea sentencias: lista = nodo.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(sentencias)) {
+        emitir_sentencia_core_pe(sentencias[indice], contexto)
+        indice = indice + 1
+    }
+}
+
+funcion emitir_sentencia_core_pe(nodo: cualquiera, contexto: cualquiera) {
+    sea hijos: lista = nodo.hijos
+    si (nodo.tipo == "Declaracion") {
+        sea nombre: texto = nombre_declaracion_core_pe(nodo.valor)
+        si (hijos[0].tipo == "Lista") {
+            sea elementos: lista = hijos[0].hijos
+            sea base: numero = contexto.siguiente_desplazamiento - 8
+            sea elemento: numero = 0
+            mientras (elemento < longitud(elementos)) {
+                sea desplazamiento_elemento: numero =
+                    declarar_simbolo_core_pe(
+                        contexto,
+                        nombre + "#" + a_texto(elemento)
+                    )
+                emitir_expresion_core_pe(elementos[elemento], contexto)
+                emitir_guardar_variable_core_pe(
+                    contexto, desplazamiento_elemento
+                )
+                elemento = elemento + 1
+            }
+            agregar(
+                contexto.colecciones,
+                ColeccionPECore(nombre, base, longitud(elementos))
+            )
+            retornar 0
+        }
+        si (hijos[0].tipo == "Texto") {
+            sea puntero: numero =
+                declarar_simbolo_core_pe(contexto, nombre + "#puntero")
+            sea largo: numero =
+                declarar_simbolo_core_pe(contexto, nombre + "#longitud")
+            emitir_texto_core_pe(hijos[0], contexto)
+            emitir_guardar_variable_core_pe(contexto, puntero)
+            sea guardar_largo: lista = [72, 137, 149]
+            agregar_le_pe(
+                guardar_largo,
+                entero_32_core_pe(largo),
+                4
+            )
+            operacion_bytes_pe(contexto, guardar_largo)
+            agregar(contexto.textos, TextoPECore(nombre, puntero, largo))
+            retornar 0
+        }
+        sea desplazamiento: numero =
+            declarar_simbolo_core_pe(contexto, nombre)
+        emitir_expresion_core_pe(hijos[0], contexto)
+        emitir_guardar_variable_core_pe(contexto, desplazamiento)
+        retornar 0
+    }
+    si (nodo.tipo == "Asignacion") {
+        sea objetivo: cualquiera = hijos[0]
+        si (objetivo.tipo == "Indice") {
+            sea partes_indice: lista = objetivo.hijos
+            afirmar(
+                partes_indice[0].tipo == "Identificador",
+                "asignación indexada requiere una lista"
+            )
+            sea coleccion_objetivo: cualquiera =
+                buscar_coleccion_core_pe(
+                    contexto, partes_indice[0].valor
+                )
+            emitir_expresion_core_pe(hijos[1], contexto)
+            operacion_bytes_pe(contexto, [80])
+            emitir_expresion_core_pe(partes_indice[1], contexto)
+            operacion_bytes_pe(contexto, [72, 247, 216])
+            sea base_objetivo: lista = [72, 141, 141]
+            agregar_le_pe(
+                base_objetivo,
+                entero_32_core_pe(coleccion_objetivo.desplazamiento),
+                4
+            )
+            operacion_bytes_pe(contexto, base_objetivo)
+            operacion_bytes_pe(contexto, [90, 72, 137, 20, 193])
+            retornar 0
+        }
+        si (
+            objetivo.tipo == "Identificador" y
+            indice_texto_core_pe(contexto, objetivo.valor) >= 0
+        ) {
+            sea texto_objetivo: cualquiera =
+                buscar_texto_core_pe(contexto, objetivo.valor)
+            emitir_texto_core_pe(hijos[1], contexto)
+            emitir_guardar_variable_core_pe(
+                contexto, texto_objetivo.puntero
+            )
+            sea guardar_nuevo_largo: lista = [72, 137, 149]
+            agregar_le_pe(
+                guardar_nuevo_largo,
+                entero_32_core_pe(texto_objetivo.longitud),
+                4
+            )
+            operacion_bytes_pe(contexto, guardar_nuevo_largo)
+            retornar 0
+        }
+        afirmar(
+            objetivo.tipo == "Identificador",
+            "B6.7 solo asigna variables"
+        )
+        emitir_expresion_core_pe(hijos[1], contexto)
+        emitir_guardar_variable_core_pe(
+            contexto,
+            desplazamiento_simbolo_core_pe(contexto, objetivo.valor)
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Mostrar") {
+        emitir_mostrar_core_pe(nodo, contexto)
+        retornar 0
+    }
+    si (nodo.tipo == "Si") {
+        sea etiqueta_sino: texto =
+            nombre_unico_core_pe(contexto, "sino")
+        sea etiqueta_fin: texto =
+            nombre_unico_core_pe(contexto, "fin_si")
+        emitir_expresion_core_pe(hijos[0], contexto)
+        operacion_bytes_pe(contexto, [72, 133, 192])
+        operacion_control_pe(contexto, "jz", etiqueta_sino, 0)
+        emitir_bloque_core_pe(hijos[1], contexto)
+        si (longitud(hijos) > 2) {
+            operacion_control_pe(contexto, "jmp", etiqueta_fin, 0)
+            etiqueta_core_pe(contexto, etiqueta_sino)
+            emitir_bloque_core_pe(hijos[2], contexto)
+            etiqueta_core_pe(contexto, etiqueta_fin)
+        } sino {
+            etiqueta_core_pe(contexto, etiqueta_sino)
+        }
+        retornar 0
+    }
+    si (nodo.tipo == "Mientras") {
+        sea etiqueta_inicio: texto =
+            nombre_unico_core_pe(contexto, "mientras")
+        sea etiqueta_fin: texto =
+            nombre_unico_core_pe(contexto, "fin_mientras")
+        etiqueta_core_pe(contexto, etiqueta_inicio)
+        emitir_expresion_core_pe(hijos[0], contexto)
+        operacion_bytes_pe(contexto, [72, 133, 192])
+        operacion_control_pe(contexto, "jz", etiqueta_fin, 0)
+        emitir_bloque_core_pe(hijos[1], contexto)
+        operacion_control_pe(contexto, "jmp", etiqueta_inicio, 0)
+        etiqueta_core_pe(contexto, etiqueta_fin)
+        retornar 0
+    }
+    si (nodo.tipo == "Retornar") {
+        afirmar(
+            contexto.retorno_actual != "",
+            "retornar fuera de una función"
+        )
+        si (longitud(hijos) > 0) {
+            emitir_expresion_core_pe(hijos[0], contexto)
+        } sino {
+            operacion_bytes_pe(contexto, bytes_mov_rax_core_pe(0))
+        }
+        operacion_control_pe(
+            contexto, "jmp", contexto.retorno_actual, 0
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Expresion") {
+        emitir_expresion_core_pe(hijos[0], contexto)
+        retornar 0
+    }
+    si (nodo.tipo == "Vacia") {
+        retornar 0
+    }
+    afirmar(falso, "B6.7 no puede emitir sentencia '" + nodo.tipo + "'")
+}
+
+funcion tamano_operacion_core_pe(operacion: cualquiera): numero {
+    si (operacion.tipo == "etiqueta") { retornar 0 }
+    si (operacion.tipo == "bytes") {
+        retornar longitud(operacion.bytes)
+    }
+    si (operacion.tipo == "jmp") { retornar 5 }
+    si (operacion.tipo == "jz") { retornar 6 }
+    si (operacion.tipo == "call_iat") { retornar 6 }
+    si (operacion.tipo == "call_rel") { retornar 5 }
+    si (operacion.tipo == "lea_dato_rdx") { retornar 7 }
+    si (operacion.tipo == "lea_dato_rax") { retornar 7 }
+    si (operacion.tipo == "lea_written_r9") { retornar 7 }
+    afirmar(falso, "operación PE desconocida '" + operacion.tipo + "'")
+    retornar 0
+}
+
+funcion posicion_etiqueta_core_pe(
+    operaciones: lista,
+    nombre: texto
+): numero {
+    sea posicion: numero = 0
+    sea indice: numero = 0
+    mientras (indice < longitud(operaciones)) {
+        sea operacion: cualquiera = operaciones[indice]
+        si (operacion.tipo == "etiqueta" y operacion.nombre == nombre) {
+            retornar posicion
+        }
+        posicion = posicion + tamano_operacion_core_pe(operacion)
+        indice = indice + 1
+    }
+    afirmar(falso, "etiqueta PE desconocida '" + nombre + "'")
+    retornar 0
+}
+
+funcion posicion_dato_core_pe(
+    datos: lista,
+    nombre: texto
+): numero {
+    sea posicion: numero = 64
+    sea indice: numero = 0
+    mientras (indice < longitud(datos)) {
+        si (datos[indice].nombre == nombre) {
+            retornar posicion
+        }
+        posicion = posicion + longitud(datos[indice].bytes)
+        indice = indice + 1
+    }
+    afirmar(falso, "dato PE desconocido '" + nombre + "'")
+    retornar 0
+}
+
+funcion resolver_operaciones_core_pe(contexto: cualquiera): lista {
+    sea salida: lista = []
+    sea operaciones: lista = contexto.operaciones
+    sea posicion: numero = 0
+    sea indice: numero = 0
+    mientras (indice < longitud(operaciones)) {
+        sea operacion: cualquiera = operaciones[indice]
+        si (operacion.tipo == "bytes") {
+            agregar_lista_pe(salida, operacion.bytes)
+        }
+        si (operacion.tipo == "jmp") {
+            agregar(salida, 233)
+            sea destino_jmp: numero =
+                posicion_etiqueta_core_pe(operaciones, operacion.nombre)
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(destino_jmp - (posicion + 5)),
+                4
+            )
+        }
+        si (operacion.tipo == "jz") {
+            agregar_lista_pe(salida, [15, 132])
+            sea destino_jz: numero =
+                posicion_etiqueta_core_pe(operaciones, operacion.nombre)
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(destino_jz - (posicion + 6)),
+                4
+            )
+        }
+        si (operacion.tipo == "call_iat") {
+            agregar_lista_pe(salida, [255, 21])
+            sea destino_iat: numero = 12288 + operacion.valor * 8
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(
+                    destino_iat - (4096 + posicion + 6)
+                ),
+                4
+            )
+        }
+        si (operacion.tipo == "call_rel") {
+            agregar(salida, 232)
+            sea destino_relativo: numero =
+                posicion_etiqueta_core_pe(
+                    operaciones, operacion.nombre
+                )
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(
+                    destino_relativo - (posicion + 5)
+                ),
+                4
+            )
+        }
+        si (operacion.tipo == "lea_dato_rdx") {
+            agregar_lista_pe(salida, [72, 141, 21])
+            sea destino_dato: numero =
+                12288 + posicion_dato_core_pe(
+                    contexto.datos,
+                    operacion.nombre
+                )
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(
+                    destino_dato - (4096 + posicion + 7)
+                ),
+                4
+            )
+        }
+        si (operacion.tipo == "lea_dato_rax") {
+            agregar_lista_pe(salida, [72, 141, 5])
+            sea destino_dato_rax: numero =
+                12288 + posicion_dato_core_pe(
+                    contexto.datos,
+                    operacion.nombre
+                )
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(
+                    destino_dato_rax - (4096 + posicion + 7)
+                ),
+                4
+            )
+        }
+        si (operacion.tipo == "lea_written_r9") {
+            agregar_lista_pe(salida, [76, 141, 13])
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(12320 - (4096 + posicion + 7)),
+                4
+            )
+        }
+        posicion = posicion + tamano_operacion_core_pe(operacion)
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion datos_core_pe(contexto: cualquiera): lista {
+    sea datos: lista = []
+    agregar_le_pe(datos, 8352, 8)
+    agregar_le_pe(datos, 8368, 8)
+    agregar_le_pe(datos, 8384, 8)
+    agregar_le_pe(datos, 0, 8)
+    agregar_le_pe(datos, 0, 4)
+    completar_pe(datos, 64)
+
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.datos)) {
+        agregar_lista_pe(datos, contexto.datos[indice].bytes)
+        indice = indice + 1
+    }
+    completar_pe(datos, 512)
+    retornar datos
+}
+
+funcion encabezado_seccion_core_pe(
+    imagen: lista,
+    nombre: texto,
+    tamano_virtual: numero,
+    rva: numero,
+    tamano_archivo: numero,
+    posicion_archivo: numero,
+    caracteristicas: numero
+) {
+    nombre_seccion_pe(imagen, nombre)
+    agregar_le_pe(imagen, tamano_virtual, 4)
+    agregar_le_pe(imagen, rva, 4)
+    agregar_le_pe(imagen, tamano_archivo, 4)
+    agregar_le_pe(imagen, posicion_archivo, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, caracteristicas, 4)
+}
+
+funcion empaquetar_core_pe(codigo: lista, datos: lista): lista {
+    afirmar(longitud(codigo) <= 4096, "código B6.7 excede .text")
+    afirmar(longitud(datos) == 512, "sección .data B6.7 inválida")
+    sea imagen: lista = [77, 90]
+    agregar_ceros_pe(imagen, 58)
+    agregar_le_pe(imagen, 128, 4)
+    completar_pe(imagen, 128)
+
+    agregar_lista_pe(imagen, [80, 69, 0, 0])
+    agregar_le_pe(imagen, 34404, 2)
+    agregar_le_pe(imagen, 3, 2)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 240, 2)
+    agregar_le_pe(imagen, 34, 2)
+
+    agregar_le_pe(imagen, 523, 2)
+    agregar_lista_pe(imagen, [1, 0])
+    agregar_le_pe(imagen, 4096, 4)
+    agregar_le_pe(imagen, 4096, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 4096, 4)
+    agregar_le_pe(imagen, 4096, 4)
+    agregar_le_pe(imagen, 5368709120, 8)
+    agregar_le_pe(imagen, 4096, 4)
+    agregar_le_pe(imagen, 512, 4)
+    agregar_le_pe(imagen, 6, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 6, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 16384, 4)
+    agregar_le_pe(imagen, 512, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 3, 2)
+    agregar_le_pe(imagen, 33024, 2)
+    agregar_le_pe(imagen, 1048576, 8)
+    agregar_le_pe(imagen, 4096, 8)
+    agregar_le_pe(imagen, 1048576, 8)
+    agregar_le_pe(imagen, 4096, 8)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 16, 4)
+    agregar_le_pe(imagen, 0, 8)
+    agregar_le_pe(imagen, 8192, 4)
+    agregar_le_pe(imagen, 40, 4)
+    agregar_ceros_pe(imagen, 80)
+    agregar_le_pe(imagen, 12288, 4)
+    agregar_le_pe(imagen, 32, 4)
+    agregar_ceros_pe(imagen, 24)
+
+    encabezado_seccion_core_pe(
+        imagen, ".text", longitud(codigo), 4096, 4096, 512, 1610612768
+    )
+    encabezado_seccion_core_pe(
+        imagen, ".rdata", 512, 8192, 512, 4608, 1073741888
+    )
+    encabezado_seccion_core_pe(
+        imagen, ".data", 512, 12288, 512, 5120, 3221225536
+    )
+    afirmar(longitud(imagen) == 512, "cabeceras PE Core inválidas")
+    agregar_lista_pe(imagen, codigo)
+    completar_pe(imagen, 4608)
+    agregar_lista_pe(imagen, seccion_importaciones_pe())
+    agregar_lista_pe(imagen, datos)
+    afirmar(longitud(imagen) == 5632, "imagen PE Core inválida")
+    retornar imagen
+}
+
+funcion compilar_core_pe(fuente: texto): lista {
+    sea tokens: lista = tokenizar_core(fuente)
+    sea programa: cualquiera = parsear_tokens_core(tokens)
+    sea contexto: cualquiera =
+        ContextoPECore([], [], [], 0, [], "", [], [], 0)
+    sea declaraciones: lista = programa.hijos
+    sea indice: numero = 0
+
+    mientras (indice < longitud(declaraciones)) {
+        si (declaraciones[indice].tipo == "Funcion") {
+            sea nombre_funcion: texto =
+                nombre_declaracion_core_pe(declaraciones[indice].valor)
+            agregar(
+                contexto.funciones,
+                FuncionPECore(
+                    nombre_funcion,
+                    declaraciones[indice],
+                    "funcion_" + nombre_funcion
+                )
+            )
+        }
+        indice = indice + 1
+    }
+
+    operacion_bytes_pe(contexto, [
+        85, 72, 137, 229, 72, 129, 236, 0, 16, 0, 0
+    ])
+    indice = 0
+    mientras (indice < longitud(declaraciones)) {
+        sea nodo: cualquiera = declaraciones[indice]
+        afirmar(
+            nodo.tipo != "Clase" y
+            nodo.tipo != "Estructura",
+            "B6.7 todavía no compila clases ni estructuras"
+        )
+        si (nodo.tipo != "Funcion") {
+            emitir_sentencia_core_pe(nodo, contexto)
+        }
+        indice = indice + 1
+    }
+
+    operacion_bytes_pe(contexto, [
+        72, 137, 236, 93,
+        72, 131, 236, 40,
+        49, 201
+    ])
+    operacion_control_pe(contexto, "call_iat", "", 2)
+    operacion_bytes_pe(contexto, [204])
+
+    indice = 0
+    mientras (indice < longitud(contexto.funciones)) {
+        sea funcion: cualquiera = contexto.funciones[indice]
+        sea nodo_funcion: cualquiera = funcion.nodo
+        sea hijos_funcion: lista = nodo_funcion.hijos
+        sea simbolos_anteriores: lista = contexto.simbolos
+        sea retorno_anterior: texto = contexto.retorno_actual
+        sea colecciones_anteriores: lista = contexto.colecciones
+        sea textos_anteriores: lista = contexto.textos
+        sea desplazamiento_anterior: numero =
+            contexto.siguiente_desplazamiento
+        contexto.simbolos = []
+        contexto.colecciones = []
+        contexto.textos = []
+        contexto.siguiente_desplazamiento = 0
+        contexto.retorno_actual = funcion.etiqueta + "_retorno"
+
+        etiqueta_core_pe(contexto, funcion.etiqueta)
+        operacion_bytes_pe(contexto, [
+            85, 72, 137, 229, 72, 129, 236, 0, 16, 0, 0
+        ])
+        sea cantidad_parametros: numero = longitud(hijos_funcion) - 1
+        afirmar(cantidad_parametros <= 4, "demasiados parámetros PE")
+        sea parametro: numero = 0
+        mientras (parametro < cantidad_parametros) {
+            sea nombre_parametro: texto =
+                nombre_declaracion_core_pe(hijos_funcion[parametro].valor)
+            sea desplazamiento_parametro: numero =
+                declarar_simbolo_core_pe(contexto, nombre_parametro)
+            sea guardar_parametro: lista = [72, 137, 141]
+            si (parametro == 1) { guardar_parametro = [72, 137, 149] }
+            si (parametro == 2) { guardar_parametro = [76, 137, 133] }
+            si (parametro == 3) { guardar_parametro = [76, 137, 141] }
+            agregar_le_pe(
+                guardar_parametro,
+                entero_32_core_pe(desplazamiento_parametro),
+                4
+            )
+            operacion_bytes_pe(contexto, guardar_parametro)
+            parametro = parametro + 1
+        }
+        emitir_bloque_core_pe(
+            hijos_funcion[longitud(hijos_funcion) - 1],
+            contexto
+        )
+        operacion_bytes_pe(contexto, bytes_mov_rax_core_pe(0))
+        etiqueta_core_pe(contexto, contexto.retorno_actual)
+        operacion_bytes_pe(contexto, [72, 137, 236, 93, 195])
+
+        contexto.simbolos = simbolos_anteriores
+        contexto.colecciones = colecciones_anteriores
+        contexto.textos = textos_anteriores
+        contexto.siguiente_desplazamiento = desplazamiento_anterior
+        contexto.retorno_actual = retorno_anterior
+        indice = indice + 1
+    }
+
+    sea codigo: lista = resolver_operaciones_core_pe(contexto)
+    retornar empaquetar_core_pe(codigo, datos_core_pe(contexto))
+}
+
+sea argumentos_core_pe: lista = argumentos_programa()
+afirmar(
+    longitud(argumentos_core_pe) == 4,
+    "uso: cforge-pe-core archivo.cfv -o programa.exe"
+)
+afirmar(argumentos_core_pe[2] == "-o", "se esperaba -o")
+sea fuente_core_pe: texto = leer_archivo(argumentos_core_pe[1])
+sea ejecutable_core_pe: lista = compilar_core_pe(fuente_core_pe)
+afirmar(
+    escribir_bytes(argumentos_core_pe[3], ejecutable_core_pe),
+    "no se pudo escribir PE Core x64"
+)
+mostrar("C-Forge emitió PE32+ Core x86-64: " + argumentos_core_pe[3])
+)CFV61DATA"},
+        {R"CFV62DATA(bootstrap/direct/cforge_pe_x64_core_backend.cfv)CFV62DATA", R"CFV63DATA(// Backend Core B6.7. Se concatena con lexer, AST, parser y biblioteca PE.
+
+estructura SimboloPECore {
+    nombre: texto
+    desplazamiento: numero
+}
+
+estructura ColeccionPECore {
+    nombre: texto
+    desplazamiento: numero
+    longitud: numero
+}
+
+estructura TextoPECore {
+    nombre: texto
+    puntero: numero
+    longitud: numero
+}
+
+estructura OperacionPECore {
+    tipo: texto
+    bytes: lista
+    nombre: texto
+    valor: numero
+}
+
+estructura DatoPECore {
+    nombre: texto
+    bytes: lista
+}
+
+estructura FuncionPECore {
+    nombre: texto
+    nodo: cualquiera
+    etiqueta: texto
+}
+
+estructura ContextoPECore {
+    operaciones: lista
+    simbolos: lista
+    datos: lista
+    contador: numero
+    funciones: lista
+    retorno_actual: texto
+    colecciones: lista
+    textos: lista
+    siguiente_desplazamiento: numero
+}
+
+funcion operacion_bytes_pe(contexto: cualquiera, bytes: lista) {
+    agregar(
+        contexto.operaciones,
+        OperacionPECore("bytes", bytes, "", 0)
+    )
+}
+
+funcion operacion_control_pe(
+    contexto: cualquiera,
+    tipo: texto,
+    nombre: texto,
+    valor: numero
+) {
+    agregar(
+        contexto.operaciones,
+        OperacionPECore(tipo, [], nombre, valor)
+    )
+}
+
+funcion etiqueta_core_pe(contexto: cualquiera, nombre: texto) {
+    operacion_control_pe(contexto, "etiqueta", nombre, 0)
+}
+
+funcion nombre_unico_core_pe(
+    contexto: cualquiera,
+    prefijo: texto
+): texto {
+    sea nombre: texto = prefijo + "_" + a_texto(contexto.contador)
+    contexto.contador = contexto.contador + 1
+    retornar nombre
+}
+
+funcion nombre_declaracion_core_pe(valor: texto): texto {
+    sea nombre: texto = ""
+    sea indice: numero = 0
+    mientras (indice < longitud(valor) y valor[indice] != ":") {
+        nombre = nombre + valor[indice]
+        indice = indice + 1
+    }
+    retornar nombre
+}
+
+funcion digito_core_pe(caracter: texto): numero {
+    si (caracter == "0") { retornar 0 }
+    si (caracter == "1") { retornar 1 }
+    si (caracter == "2") { retornar 2 }
+    si (caracter == "3") { retornar 3 }
+    si (caracter == "4") { retornar 4 }
+    si (caracter == "5") { retornar 5 }
+    si (caracter == "6") { retornar 6 }
+    si (caracter == "7") { retornar 7 }
+    si (caracter == "8") { retornar 8 }
+    si (caracter == "9") { retornar 9 }
+    afirmar(falso, "literal numérico PE inválido")
+    retornar 0
+}
+
+funcion numero_ast_core_pe(valor: texto): numero {
+    sea resultado: numero = 0
+    sea indice: numero = 0
+    mientras (indice < longitud(valor)) {
+        resultado = resultado * 10 + digito_core_pe(valor[indice])
+        indice = indice + 1
+    }
+    retornar resultado
+}
+
+funcion texto_ast_core_pe(valor: texto): texto {
+    afirmar(longitud(valor) >= 2, "literal de texto PE inválido")
+    sea resultado: texto = ""
+    sea indice: numero = 1
+    mientras (indice + 1 < longitud(valor)) {
+        resultado = resultado + valor[indice]
+        indice = indice + 1
+    }
+    retornar resultado
+}
+
+funcion indice_simbolo_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea simbolos: lista = contexto.simbolos
+    sea indice: numero = 0
+    mientras (indice < longitud(simbolos)) {
+        si (simbolos[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion declarar_simbolo_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    afirmar(
+        indice_simbolo_core_pe(contexto, nombre) < 0,
+        "variable PE duplicada '" + nombre + "'"
+    )
+    contexto.siguiente_desplazamiento =
+        contexto.siguiente_desplazamiento - 8
+    sea desplazamiento: numero = contexto.siguiente_desplazamiento
+    afirmar(desplazamiento >= -4096, "memoria local PE agotada")
+    agregar(
+        contexto.simbolos,
+        SimboloPECore(nombre, desplazamiento)
+    )
+    retornar desplazamiento
+}
+
+funcion reservar_memoria_core_pe(
+    contexto: cualquiera,
+    cantidad: numero
+): numero {
+    contexto.siguiente_desplazamiento =
+        contexto.siguiente_desplazamiento - cantidad
+    afirmar(
+        contexto.siguiente_desplazamiento >= -4096,
+        "memoria dinámica local PE agotada"
+    )
+    retornar contexto.siguiente_desplazamiento
+}
+
+funcion buscar_coleccion_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): cualquiera {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.colecciones)) {
+        si (contexto.colecciones[indice].nombre == nombre) {
+            retornar contexto.colecciones[indice]
+        }
+        indice = indice + 1
+    }
+    afirmar(falso, "colección PE desconocida '" + nombre + "'")
+    retornar contexto.colecciones[0]
+}
+
+funcion indice_coleccion_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.colecciones)) {
+        si (contexto.colecciones[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion buscar_texto_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): cualquiera {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.textos)) {
+        si (contexto.textos[indice].nombre == nombre) {
+            retornar contexto.textos[indice]
+        }
+        indice = indice + 1
+    }
+    afirmar(falso, "texto PE desconocido '" + nombre + "'")
+    retornar contexto.textos[0]
+}
+
+funcion indice_texto_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.textos)) {
+        si (contexto.textos[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion desplazamiento_simbolo_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea indice: numero = indice_simbolo_core_pe(contexto, nombre)
+    afirmar(indice >= 0, "variable PE desconocida '" + nombre + "'")
+    sea simbolos: lista = contexto.simbolos
+    retornar simbolos[indice].desplazamiento
+}
+
+funcion buscar_funcion_core_pe(
+    contexto: cualquiera,
+    nombre: texto
+): cualquiera {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.funciones)) {
+        si (contexto.funciones[indice].nombre == nombre) {
+            retornar contexto.funciones[indice]
+        }
+        indice = indice + 1
+    }
+    afirmar(falso, "función PE desconocida '" + nombre + "'")
+    retornar contexto.funciones[0]
+}
+
+funcion emitir_argumentos_llamada_core_pe(
+    argumentos: lista,
+    contexto: cualquiera
+) {
+    afirmar(longitud(argumentos) <= 4, "B6.7 admite hasta cuatro parámetros")
+    sea indice: numero = 0
+    mientras (indice < longitud(argumentos)) {
+        emitir_expresion_core_pe(argumentos[indice], contexto)
+        operacion_bytes_pe(contexto, [80])
+        indice = indice + 1
+    }
+    indice = longitud(argumentos)
+    mientras (indice > 0) {
+        indice = indice - 1
+        si (indice == 0) { operacion_bytes_pe(contexto, [89]) }
+        si (indice == 1) { operacion_bytes_pe(contexto, [90]) }
+        si (indice == 2) { operacion_bytes_pe(contexto, [65, 88]) }
+        si (indice == 3) { operacion_bytes_pe(contexto, [65, 89]) }
+    }
+}
+
+funcion entero_32_core_pe(valor: numero): numero {
+    si (valor < 0) {
+        retornar 4294967296 + valor
+    }
+    retornar valor
+}
+
+funcion bytes_mov_rax_core_pe(valor: numero): lista {
+    afirmar(valor >= 0 y valor < 2147483648, "entero fuera del rango B6.7")
+    sea bytes: lista = [72, 184]
+    agregar_le_pe(bytes, valor, 8)
+    retornar bytes
+}
+
+funcion emitir_cargar_variable_core_pe(
+    contexto: cualquiera,
+    desplazamiento: numero
+) {
+    sea bytes: lista = [72, 139, 133]
+    agregar_le_pe(bytes, entero_32_core_pe(desplazamiento), 4)
+    operacion_bytes_pe(contexto, bytes)
+}
+
+funcion emitir_guardar_variable_core_pe(
+    contexto: cualquiera,
+    desplazamiento: numero
+) {
+    sea bytes: lista = [72, 137, 133]
+    agregar_le_pe(bytes, entero_32_core_pe(desplazamiento), 4)
+    operacion_bytes_pe(contexto, bytes)
+}
+
+funcion emitir_comparacion_core_pe(
+    contexto: cualquiera,
+    operador: texto
+) {
+    sea condicion: numero = 0
+    si (operador == "==") { condicion = 148 }
+    si (operador == "!=") { condicion = 149 }
+    si (operador == "<") { condicion = 156 }
+    si (operador == "<=") { condicion = 158 }
+    si (operador == ">") { condicion = 159 }
+    si (operador == ">=") { condicion = 157 }
+    afirmar(condicion > 0, "comparación PE desconocida")
+    operacion_bytes_pe(contexto, [72, 57, 193, 15, condicion, 192])
+    operacion_bytes_pe(contexto, [72, 15, 182, 192])
+}
+
+funcion emitir_expresion_core_pe(nodo: cualquiera, contexto: cualquiera) {
+    si (nodo.tipo == "Numero") {
+        operacion_bytes_pe(
+            contexto,
+            bytes_mov_rax_core_pe(numero_ast_core_pe(nodo.valor))
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Booleano") {
+        si (nodo.valor == "verdadero") {
+            operacion_bytes_pe(contexto, bytes_mov_rax_core_pe(1))
+        } sino {
+            operacion_bytes_pe(contexto, bytes_mov_rax_core_pe(0))
+        }
+        retornar 0
+    }
+    si (nodo.tipo == "Identificador") {
+        si (indice_texto_core_pe(contexto, nodo.valor) >= 0) {
+            afirmar(
+                falso,
+                "el texto '" + nodo.valor +
+                "' requiere una operación textual"
+            )
+        }
+        emitir_cargar_variable_core_pe(
+            contexto,
+            desplazamiento_simbolo_core_pe(contexto, nodo.valor)
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Indice") {
+        sea hijos_indice: lista = nodo.hijos
+        afirmar(
+            hijos_indice[0].tipo == "Identificador",
+            "B6.7 indexa una lista identificada"
+        )
+        sea coleccion: cualquiera = buscar_coleccion_core_pe(
+            contexto, hijos_indice[0].valor
+        )
+        emitir_expresion_core_pe(hijos_indice[1], contexto)
+        operacion_bytes_pe(contexto, [72, 247, 216])
+        sea direccion_lista: lista = [72, 141, 141]
+        agregar_le_pe(
+            direccion_lista,
+            entero_32_core_pe(coleccion.desplazamiento),
+            4
+        )
+        operacion_bytes_pe(contexto, direccion_lista)
+        operacion_bytes_pe(contexto, [72, 139, 4, 193])
+        retornar 0
+    }
+    si (nodo.tipo == "Miembro" y nodo.valor == "length") {
+        sea base_miembro: lista = nodo.hijos
+        afirmar(
+            base_miembro[0].tipo == "Identificador",
+            "length requiere un identificador"
+        )
+        sea nombre_base: texto = base_miembro[0].valor
+        si (indice_coleccion_core_pe(contexto, nombre_base) >= 0) {
+            sea lista_base: cualquiera =
+                buscar_coleccion_core_pe(contexto, nombre_base)
+            operacion_bytes_pe(
+                contexto,
+                bytes_mov_rax_core_pe(lista_base.longitud)
+            )
+            retornar 0
+        }
+        sea texto_base: cualquiera =
+            buscar_texto_core_pe(contexto, nombre_base)
+        emitir_cargar_variable_core_pe(contexto, texto_base.longitud)
+        retornar 0
+    }
+    si (nodo.tipo == "Llamada") {
+        si (nodo.valor == "longitud") {
+            afirmar(longitud(nodo.hijos) == 1, "longitud requiere un valor")
+            sea argumento_longitud: cualquiera = nodo.hijos[0]
+            afirmar(
+                argumento_longitud.tipo == "Identificador",
+                "B6.7 longitud requiere un identificador"
+            )
+            sea nombre_longitud: texto = argumento_longitud.valor
+            si (indice_coleccion_core_pe(contexto, nombre_longitud) >= 0) {
+                sea lista_longitud: cualquiera =
+                    buscar_coleccion_core_pe(contexto, nombre_longitud)
+                operacion_bytes_pe(
+                    contexto,
+                    bytes_mov_rax_core_pe(lista_longitud.longitud)
+                )
+            } sino {
+                sea texto_longitud: cualquiera =
+                    buscar_texto_core_pe(contexto, nombre_longitud)
+                emitir_cargar_variable_core_pe(
+                    contexto, texto_longitud.longitud
+                )
+            }
+            retornar 0
+        }
+        sea funcion: cualquiera =
+            buscar_funcion_core_pe(contexto, nodo.valor)
+        emitir_argumentos_llamada_core_pe(nodo.hijos, contexto)
+        operacion_control_pe(contexto, "call_rel", funcion.etiqueta, 0)
+        retornar 0
+    }
+    si (nodo.tipo == "Unario") {
+        sea hijos_unarios: lista = nodo.hijos
+        emitir_expresion_core_pe(hijos_unarios[0], contexto)
+        si (nodo.valor == "-") {
+            operacion_bytes_pe(contexto, [72, 247, 216])
+            retornar 0
+        }
+        si (nodo.valor == "no") {
+            operacion_bytes_pe(contexto, [
+                72, 133, 192, 15, 148, 192, 72, 15, 182, 192
+            ])
+            retornar 0
+        }
+    }
+    si (nodo.tipo == "Binario") {
+        sea hijos: lista = nodo.hijos
+        emitir_expresion_core_pe(hijos[0], contexto)
+        operacion_bytes_pe(contexto, [80])
+        emitir_expresion_core_pe(hijos[1], contexto)
+        operacion_bytes_pe(contexto, [89])
+
+        si (nodo.valor == "+") {
+            operacion_bytes_pe(contexto, [72, 1, 200])
+            retornar 0
+        }
+        si (nodo.valor == "-") {
+            operacion_bytes_pe(contexto, [72, 41, 193, 72, 137, 200])
+            retornar 0
+        }
+        si (nodo.valor == "*") {
+            operacion_bytes_pe(contexto, [72, 15, 175, 193])
+            retornar 0
+        }
+        si (nodo.valor == "/") {
+            operacion_bytes_pe(contexto, [
+                73, 137, 194, 72, 137, 200, 72, 153, 73, 247, 250
+            ])
+            retornar 0
+        }
+        emitir_comparacion_core_pe(contexto, nodo.valor)
+        retornar 0
+    }
+    afirmar(
+        falso,
+        "B6.7 no puede emitir expresión '" + nodo.tipo + "'"
+    )
+}
+
+funcion registrar_texto_core_pe(
+    contexto: cualquiera,
+    literal: texto
+): texto {
+    sea nombre: texto = nombre_unico_core_pe(contexto, "dato")
+    sea bytes: lista = bytes_texto(literal)
+    agregar(contexto.datos, DatoPECore(nombre, bytes))
+    retornar nombre
+}
+
+funcion emitir_texto_core_pe(nodo: cualquiera, contexto: cualquiera) {
+    si (nodo.tipo == "Texto") {
+        sea literal: texto = texto_ast_core_pe(nodo.valor)
+        sea nombre: texto = registrar_texto_core_pe(contexto, literal)
+        operacion_control_pe(contexto, "lea_dato_rax", nombre, 0)
+        sea mover_longitud: lista = [72, 186]
+        agregar_le_pe(mover_longitud, longitud(bytes_texto(literal)), 8)
+        operacion_bytes_pe(contexto, mover_longitud)
+        retornar 0
+    }
+    si (nodo.tipo == "Identificador") {
+        sea simbolo_texto: cualquiera =
+            buscar_texto_core_pe(contexto, nodo.valor)
+        emitir_cargar_variable_core_pe(contexto, simbolo_texto.puntero)
+        sea cargar_longitud: lista = [72, 139, 149]
+        agregar_le_pe(
+            cargar_longitud,
+            entero_32_core_pe(simbolo_texto.longitud),
+            4
+        )
+        operacion_bytes_pe(contexto, cargar_longitud)
+        retornar 0
+    }
+    si (nodo.tipo == "Binario" y nodo.valor == "+") {
+        sea partes: lista = nodo.hijos
+        emitir_texto_core_pe(partes[0], contexto)
+        operacion_bytes_pe(contexto, [80, 82])
+        emitir_texto_core_pe(partes[1], contexto)
+        operacion_bytes_pe(contexto, [73, 137, 194, 73, 137, 211])
+        operacion_bytes_pe(contexto, [65, 88, 89])
+        sea buffer: numero = reservar_memoria_core_pe(contexto, 256)
+        sea direccion_buffer: lista = [76, 141, 141]
+        agregar_le_pe(
+            direccion_buffer,
+            entero_32_core_pe(buffer),
+            4
+        )
+        operacion_bytes_pe(contexto, direccion_buffer)
+        operacion_bytes_pe(contexto, [75, 141, 20, 24])
+        sea inicio_buffer: lista = [72, 141, 133]
+        agregar_le_pe(
+            inicio_buffer,
+            entero_32_core_pe(buffer),
+            4
+        )
+        operacion_bytes_pe(contexto, inicio_buffer)
+        sea copiar_izquierda: texto =
+            nombre_unico_core_pe(contexto, "texto_izquierdo")
+        sea copiar_derecha: texto =
+            nombre_unico_core_pe(contexto, "texto_derecho")
+        sea fin_izquierda: texto =
+            nombre_unico_core_pe(contexto, "fin_izquierdo")
+        sea fin_derecha: texto =
+            nombre_unico_core_pe(contexto, "fin_derecho")
+        etiqueta_core_pe(contexto, copiar_izquierda)
+        operacion_bytes_pe(contexto, [77, 133, 192])
+        operacion_control_pe(contexto, "jz", fin_izquierda, 0)
+        operacion_bytes_pe(contexto, [138, 1, 65, 136, 1])
+        operacion_bytes_pe(contexto, [72, 255, 193, 73, 255, 193, 73, 255, 200])
+        operacion_control_pe(contexto, "jmp", copiar_izquierda, 0)
+        etiqueta_core_pe(contexto, fin_izquierda)
+        etiqueta_core_pe(contexto, copiar_derecha)
+        operacion_bytes_pe(contexto, [77, 133, 219])
+        operacion_control_pe(contexto, "jz", fin_derecha, 0)
+        operacion_bytes_pe(contexto, [65, 138, 2, 65, 136, 1])
+        operacion_bytes_pe(contexto, [73, 255, 194, 73, 255, 193, 73, 255, 203])
+        operacion_control_pe(contexto, "jmp", copiar_derecha, 0)
+        etiqueta_core_pe(contexto, fin_derecha)
+        retornar 0
+    }
+    afirmar(falso, "expresión textual PE no soportada")
+}
+
+funcion emitir_mostrar_core_pe(nodo: cualquiera, contexto: cualquiera) {
+    sea hijos: lista = nodo.hijos
+    sea valor: cualquiera = hijos[0]
+    emitir_texto_core_pe(valor, contexto)
+    sea temporal_puntero: numero = reservar_memoria_core_pe(contexto, 8)
+    sea temporal_longitud: numero = reservar_memoria_core_pe(contexto, 8)
+    emitir_guardar_variable_core_pe(contexto, temporal_puntero)
+    sea guardar_longitud: lista = [72, 137, 149]
+    agregar_le_pe(
+        guardar_longitud,
+        entero_32_core_pe(temporal_longitud),
+        4
+    )
+    operacion_bytes_pe(contexto, guardar_longitud)
+    operacion_bytes_pe(contexto, [
+        72, 131, 236, 48,
+        185, 245, 255, 255, 255
+    ])
+    operacion_control_pe(contexto, "call_iat", "", 0)
+    operacion_bytes_pe(contexto, [72, 137, 193])
+    sea cargar_puntero: lista = [72, 139, 149]
+    agregar_le_pe(
+        cargar_puntero,
+        entero_32_core_pe(temporal_puntero),
+        4
+    )
+    operacion_bytes_pe(contexto, cargar_puntero)
+    sea cargar_tamano: lista = [68, 139, 133]
+    agregar_le_pe(
+        cargar_tamano,
+        entero_32_core_pe(temporal_longitud),
+        4
+    )
+    operacion_bytes_pe(contexto, cargar_tamano)
+    operacion_control_pe(contexto, "lea_written_r9", "", 0)
+    operacion_bytes_pe(contexto, [
+        72, 199, 68, 36, 32, 0, 0, 0, 0
+    ])
+    operacion_control_pe(contexto, "call_iat", "", 1)
+    sea salto_linea: texto = registrar_texto_core_pe(contexto, "\r\n")
+    operacion_bytes_pe(contexto, [185, 245, 255, 255, 255])
+    operacion_control_pe(contexto, "call_iat", "", 0)
+    operacion_bytes_pe(contexto, [72, 137, 193])
+    operacion_control_pe(contexto, "lea_dato_rdx", salto_linea, 0)
+    operacion_bytes_pe(contexto, [65, 184, 2, 0, 0, 0])
+    operacion_control_pe(contexto, "lea_written_r9", "", 0)
+    operacion_bytes_pe(contexto, [
+        72, 199, 68, 36, 32, 0, 0, 0, 0
+    ])
+    operacion_control_pe(contexto, "call_iat", "", 1)
+    operacion_bytes_pe(contexto, [72, 131, 196, 48])
+}
+
+funcion emitir_bloque_core_pe(nodo: cualquiera, contexto: cualquiera) {
+    sea sentencias: lista = nodo.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(sentencias)) {
+        emitir_sentencia_core_pe(sentencias[indice], contexto)
+        indice = indice + 1
+    }
+}
+
+funcion emitir_sentencia_core_pe(nodo: cualquiera, contexto: cualquiera) {
+    sea hijos: lista = nodo.hijos
+    si (nodo.tipo == "Declaracion") {
+        sea nombre: texto = nombre_declaracion_core_pe(nodo.valor)
+        si (hijos[0].tipo == "Lista") {
+            sea elementos: lista = hijos[0].hijos
+            sea base: numero = contexto.siguiente_desplazamiento - 8
+            sea elemento: numero = 0
+            mientras (elemento < longitud(elementos)) {
+                sea desplazamiento_elemento: numero =
+                    declarar_simbolo_core_pe(
+                        contexto,
+                        nombre + "#" + a_texto(elemento)
+                    )
+                emitir_expresion_core_pe(elementos[elemento], contexto)
+                emitir_guardar_variable_core_pe(
+                    contexto, desplazamiento_elemento
+                )
+                elemento = elemento + 1
+            }
+            agregar(
+                contexto.colecciones,
+                ColeccionPECore(nombre, base, longitud(elementos))
+            )
+            retornar 0
+        }
+        si (hijos[0].tipo == "Texto") {
+            sea puntero: numero =
+                declarar_simbolo_core_pe(contexto, nombre + "#puntero")
+            sea largo: numero =
+                declarar_simbolo_core_pe(contexto, nombre + "#longitud")
+            emitir_texto_core_pe(hijos[0], contexto)
+            emitir_guardar_variable_core_pe(contexto, puntero)
+            sea guardar_largo: lista = [72, 137, 149]
+            agregar_le_pe(
+                guardar_largo,
+                entero_32_core_pe(largo),
+                4
+            )
+            operacion_bytes_pe(contexto, guardar_largo)
+            agregar(contexto.textos, TextoPECore(nombre, puntero, largo))
+            retornar 0
+        }
+        sea desplazamiento: numero =
+            declarar_simbolo_core_pe(contexto, nombre)
+        emitir_expresion_core_pe(hijos[0], contexto)
+        emitir_guardar_variable_core_pe(contexto, desplazamiento)
+        retornar 0
+    }
+    si (nodo.tipo == "Asignacion") {
+        sea objetivo: cualquiera = hijos[0]
+        si (objetivo.tipo == "Indice") {
+            sea partes_indice: lista = objetivo.hijos
+            afirmar(
+                partes_indice[0].tipo == "Identificador",
+                "asignación indexada requiere una lista"
+            )
+            sea coleccion_objetivo: cualquiera =
+                buscar_coleccion_core_pe(
+                    contexto, partes_indice[0].valor
+                )
+            emitir_expresion_core_pe(hijos[1], contexto)
+            operacion_bytes_pe(contexto, [80])
+            emitir_expresion_core_pe(partes_indice[1], contexto)
+            operacion_bytes_pe(contexto, [72, 247, 216])
+            sea base_objetivo: lista = [72, 141, 141]
+            agregar_le_pe(
+                base_objetivo,
+                entero_32_core_pe(coleccion_objetivo.desplazamiento),
+                4
+            )
+            operacion_bytes_pe(contexto, base_objetivo)
+            operacion_bytes_pe(contexto, [90, 72, 137, 20, 193])
+            retornar 0
+        }
+        si (
+            objetivo.tipo == "Identificador" y
+            indice_texto_core_pe(contexto, objetivo.valor) >= 0
+        ) {
+            sea texto_objetivo: cualquiera =
+                buscar_texto_core_pe(contexto, objetivo.valor)
+            emitir_texto_core_pe(hijos[1], contexto)
+            emitir_guardar_variable_core_pe(
+                contexto, texto_objetivo.puntero
+            )
+            sea guardar_nuevo_largo: lista = [72, 137, 149]
+            agregar_le_pe(
+                guardar_nuevo_largo,
+                entero_32_core_pe(texto_objetivo.longitud),
+                4
+            )
+            operacion_bytes_pe(contexto, guardar_nuevo_largo)
+            retornar 0
+        }
+        afirmar(
+            objetivo.tipo == "Identificador",
+            "B6.7 solo asigna variables"
+        )
+        emitir_expresion_core_pe(hijos[1], contexto)
+        emitir_guardar_variable_core_pe(
+            contexto,
+            desplazamiento_simbolo_core_pe(contexto, objetivo.valor)
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Mostrar") {
+        emitir_mostrar_core_pe(nodo, contexto)
+        retornar 0
+    }
+    si (nodo.tipo == "Si") {
+        sea etiqueta_sino: texto =
+            nombre_unico_core_pe(contexto, "sino")
+        sea etiqueta_fin: texto =
+            nombre_unico_core_pe(contexto, "fin_si")
+        emitir_expresion_core_pe(hijos[0], contexto)
+        operacion_bytes_pe(contexto, [72, 133, 192])
+        operacion_control_pe(contexto, "jz", etiqueta_sino, 0)
+        emitir_bloque_core_pe(hijos[1], contexto)
+        si (longitud(hijos) > 2) {
+            operacion_control_pe(contexto, "jmp", etiqueta_fin, 0)
+            etiqueta_core_pe(contexto, etiqueta_sino)
+            emitir_bloque_core_pe(hijos[2], contexto)
+            etiqueta_core_pe(contexto, etiqueta_fin)
+        } sino {
+            etiqueta_core_pe(contexto, etiqueta_sino)
+        }
+        retornar 0
+    }
+    si (nodo.tipo == "Mientras") {
+        sea etiqueta_inicio: texto =
+            nombre_unico_core_pe(contexto, "mientras")
+        sea etiqueta_fin: texto =
+            nombre_unico_core_pe(contexto, "fin_mientras")
+        etiqueta_core_pe(contexto, etiqueta_inicio)
+        emitir_expresion_core_pe(hijos[0], contexto)
+        operacion_bytes_pe(contexto, [72, 133, 192])
+        operacion_control_pe(contexto, "jz", etiqueta_fin, 0)
+        emitir_bloque_core_pe(hijos[1], contexto)
+        operacion_control_pe(contexto, "jmp", etiqueta_inicio, 0)
+        etiqueta_core_pe(contexto, etiqueta_fin)
+        retornar 0
+    }
+    si (nodo.tipo == "Retornar") {
+        afirmar(
+            contexto.retorno_actual != "",
+            "retornar fuera de una función"
+        )
+        si (longitud(hijos) > 0) {
+            emitir_expresion_core_pe(hijos[0], contexto)
+        } sino {
+            operacion_bytes_pe(contexto, bytes_mov_rax_core_pe(0))
+        }
+        operacion_control_pe(
+            contexto, "jmp", contexto.retorno_actual, 0
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Expresion") {
+        emitir_expresion_core_pe(hijos[0], contexto)
+        retornar 0
+    }
+    si (nodo.tipo == "Vacia") {
+        retornar 0
+    }
+    afirmar(falso, "B6.7 no puede emitir sentencia '" + nodo.tipo + "'")
+}
+
+funcion tamano_operacion_core_pe(operacion: cualquiera): numero {
+    si (operacion.tipo == "etiqueta") { retornar 0 }
+    si (operacion.tipo == "bytes") {
+        retornar longitud(operacion.bytes)
+    }
+    si (operacion.tipo == "jmp") { retornar 5 }
+    si (operacion.tipo == "jz") { retornar 6 }
+    si (operacion.tipo == "call_iat") { retornar 6 }
+    si (operacion.tipo == "call_rel") { retornar 5 }
+    si (operacion.tipo == "lea_dato_rdx") { retornar 7 }
+    si (operacion.tipo == "lea_dato_rax") { retornar 7 }
+    si (operacion.tipo == "lea_written_r9") { retornar 7 }
+    afirmar(falso, "operación PE desconocida '" + operacion.tipo + "'")
+    retornar 0
+}
+
+funcion posicion_etiqueta_core_pe(
+    operaciones: lista,
+    nombre: texto
+): numero {
+    sea posicion: numero = 0
+    sea indice: numero = 0
+    mientras (indice < longitud(operaciones)) {
+        sea operacion: cualquiera = operaciones[indice]
+        si (operacion.tipo == "etiqueta" y operacion.nombre == nombre) {
+            retornar posicion
+        }
+        posicion = posicion + tamano_operacion_core_pe(operacion)
+        indice = indice + 1
+    }
+    afirmar(falso, "etiqueta PE desconocida '" + nombre + "'")
+    retornar 0
+}
+
+funcion posicion_dato_core_pe(
+    datos: lista,
+    nombre: texto
+): numero {
+    sea posicion: numero = 64
+    sea indice: numero = 0
+    mientras (indice < longitud(datos)) {
+        si (datos[indice].nombre == nombre) {
+            retornar posicion
+        }
+        posicion = posicion + longitud(datos[indice].bytes)
+        indice = indice + 1
+    }
+    afirmar(falso, "dato PE desconocido '" + nombre + "'")
+    retornar 0
+}
+
+funcion resolver_operaciones_core_pe(contexto: cualquiera): lista {
+    sea salida: lista = []
+    sea operaciones: lista = contexto.operaciones
+    sea posicion: numero = 0
+    sea indice: numero = 0
+    mientras (indice < longitud(operaciones)) {
+        sea operacion: cualquiera = operaciones[indice]
+        si (operacion.tipo == "bytes") {
+            agregar_lista_pe(salida, operacion.bytes)
+        }
+        si (operacion.tipo == "jmp") {
+            agregar(salida, 233)
+            sea destino_jmp: numero =
+                posicion_etiqueta_core_pe(operaciones, operacion.nombre)
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(destino_jmp - (posicion + 5)),
+                4
+            )
+        }
+        si (operacion.tipo == "jz") {
+            agregar_lista_pe(salida, [15, 132])
+            sea destino_jz: numero =
+                posicion_etiqueta_core_pe(operaciones, operacion.nombre)
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(destino_jz - (posicion + 6)),
+                4
+            )
+        }
+        si (operacion.tipo == "call_iat") {
+            agregar_lista_pe(salida, [255, 21])
+            sea destino_iat: numero = 12288 + operacion.valor * 8
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(
+                    destino_iat - (4096 + posicion + 6)
+                ),
+                4
+            )
+        }
+        si (operacion.tipo == "call_rel") {
+            agregar(salida, 232)
+            sea destino_relativo: numero =
+                posicion_etiqueta_core_pe(
+                    operaciones, operacion.nombre
+                )
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(
+                    destino_relativo - (posicion + 5)
+                ),
+                4
+            )
+        }
+        si (operacion.tipo == "lea_dato_rdx") {
+            agregar_lista_pe(salida, [72, 141, 21])
+            sea destino_dato: numero =
+                12288 + posicion_dato_core_pe(
+                    contexto.datos,
+                    operacion.nombre
+                )
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(
+                    destino_dato - (4096 + posicion + 7)
+                ),
+                4
+            )
+        }
+        si (operacion.tipo == "lea_dato_rax") {
+            agregar_lista_pe(salida, [72, 141, 5])
+            sea destino_dato_rax: numero =
+                12288 + posicion_dato_core_pe(
+                    contexto.datos,
+                    operacion.nombre
+                )
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(
+                    destino_dato_rax - (4096 + posicion + 7)
+                ),
+                4
+            )
+        }
+        si (operacion.tipo == "lea_written_r9") {
+            agregar_lista_pe(salida, [76, 141, 13])
+            agregar_le_pe(
+                salida,
+                entero_32_core_pe(12320 - (4096 + posicion + 7)),
+                4
+            )
+        }
+        posicion = posicion + tamano_operacion_core_pe(operacion)
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion datos_core_pe(contexto: cualquiera): lista {
+    sea datos: lista = []
+    agregar_le_pe(datos, 8352, 8)
+    agregar_le_pe(datos, 8368, 8)
+    agregar_le_pe(datos, 8384, 8)
+    agregar_le_pe(datos, 0, 8)
+    agregar_le_pe(datos, 0, 4)
+    completar_pe(datos, 64)
+
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.datos)) {
+        agregar_lista_pe(datos, contexto.datos[indice].bytes)
+        indice = indice + 1
+    }
+    completar_pe(datos, 512)
+    retornar datos
+}
+
+funcion encabezado_seccion_core_pe(
+    imagen: lista,
+    nombre: texto,
+    tamano_virtual: numero,
+    rva: numero,
+    tamano_archivo: numero,
+    posicion_archivo: numero,
+    caracteristicas: numero
+) {
+    nombre_seccion_pe(imagen, nombre)
+    agregar_le_pe(imagen, tamano_virtual, 4)
+    agregar_le_pe(imagen, rva, 4)
+    agregar_le_pe(imagen, tamano_archivo, 4)
+    agregar_le_pe(imagen, posicion_archivo, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, caracteristicas, 4)
+}
+
+funcion empaquetar_core_pe(codigo: lista, datos: lista): lista {
+    afirmar(longitud(codigo) <= 4096, "código B6.7 excede .text")
+    afirmar(longitud(datos) == 512, "sección .data B6.7 inválida")
+    sea imagen: lista = [77, 90]
+    agregar_ceros_pe(imagen, 58)
+    agregar_le_pe(imagen, 128, 4)
+    completar_pe(imagen, 128)
+
+    agregar_lista_pe(imagen, [80, 69, 0, 0])
+    agregar_le_pe(imagen, 34404, 2)
+    agregar_le_pe(imagen, 3, 2)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 240, 2)
+    agregar_le_pe(imagen, 34, 2)
+
+    agregar_le_pe(imagen, 523, 2)
+    agregar_lista_pe(imagen, [1, 0])
+    agregar_le_pe(imagen, 4096, 4)
+    agregar_le_pe(imagen, 4096, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 4096, 4)
+    agregar_le_pe(imagen, 4096, 4)
+    agregar_le_pe(imagen, 5368709120, 8)
+    agregar_le_pe(imagen, 4096, 4)
+    agregar_le_pe(imagen, 512, 4)
+    agregar_le_pe(imagen, 6, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 6, 2)
+    agregar_le_pe(imagen, 0, 2)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 16384, 4)
+    agregar_le_pe(imagen, 512, 4)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 3, 2)
+    agregar_le_pe(imagen, 33024, 2)
+    agregar_le_pe(imagen, 1048576, 8)
+    agregar_le_pe(imagen, 4096, 8)
+    agregar_le_pe(imagen, 1048576, 8)
+    agregar_le_pe(imagen, 4096, 8)
+    agregar_le_pe(imagen, 0, 4)
+    agregar_le_pe(imagen, 16, 4)
+    agregar_le_pe(imagen, 0, 8)
+    agregar_le_pe(imagen, 8192, 4)
+    agregar_le_pe(imagen, 40, 4)
+    agregar_ceros_pe(imagen, 80)
+    agregar_le_pe(imagen, 12288, 4)
+    agregar_le_pe(imagen, 32, 4)
+    agregar_ceros_pe(imagen, 24)
+
+    encabezado_seccion_core_pe(
+        imagen, ".text", longitud(codigo), 4096, 4096, 512, 1610612768
+    )
+    encabezado_seccion_core_pe(
+        imagen, ".rdata", 512, 8192, 512, 4608, 1073741888
+    )
+    encabezado_seccion_core_pe(
+        imagen, ".data", 512, 12288, 512, 5120, 3221225536
+    )
+    afirmar(longitud(imagen) == 512, "cabeceras PE Core inválidas")
+    agregar_lista_pe(imagen, codigo)
+    completar_pe(imagen, 4608)
+    agregar_lista_pe(imagen, seccion_importaciones_pe())
+    agregar_lista_pe(imagen, datos)
+    afirmar(longitud(imagen) == 5632, "imagen PE Core inválida")
+    retornar imagen
+}
+
+funcion compilar_core_pe(fuente: texto): lista {
+    sea tokens: lista = tokenizar_core(fuente)
+    sea programa: cualquiera = parsear_tokens_core(tokens)
+    sea contexto: cualquiera =
+        ContextoPECore([], [], [], 0, [], "", [], [], 0)
+    sea declaraciones: lista = programa.hijos
+    sea indice: numero = 0
+
+    mientras (indice < longitud(declaraciones)) {
+        si (declaraciones[indice].tipo == "Funcion") {
+            sea nombre_funcion: texto =
+                nombre_declaracion_core_pe(declaraciones[indice].valor)
+            agregar(
+                contexto.funciones,
+                FuncionPECore(
+                    nombre_funcion,
+                    declaraciones[indice],
+                    "funcion_" + nombre_funcion
+                )
+            )
+        }
+        indice = indice + 1
+    }
+
+    operacion_bytes_pe(contexto, [
+        85, 72, 137, 229, 72, 129, 236, 0, 16, 0, 0
+    ])
+    indice = 0
+    mientras (indice < longitud(declaraciones)) {
+        sea nodo: cualquiera = declaraciones[indice]
+        afirmar(
+            nodo.tipo != "Clase" y
+            nodo.tipo != "Estructura",
+            "B6.7 todavía no compila clases ni estructuras"
+        )
+        si (nodo.tipo != "Funcion") {
+            emitir_sentencia_core_pe(nodo, contexto)
+        }
+        indice = indice + 1
+    }
+
+    operacion_bytes_pe(contexto, [
+        72, 137, 236, 93,
+        72, 131, 236, 40,
+        49, 201
+    ])
+    operacion_control_pe(contexto, "call_iat", "", 2)
+    operacion_bytes_pe(contexto, [204])
+
+    indice = 0
+    mientras (indice < longitud(contexto.funciones)) {
+        sea funcion: cualquiera = contexto.funciones[indice]
+        sea nodo_funcion: cualquiera = funcion.nodo
+        sea hijos_funcion: lista = nodo_funcion.hijos
+        sea simbolos_anteriores: lista = contexto.simbolos
+        sea retorno_anterior: texto = contexto.retorno_actual
+        sea colecciones_anteriores: lista = contexto.colecciones
+        sea textos_anteriores: lista = contexto.textos
+        sea desplazamiento_anterior: numero =
+            contexto.siguiente_desplazamiento
+        contexto.simbolos = []
+        contexto.colecciones = []
+        contexto.textos = []
+        contexto.siguiente_desplazamiento = 0
+        contexto.retorno_actual = funcion.etiqueta + "_retorno"
+
+        etiqueta_core_pe(contexto, funcion.etiqueta)
+        operacion_bytes_pe(contexto, [
+            85, 72, 137, 229, 72, 129, 236, 0, 16, 0, 0
+        ])
+        sea cantidad_parametros: numero = longitud(hijos_funcion) - 1
+        afirmar(cantidad_parametros <= 4, "demasiados parámetros PE")
+        sea parametro: numero = 0
+        mientras (parametro < cantidad_parametros) {
+            sea nombre_parametro: texto =
+                nombre_declaracion_core_pe(hijos_funcion[parametro].valor)
+            sea desplazamiento_parametro: numero =
+                declarar_simbolo_core_pe(contexto, nombre_parametro)
+            sea guardar_parametro: lista = [72, 137, 141]
+            si (parametro == 1) { guardar_parametro = [72, 137, 149] }
+            si (parametro == 2) { guardar_parametro = [76, 137, 133] }
+            si (parametro == 3) { guardar_parametro = [76, 137, 141] }
+            agregar_le_pe(
+                guardar_parametro,
+                entero_32_core_pe(desplazamiento_parametro),
+                4
+            )
+            operacion_bytes_pe(contexto, guardar_parametro)
+            parametro = parametro + 1
+        }
+        emitir_bloque_core_pe(
+            hijos_funcion[longitud(hijos_funcion) - 1],
+            contexto
+        )
+        operacion_bytes_pe(contexto, bytes_mov_rax_core_pe(0))
+        etiqueta_core_pe(contexto, contexto.retorno_actual)
+        operacion_bytes_pe(contexto, [72, 137, 236, 93, 195])
+
+        contexto.simbolos = simbolos_anteriores
+        contexto.colecciones = colecciones_anteriores
+        contexto.textos = textos_anteriores
+        contexto.siguiente_desplazamiento = desplazamiento_anterior
+        contexto.retorno_actual = retorno_anterior
+        indice = indice + 1
+    }
+
+    sea codigo: lista = resolver_operaciones_core_pe(contexto)
+    retornar empaquetar_core_pe(codigo, datos_core_pe(contexto))
+}
+
+sea argumentos_core_pe: lista = argumentos_programa()
+afirmar(
+    longitud(argumentos_core_pe) == 4,
+    "uso: cforge-pe-core archivo.cfv -o programa.exe"
+)
+afirmar(argumentos_core_pe[2] == "-o", "se esperaba -o")
+sea fuente_core_pe: texto = leer_archivo(argumentos_core_pe[1])
+sea ejecutable_core_pe: lista = compilar_core_pe(fuente_core_pe)
+afirmar(
+    escribir_bytes(argumentos_core_pe[3], ejecutable_core_pe),
+    "no se pudo escribir PE Core x64"
+)
+mostrar("C-Forge emitió PE32+ Core x86-64: " + argumentos_core_pe[3])
+)CFV63DATA"},
+        {R"CFV64DATA(bootstrap/fixtures/machine_control_b6.cfv)CFV64DATA", R"CFV65DATA(sea contador: numero = 0
 sea acumulado: numero = 0
 
 mientras (contador < 5) {
@@ -15495,10 +19733,67 @@ si (acumulado > division) {
 } sino {
     mostrar("MAYOR-FALLO")
 }
-)CFV61DATA"},
-        {R"CFV62DATA(bootstrap/fixtures/machine_hello_windows_b6.cfv)CFV62DATA", R"CFV63DATA(mostrar("Hola maquina Windows desde C-Forge")
-)CFV63DATA"},
-        {R"CFV64DATA(herramientas/generar_macho_core.py)CFV64DATA", R"CFV65DATA(#!/usr/bin/env python3
+)CFV65DATA"},
+        {R"CFV66DATA(bootstrap/fixtures/machine_hello_windows_b6.cfv)CFV66DATA", R"CFV67DATA(mostrar("Hola maquina Windows desde C-Forge")
+)CFV67DATA"},
+        {R"CFV68DATA(bootstrap/fixtures/machine_control_windows_b6.cfv)CFV68DATA", R"CFV69DATA(sea contador: numero = 0
+sea acumulado: numero = 0
+
+mientras (contador < 5) {
+    acumulado = acumulado + contador * 2
+    contador = contador + 1
+}
+
+si (acumulado == 20) {
+    mostrar("PE-ARITMETICA-CONDICION-CICLO-OK")
+} sino {
+    mostrar("PE-ARITMETICA-CONDICION-CICLO-FALLO")
+}
+
+sea division: numero = acumulado / 4
+si (division >= 5) {
+    mostrar("PE-DIVISION-COMPARACION-OK")
+} sino {
+    mostrar("PE-DIVISION-COMPARACION-FALLO")
+}
+
+si (division != 4) {
+    mostrar("PE-DISTINTO-OK")
+} sino {
+    mostrar("PE-DISTINTO-FALLO")
+}
+
+si (division <= 5) {
+    mostrar("PE-MENOR-IGUAL-OK")
+} sino {
+    mostrar("PE-MENOR-IGUAL-FALLO")
+}
+
+si (acumulado > division) {
+    mostrar("PE-MAYOR-OK")
+} sino {
+    mostrar("PE-MAYOR-FALLO")
+}
+)CFV69DATA"},
+        {R"CFV70DATA(bootstrap/fixtures/machine_runtime_b6.cfv)CFV70DATA", R"CFV71DATA(funcion sumar(a: numero, b: numero): numero {
+    retornar a + b
+}
+
+sea valores = [10, 20, 30]
+valores[1] = sumar(valores[0], 32)
+
+sea prefijo = "C-FORGE-"
+prefijo = prefijo + "B6.7-OK"
+
+si (valores[1] == 42) {
+    si (longitud(valores) == 3) {
+        si (longitud(prefijo) == 15) {
+            mostrar(prefijo)
+        }
+    }
+}
+)CFV71DATA"},
+        {R"CFV72DATA(herramientas/generar_macho_core.py)CFV72DATA", R"CFV73DATA(#!/usr/bin/env python3
 """Genera el compilador Mach-O Core autocontenido escrito en C-Forge."""
 
 from pathlib import Path
@@ -15534,8 +19829,46 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-)CFV65DATA"},
-        {R"CFV66DATA(tests/test_bootstrap_b6_macho_core.py)CFV66DATA", R"CFV67DATA(import os
+)CFV73DATA"},
+        {R"CFV74DATA(herramientas/generar_pe_core.py)CFV74DATA", R"CFV75DATA(#!/usr/bin/env python3
+"""Genera el backend PE Core autocontenido escrito en C-Forge."""
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+OUTPUT = ROOT / "bootstrap/direct/cforge_pe_x64_core.cfv"
+PARTS = (
+    ROOT / "bootstrap/core_lexer.cfv",
+    ROOT / "bootstrap/core_ast.cfv",
+    ROOT / "bootstrap/core_parser.cfv",
+)
+PE_LIBRARY = ROOT / "bootstrap/direct/cforge_pe_x64.cfv"
+BACKEND = ROOT / "bootstrap/direct/cforge_pe_x64_core_backend.cfv"
+
+
+def main() -> int:
+    sources = [path.read_text(encoding="utf-8") for path in PARTS]
+    lexer_demo = "sea muestra: texto ="
+    if lexer_demo not in sources[0]:
+        raise RuntimeError("no se encontró la prueba incrustada del lexer Core")
+    sources[0] = sources[0].split(lexer_demo, 1)[0]
+
+    pe = PE_LIBRARY.read_text(encoding="utf-8")
+    marker = "sea argumentos_pe: lista = argumentos_programa()"
+    if marker not in pe:
+        raise RuntimeError("no se encontró el controlador B6.5")
+    sources.append(pe.split(marker, 1)[0])
+    sources.append(BACKEND.read_text(encoding="utf-8"))
+    OUTPUT.write_text("\n\n".join(sources), encoding="utf-8")
+    print(f"Backend PE Core generado: {OUTPUT}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+)CFV75DATA"},
+        {R"CFV76DATA(tests/test_bootstrap_b6_macho_core.py)CFV76DATA", R"CFV77DATA(import os
 import platform
 import shutil
 import struct
@@ -15660,8 +19993,8 @@ class BootstrapB6MachOCoreExecutionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-)CFV67DATA"},
-        {R"CFV68DATA(tests/test_bootstrap_b6_pe.py)CFV68DATA", R"CFV69DATA(import os
+)CFV77DATA"},
+        {R"CFV78DATA(tests/test_bootstrap_b6_pe.py)CFV78DATA", R"CFV79DATA(import os
 import platform
 import shutil
 import struct
@@ -15788,8 +20121,232 @@ class BootstrapB6PEDirectEmissionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-)CFV69DATA"},
-        {R"CFV70DATA(tests/test_bootstrap_b5.py)CFV70DATA", R"CFV71DATA(import hashlib
+)CFV79DATA"},
+        {R"CFV80DATA(tests/test_bootstrap_b6_pe_core.py)CFV80DATA", R"CFV81DATA(import os
+import shutil
+import struct
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+STAGE0_SOURCE = ROOT / "bootstrap/stage0/cforge_bootstrap.cpp"
+DIRECT_SOURCE = ROOT / "bootstrap/direct/cforge_pe_x64_core.cfv"
+BACKEND_SOURCE = ROOT / "bootstrap/direct/cforge_pe_x64_core_backend.cfv"
+FIXTURE = ROOT / "bootstrap/fixtures/machine_control_windows_b6.cfv"
+GENERATOR = ROOT / "herramientas/generar_pe_core.py"
+EXPECTED_LINES = (
+    "PE-ARITMETICA-CONDICION-CICLO-OK",
+    "PE-DIVISION-COMPARACION-OK",
+    "PE-DISTINTO-OK",
+    "PE-MENOR-IGUAL-OK",
+    "PE-MAYOR-OK",
+)
+
+
+def run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, capture_output=True, text=True, **kwargs)
+
+
+def require_success(result: subprocess.CompletedProcess[str]) -> None:
+    if result.returncode != 0:
+        raise AssertionError(
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+
+
+class BootstrapB6PECoreSourceTests(unittest.TestCase):
+    def test_backend_is_cforge_without_foreign_bridges(self):
+        source = DIRECT_SOURCE.read_text(encoding="utf-8")
+        self.assertIn("funcion compilar_core_pe", source)
+        self.assertIn("funcion emitir_expresion_core_pe", source)
+        self.assertIn("funcion resolver_operaciones_core_pe", source)
+        self.assertNotIn('extern("', source)
+        self.assertNotIn("compilar_cpp_nativo", source)
+        self.assertNotIn("sys_run", source)
+
+    def test_generated_backend_is_reproducible(self):
+        before = DIRECT_SOURCE.read_bytes()
+        require_success(run(["python3", str(GENERATOR)], cwd=ROOT))
+        self.assertEqual(DIRECT_SOURCE.read_bytes(), before)
+
+
+@unittest.skipUnless(
+    shutil.which("clang++"),
+    "clang++ solo es necesario para construir Stage 0 durante la prueba",
+)
+class BootstrapB6PECoreEmissionTests(unittest.TestCase):
+    def test_variables_arithmetic_comparisons_if_else_and_while(self):
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            stage0 = build / "stage0"
+            backend = build / "cforge-pe-core"
+            first = build / "control-primero.exe"
+            second = build / "control-segundo.exe"
+            poison = build / "sin-toolchain"
+            marker = build / "herramienta-invocada"
+
+            require_success(
+                run(
+                    [
+                        "clang++", "-std=c++17", "-O2",
+                        str(STAGE0_SOURCE), "-o", str(stage0),
+                    ]
+                )
+            )
+            require_success(
+                run([str(stage0), str(DIRECT_SOURCE), "-o", str(backend)])
+            )
+
+            poison.mkdir()
+            for name in (
+                "clang++", "clang", "g++", "gcc", "cc", "cl", "link",
+                "lld", "ld", "as", "python", "python3",
+            ):
+                blocker = poison / name
+                blocker.write_text(
+                    "#!/bin/sh\n"
+                    f"touch '{marker}'\n"
+                    "exit 97\n",
+                    encoding="utf-8",
+                )
+                blocker.chmod(0o755)
+
+            environment = os.environ.copy()
+            environment["PATH"] = str(poison)
+            for output in (first, second):
+                emission = run(
+                    [str(backend), str(FIXTURE), "-o", str(output)],
+                    env=environment,
+                )
+                require_success(emission)
+
+            self.assertFalse(marker.exists())
+            image = first.read_bytes()
+            self.assertEqual(image, second.read_bytes())
+            self.assertEqual(len(image), 5632)
+            self.assertEqual(image[:2], b"MZ")
+            self.assertEqual(image[0x80:0x84], b"PE\0\0")
+            self.assertEqual(struct.unpack_from("<H", image, 0x84)[0], 0x8664)
+            self.assertEqual(struct.unpack_from("<H", image, 0x98)[0], 0x20B)
+            self.assertEqual(struct.unpack_from("<I", image, 0xA8)[0], 0x1000)
+            self.assertEqual(struct.unpack_from("<I", image, 0x9C)[0], 4096)
+            self.assertEqual(struct.unpack_from("<I", image, 0x198)[0], 4096)
+            self.assertEqual(struct.unpack_from("<I", image, 0x1C4)[0], 4608)
+            self.assertEqual(struct.unpack_from("<I", image, 0x1EC)[0], 5120)
+            self.assertEqual(image[0x200:0x20B], bytes([
+                85, 72, 137, 229, 72, 129, 236, 0, 16, 0, 0
+            ]))
+            self.assertIn(b"\x48\x0f\xaf\xc1", image[:0x600])
+            self.assertIn(b"\x49\xf7\xfa", image[:0x600])
+            self.assertIn(b"\x0f\x84", image[:0x600])
+            self.assertIn(b"\xe9", image[:0x600])
+            self.assertIn(b"KERNEL32.dll\0", image)
+            self.assertIn(b"GetStdHandle\0", image)
+            self.assertIn(b"WriteFile\0", image)
+            self.assertIn(b"ExitProcess\0", image)
+            for line in EXPECTED_LINES:
+                self.assertIn((line + "\r\n").encode("utf-8"), image)
+
+
+if __name__ == "__main__":
+    unittest.main()
+)CFV81DATA"},
+        {R"CFV82DATA(tests/test_bootstrap_b6_runtime_values.py)CFV82DATA", R"CFV83DATA(from __future__ import annotations
+
+import os
+import platform
+import shutil
+import struct
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+STAGE0 = ROOT / "bootstrap/stage0/cforge_bootstrap.cpp"
+MACHO = ROOT / "bootstrap/direct/cforge_macho_arm64_core.cfv"
+PE = ROOT / "bootstrap/direct/cforge_pe_x64_core.cfv"
+FIXTURE = ROOT / "bootstrap/fixtures/machine_runtime_b6.cfv"
+
+
+def run(command: list[str], *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=ROOT,
+        env=env,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+@unittest.skipUnless(shutil.which("clang++"), "clang++ no disponible para construir Stage 0")
+class BootstrapB67RuntimeValueTests(unittest.TestCase):
+    def build_backend(self, source: Path, directory: Path) -> Path:
+        stage0 = directory / "stage0"
+        backend = directory / source.stem
+        run(["clang++", "-std=c++17", "-O2", str(STAGE0), "-o", str(stage0)])
+        run([str(stage0), str(source), "-o", str(backend)])
+        return backend
+
+    def test_sources_are_cforge_and_cover_runtime_values(self):
+        for source in (MACHO, PE):
+            text = source.read_text(encoding="utf-8")
+            self.assertIn("Funcion", text)
+            self.assertIn("Coleccion", text)
+            self.assertIn("emitir_texto", text)
+            self.assertNotIn("extern(", text)
+            self.assertNotIn("use_python", text)
+
+    def test_pe_emits_functions_lists_indexing_and_dynamic_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            backend = self.build_backend(PE, directory)
+            executable = directory / "runtime.exe"
+            blocked = directory / "blocked"
+            blocked.mkdir()
+            for name in ("clang", "clang++", "cl", "link", "lld", "ld", "as", "python", "python3"):
+                path = blocked / name
+                path.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8")
+                path.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = str(blocked)
+            run([str(backend), str(FIXTURE), "-o", str(executable)], env=env)
+            image = executable.read_bytes()
+            self.assertEqual(image[:2], b"MZ")
+            self.assertEqual(image[0x80:0x84], b"PE\0\0")
+            self.assertEqual(struct.unpack_from("<H", image, 0x84)[0], 0x8664)
+            self.assertEqual(len(image), 5632)
+            text = image[512:4608]
+            self.assertIn(b"\xe8", text)  # CALL rel32 de una función C-Forge.
+            self.assertIn(b"\x48\x8b\x04\xc1", text)  # indexación de lista.
+            self.assertIn(b"\x41\x88\x01", text)  # copia dinámica de texto.
+            self.assertIn(b"C-FORGE-", image)
+            self.assertIn(b"B6.7-OK", image)
+
+    @unittest.skipUnless(
+        platform.system() == "Darwin" and platform.machine() == "arm64",
+        "ejecución Mach-O ARM64 disponible solo en macOS ARM64",
+    )
+    def test_macho_executes_functions_lists_indexing_and_dynamic_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            backend = self.build_backend(MACHO, directory)
+            executable = directory / "runtime"
+            run([str(backend), str(FIXTURE), "-o", str(executable)])
+            result = run([str(executable)])
+            self.assertEqual(result.stdout, "C-FORGE-B6.7-OK\n")
+
+
+if __name__ == "__main__":
+    unittest.main()
+)CFV83DATA"},
+        {R"CFV84DATA(tests/test_bootstrap_b5.py)CFV84DATA", R"CFV85DATA(import hashlib
 import shutil
 import subprocess
 import tempfile
@@ -15916,8 +20473,8 @@ class BootstrapB5Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-)CFV71DATA"},
-        {R"CFV72DATA(bootstrap/stage0/cforge_bootstrap.cpp)CFV72DATA", R"CFV73DATA(// C-Forge Stage 0 Bootstrap
+)CFV85DATA"},
+        {R"CFV86DATA(bootstrap/stage0/cforge_bootstrap.cpp)CFV86DATA", R"CFV87DATA(// C-Forge Stage 0 Bootstrap
 // Compilador mínimo alojado exclusivamente en C++17. No carga Python, JVM,
 // .NET, Node ni ningún runtime extranjero.
 
@@ -17164,15 +21721,15 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-)CFV73DATA"},
-        {R"CFV74DATA(bootstrap/fixtures/minimal.cfv)CFV74DATA", R"CFV75DATA(// Programa aceptado por C-Forge Stage 0.
+)CFV87DATA"},
+        {R"CFV88DATA(bootstrap/fixtures/minimal.cfv)CFV88DATA", R"CFV89DATA(// Programa aceptado por C-Forge Stage 0.
 sea proyecto: texto = "C-Forge"
 sea base: numero = 40
 sea resultado: numero = base + 2
 mostrar(proyecto + " Core Bootstrap")
 mostrar(resultado)
-)CFV75DATA"},
-        {R"CFV76DATA(bootstrap/fixtures/parser_b1_driver.cfv)CFV76DATA", R"CFV77DATA(// Driver B1. Se concatena después de core_lexer, core_ast y core_parser.
+)CFV89DATA"},
+        {R"CFV90DATA(bootstrap/fixtures/parser_b1_driver.cfv)CFV90DATA", R"CFV91DATA(// Driver B1. Se concatena después de core_lexer, core_ast y core_parser.
 sea fuente_b1: texto =
     "sea respuesta: numero = 40 + 2 * 3\n" +
     "mostrar(respuesta)\n"
@@ -17191,8 +21748,8 @@ sea fuente_asociatividad_b1: texto =
 sea programa_asociatividad_b1: cualquiera =
     parsear_fuente_core(fuente_asociatividad_b1)
 mostrar(ast_core_canonico(programa_asociatividad_b1))
-)CFV77DATA"},
-        {R"CFV78DATA(bootstrap/fixtures/semantics_b2_driver.cfv)CFV78DATA", R"CFV79DATA(// Corpus normativo B2. Se concatena tras lexer, AST, parser y semántica.
+)CFV91DATA"},
+        {R"CFV92DATA(bootstrap/fixtures/semantics_b2_driver.cfv)CFV92DATA", R"CFV93DATA(// Corpus normativo B2. Se concatena tras lexer, AST, parser y semántica.
 
 sea fuente_valida_b2: texto =
     "sea titulo: texto = \"C-Forge\"\n" +
@@ -17221,8 +21778,8 @@ sea fuente_movida_b2: texto =
 sea resultado_movida_b2: cualquiera =
     analizar_semantica_core(parsear_fuente_core(fuente_movida_b2))
 mostrar(diagnosticos_semanticos_core(resultado_movida_b2))
-)CFV79DATA"},
-        {R"CFV80DATA(bootstrap/fixtures/emitter_b3_driver.cfv)CFV80DATA", R"CFV81DATA(// Driver del emisor B3. Su única salida es una unidad C++17 compilable.
+)CFV93DATA"},
+        {R"CFV94DATA(bootstrap/fixtures/emitter_b3_driver.cfv)CFV94DATA", R"CFV95DATA(// Driver del emisor B3. Su única salida es una unidad C++17 compilable.
 sea fuente_b3: texto =
     "sea nombre: texto = \"C-Forge\"\n" +
     "sea nombre_movido: texto = mover(nombre)\n" +
@@ -17234,16 +21791,16 @@ sea programa_b3: cualquiera = parsear_fuente_core(fuente_b3)
 sea emision_b3: cualquiera = emitir_programa_core(programa_b3)
 afirmar(emision_b3.valido, diagnosticos_semanticos_core(emision_b3))
 mostrar(emision_b3.codigo)
-)CFV81DATA"},
-        {R"CFV82DATA(registry/index.json)CFV82DATA", R"CFV83DATA({
+)CFV95DATA"},
+        {R"CFV96DATA(registry/index.json)CFV96DATA", R"CFV97DATA({
   "format": 2,
   "registry": "C-Forge Community Registry",
   "publishers": {},
   "revocations": [],
   "packages": {}
 }
-)CFV83DATA"},
-        {R"CFV84DATA(registry/README.md)CFV84DATA", R"CFV85DATA(# Registro público de paquetes C-Forge
+)CFV97DATA"},
+        {R"CFV98DATA(registry/README.md)CFV98DATA", R"CFV99DATA(# Registro público de paquetes C-Forge
 
 Este directorio define el índice público, auditable y versionado del gestor `cforge pkg`.
 Cada versión del formato 2 debe publicar una URL HTTPS, el SHA-256 exacto del
@@ -17270,8 +21827,8 @@ que cada paquete señale un publicador `active` y que su `key_id` esté autoriza
 por esa cuenta. Esta fase usa
 identidades de GitHub y revisión por pull request; todavía no existe un servicio
 central de inicio de sesión, recuperación de cuenta ni publicación automática.
-)CFV85DATA"},
-        {R"CFV86DATA(include/cforgev_ffi.h)CFV86DATA", R"CFV87DATA(#ifndef CFORGEV_FFI_H
+)CFV99DATA"},
+        {R"CFV100DATA(include/cforgev_ffi.h)CFV100DATA", R"CFV101DATA(#ifndef CFORGEV_FFI_H
 #define CFORGEV_FFI_H
 
 #include <stddef.h>
@@ -17416,8 +21973,8 @@ CFV_EXPORT int cfv_register_function_v2(const char* name, CfvForeignFunctionV2 f
 #endif
 
 #endif
-)CFV87DATA"},
-        {R"CFV88DATA(include/cforge_shared_arena.h)CFV88DATA", R"CFV89DATA(#ifndef CFORGE_SHARED_ARENA_H
+)CFV101DATA"},
+        {R"CFV102DATA(include/cforge_shared_arena.h)CFV102DATA", R"CFV103DATA(#ifndef CFORGE_SHARED_ARENA_H
 #define CFORGE_SHARED_ARENA_H
 
 #include <atomic>
@@ -17767,8 +22324,8 @@ private:
 }  // namespace cforge::arena
 
 #endif
-)CFV89DATA"},
-        {R"CFV90DATA(herramientas/cforgev_ffi_runner.cpp)CFV90DATA", R"CFV91DATA(#include "cforgev_ffi.h"
+)CFV103DATA"},
+        {R"CFV104DATA(herramientas/cforgev_ffi_runner.cpp)CFV104DATA", R"CFV105DATA(#include "cforgev_ffi.h"
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -17816,8 +22373,8 @@ int main(int argc, char** argv) {
     if (result.release) result.release(result.owner);
     return 0;
 }
-)CFV91DATA"},
-        {R"CFV92DATA(herramientas/cforge_cli.cpp)CFV92DATA", R"CFV93DATA(#include <cerrno>
+)CFV105DATA"},
+        {R"CFV106DATA(herramientas/cforge_cli.cpp)CFV106DATA", R"CFV107DATA(#include <cerrno>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -17888,8 +22445,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-)CFV93DATA"},
-        {R"CFV94DATA(herramientas/vscode-cforgev/package.json)CFV94DATA", R"CFV95DATA({
+)CFV107DATA"},
+        {R"CFV108DATA(herramientas/vscode-cforgev/package.json)CFV108DATA", R"CFV109DATA({
   "name": "cforgev-language",
   "displayName": "C-Forge Language Support",
   "description": "Resaltado de sintaxis y configuración oficial para el lenguaje C-Forge (.cfv)",
@@ -17989,8 +22546,8 @@ int main(int argc, char** argv) {
     ]
   }
 }
-)CFV95DATA"},
-        {R"CFV96DATA(herramientas/vscode-cforgev/extension.js)CFV96DATA", R"CFV97DATA("use strict";
+)CFV109DATA"},
+        {R"CFV110DATA(herramientas/vscode-cforgev/extension.js)CFV110DATA", R"CFV111DATA("use strict";
 
 const vscode = require("vscode");
 const { execFile, spawn } = require("child_process");
@@ -18236,8 +22793,8 @@ function activate(context) {
 async function deactivate() { if (languageServer) await languageServer.stop(); }
 
 module.exports = { activate, deactivate };
-)CFV97DATA"},
-        {R"CFV98DATA(herramientas/vscode-cforgev/language-configuration.json)CFV98DATA", R"CFV99DATA({
+)CFV111DATA"},
+        {R"CFV112DATA(herramientas/vscode-cforgev/language-configuration.json)CFV112DATA", R"CFV113DATA({
   "comments": { "lineComment": "//" },
   "brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
   "autoClosingPairs": [
@@ -18247,8 +22804,8 @@ module.exports = { activate, deactivate };
     { "open": "\"", "close": "\"" }
   ]
 }
-)CFV99DATA"},
-        {R"CFV100DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV100DATA", R"CFV101DATA({
+)CFV113DATA"},
+        {R"CFV114DATA(herramientas/vscode-cforgev/syntaxes/cforgev.tmLanguage.json)CFV114DATA", R"CFV115DATA({
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "C-Forge",
   "scopeName": "source.cforgev",
@@ -18294,7 +22851,7 @@ module.exports = { activate, deactivate };
     ] }
   }
 }
-)CFV101DATA"}
+)CFV115DATA"}
     };
     return resources;
 }

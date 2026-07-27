@@ -17,7 +17,7 @@ jobs:
         run: |
           clang++ -std=c++17 -O2 bootstrap/stage0/cforge_bootstrap.cpp \
             -o cforge-stage0
-          ./cforge-stage0 bootstrap/direct/cforge_pe_x64.cfv \
+          ./cforge-stage0 bootstrap/direct/cforge_pe_x64_core.cfv \
             -o cforge-pe-x64
       - name: Emitir PE sin toolchain externo
         shell: bash
@@ -29,7 +29,7 @@ jobs:
             chmod +x "sin-toolchain/$tool"
           done
           PATH="$PWD/sin-toolchain" "$PWD/cforge-pe-x64" \
-            "$PWD/bootstrap/fixtures/machine_hello_windows_b6.cfv" \
+            "$PWD/bootstrap/fixtures/machine_runtime_b6.cfv" \
             -o "$PWD/cforge-pe-smoke.exe"
           file cforge-pe-smoke.exe | grep 'PE32+ executable'
       - uses: actions/upload-artifact@v4
@@ -48,12 +48,13 @@ jobs:
       - name: Ejecutar PE generado por C-Forge
         shell: pwsh
         run: |
-          $salida = & .\cforge-pe-smoke.exe
+          $salida = @(& .\cforge-pe-smoke.exe)
           if ($LASTEXITCODE -ne 0) {
             throw "El PE terminó con código $LASTEXITCODE"
           }
-          if ($salida -ne "Hola maquina Windows desde C-Forge") {
-            throw "Salida PE inesperada: $salida"
+          $esperado = @("C-FORGE-B6.7-OK")
+          if (Compare-Object $esperado $salida) {
+            throw "Salida PE inesperada: $($salida -join ', ')"
           }
 
   portable:

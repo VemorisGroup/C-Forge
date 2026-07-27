@@ -140,6 +140,20 @@ emisión no ejecuta compilador, ensamblador, enlazador ni Python. Un trabajo de 
 transporta el artefacto determinista y lo ejecuta en Windows x64. Esta primera
 fase PE cubre el programa mínimo `mostrar("texto")`.
 
+B6.6 conecta el frontend Core al objetivo PE32+/x86-64. El nuevo backend genera
+directamente variables locales, asignaciones, aritmética entera con signo,
+comparaciones, `si`/`sino` y `mientras`, además de salida literal. Sus saltos,
+datos e importaciones se resuelven dentro del emisor C-Forge. La validación
+local comprueba el archivo PE byte por byte y el CI lo ejecuta en Windows x64.
+Funciones, colecciones y el runtime general siguen fuera de este corte.
+
+B6.7 añade llamadas reales de funciones, parámetros y retornos a Mach-O ARM64
+y PE x64. También incorpora listas numéricas contiguas con indexación,
+asignación indexada y longitud, además de textos dinámicos representados como
+puntero y longitud con concatenación en tiempo de ejecución. El mismo fixture
+se ejecuta en macOS ARM64 y Windows x64. Recursión, crecimiento de colecciones,
+límites dinámicos y el runtime general siguen pendientes.
+
 Construcción manual:
 
 ```bash
