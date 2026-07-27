@@ -856,6 +856,7 @@ private:
 
     static std::string runtime() {
         return R"CPP(#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -1046,15 +1047,61 @@ static std::string cfv_shell_quote(const std::string& value) {
     }
     return quoted + "'";
 }
+#if defined(__APPLE__)
+static bool cfv_normalize_macho_uuid(const std::string& path) {
+    std::fstream stream(path, std::ios::in | std::ios::out | std::ios::binary);
+    if (!stream) return false;
+    std::uint32_t magic = 0;
+    std::uint32_t commands = 0;
+    stream.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    if (magic != 0xfeedfacf && magic != 0xfeedface) return false;
+    stream.seekg(16);
+    stream.read(reinterpret_cast<char*>(&commands), sizeof(commands));
+    std::streamoff offset = magic == 0xfeedfacf ? 32 : 28;
+    for (std::uint32_t index = 0; index < commands; ++index) {
+        std::uint32_t command = 0;
+        std::uint32_t size = 0;
+        stream.seekg(offset);
+        stream.read(reinterpret_cast<char*>(&command), sizeof(command));
+        stream.read(reinterpret_cast<char*>(&size), sizeof(size));
+        if (!stream || size < 8) return false;
+        if (command == 0x1b && size >= 24) {
+            const char zero_uuid[16] = {};
+            stream.seekp(offset + 8);
+            stream.write(zero_uuid, sizeof(zero_uuid));
+            stream.flush();
+            return static_cast<bool>(stream);
+        }
+        offset += size;
+    }
+    return false;
+}
+static bool cfv_sign_reproducible_macos(const std::string& path) {
+    if (!cfv_normalize_macho_uuid(path)) return false;
+    const std::string command =
+        "codesign --force --sign - --identifier "
+        "org.vemoris.cforge.bootstrap " +
+        cfv_shell_quote(path) + " >/dev/null 2>&1";
+    return std::system(command.c_str()) == 0;
+}
+#endif
 static Value cfv_compile_cpp(const Value& source_value, const Value& output_value) {
     const std::string source =
         cfv_required_text(source_value, "compilar_cpp_nativo");
     const std::string output =
         cfv_required_text(output_value, "compilar_cpp_nativo");
-    const std::string command =
+    std::string command =
         "clang++ -std=c++17 -O2 " + cfv_shell_quote(source) +
         " -o " + cfv_shell_quote(output);
-    return Value(std::system(command.c_str()) == 0);
+#if defined(__linux__)
+    command += " -Wl,--build-id=none";
+#endif
+    if (std::system(command.c_str()) != 0) return Value(false);
+#if defined(__APPLE__)
+    return Value(cfv_sign_reproducible_macos(output));
+#else
+    return Value(true);
+#endif
 }
 static Value cfv_arg(const std::vector<Value>& args, std::size_t index,
                      const std::string& function) {

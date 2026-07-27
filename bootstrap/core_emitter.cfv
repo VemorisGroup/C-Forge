@@ -1,135 +1,516 @@
-// Emisor nativo de C-Forge Core Bootstrap 0.4.
-// Recibe el AST canónico validado por B2 y genera una unidad C++17 completa.
+// Emisor nativo de C-Forge Core Bootstrap 0.5.
+// Emite el subconjunto completo utilizado por las fuentes de Stage 1.
 
 estructura ResultadoEmisionCore {
     valido: booleano
     codigo: texto
-    errores: lista
+    errores: cualquiera
+}
+
+estructura TipoNativoCore {
+    nombre: texto
+    campos: cualquiera
+}
+
+estructura ContextoEmisionCore {
+    tipos: cualquiera
+    funciones: cualquiera
+    metodos: cualquiera
 }
 
 funcion nombre_cpp_core(nombre: texto): texto {
     retornar "cfv_" + nombre
 }
 
-funcion encabezado_cpp_core(): texto {
-    retornar
-        "#include <cmath>\n" +
-        "#include <iomanip>\n" +
-        "#include <iostream>\n" +
-        "#include <sstream>\n" +
-        "#include <stdexcept>\n" +
-        "#include <string>\n" +
-        "#include <variant>\n\n" +
-        "struct Valor {\n" +
-        "    std::variant<double, std::string> dato;\n" +
-        "    explicit Valor(double valor) : dato(valor) {}\n" +
-        "    explicit Valor(std::string valor) : dato(std::move(valor)) {}\n" +
-        "};\n\n" +
-        "static double numero(const Valor& valor) {\n" +
-        "    if (const auto* n = std::get_if<double>(&valor.dato)) return *n;\n" +
-        "    throw std::runtime_error(\"se esperaba numero\");\n" +
-        "}\n" +
-        "static Valor sumar(const Valor& a, const Valor& b) {\n" +
-        "    if (const auto* x = std::get_if<double>(&a.dato)) {\n" +
-        "        if (const auto* y = std::get_if<double>(&b.dato)) return Valor(*x + *y);\n" +
-        "    }\n" +
-        "    if (const auto* x = std::get_if<std::string>(&a.dato)) {\n" +
-        "        if (const auto* y = std::get_if<std::string>(&b.dato)) return Valor(*x + *y);\n" +
-        "    }\n" +
-        "    throw std::runtime_error(\"tipos incompatibles para +\");\n" +
-        "}\n" +
-        "static Valor restar(const Valor& a, const Valor& b) {\n" +
-        "    return Valor(numero(a) - numero(b));\n" +
-        "}\n" +
-        "static Valor multiplicar(const Valor& a, const Valor& b) {\n" +
-        "    return Valor(numero(a) * numero(b));\n" +
-        "}\n" +
-        "static Valor dividir(const Valor& a, const Valor& b) {\n" +
-        "    const double divisor = numero(b);\n" +
-        "    if (divisor == 0) throw std::runtime_error(\"division por cero\");\n" +
-        "    return Valor(numero(a) / divisor);\n" +
-        "}\n" +
-        "static Valor mover_core(const Valor& valor) { return valor; }\n" +
-        "static void mostrar_core(const Valor& valor) {\n" +
-        "    if (const auto* texto = std::get_if<std::string>(&valor.dato)) {\n" +
-        "        std::cout << *texto << '\\n';\n" +
-        "        return;\n" +
-        "    }\n" +
-        "    const double n = numero(valor);\n" +
-        "    if (std::floor(n) == n) {\n" +
-        "        std::cout << static_cast<long long>(n) << '\\n';\n" +
-        "    } else {\n" +
-        "        std::ostringstream salida;\n" +
-        "        salida << std::setprecision(15) << n;\n" +
-        "        std::cout << salida.str() << '\\n';\n" +
-        "    }\n" +
-        "}\n\n" +
-        "int main() {\n" +
-        "    try {\n"
+funcion contiene_texto_core(valores: lista, buscado: texto): booleano {
+    sea indice: numero = 0
+    mientras (indice < longitud(valores)) {
+        si (valores[indice] == buscado) {
+            retornar verdadero
+        }
+        indice = indice + 1
+    }
+    retornar falso
 }
 
-funcion pie_cpp_core(): texto {
-    retornar
-        "        return 0;\n" +
-        "    } catch (const std::exception& error) {\n" +
-        "        std::cerr << \"[C-Forge Core Runtime Error] \" << error.what() << '\\n';\n" +
-        "        return 1;\n" +
-        "    }\n" +
-        "}\n"
+funcion nombre_firma_core(valor: texto): texto {
+    retornar nombre_declaracion_core(valor)
 }
 
-funcion emitir_expresion_core(nodo: cualquiera): texto {
+funcion campos_nodo_tipo_core(nodo: cualquiera): cualquiera {
+    sea campos: lista = []
+    sea miembros: lista = nodo.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(miembros)) {
+        sea miembro: cualquiera = miembros[indice]
+        si (miembro.tipo == "Campo") {
+            agregar(campos, nombre_declaracion_core(miembro.valor))
+        }
+        indice = indice + 1
+    }
+    retornar campos
+}
+
+funcion contexto_emision_core(programa: cualquiera): cualquiera {
+    sea tipos: lista = []
+    sea funciones: lista = []
+    sea metodos: lista = []
+    sea declaraciones: lista = programa.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(declaraciones)) {
+        sea nodo: cualquiera = declaraciones[indice]
+        si (nodo.tipo == "Estructura" o nodo.tipo == "Clase") {
+            agregar(tipos, TipoNativoCore(nodo.valor, campos_nodo_tipo_core(nodo)))
+        }
+        si (nodo.tipo == "Funcion") {
+            agregar(funciones, nombre_firma_core(nodo.valor))
+        }
+        si (nodo.tipo == "Clase") {
+            sea miembros: lista = nodo.hijos
+            sea cursor: numero = 0
+            mientras (cursor < longitud(miembros)) {
+                sea miembro_actual: cualquiera = miembros[cursor]
+                si (miembro_actual.tipo == "Metodo") {
+                    agregar(
+                        metodos,
+                        nombre_firma_core(miembro_actual.valor)
+                    )
+                }
+                cursor = cursor + 1
+            }
+        }
+        indice = indice + 1
+    }
+    retornar ContextoEmisionCore(tipos, funciones, metodos)
+}
+
+funcion indice_tipo_nativo_core(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea tipos: lista = contexto.tipos
+    sea indice: numero = 0
+    mientras (indice < longitud(tipos)) {
+        sea tipo_actual: cualquiera = tipos[indice]
+        si (tipo_actual.nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion vector_textos_cpp_core(valores: lista): texto {
+    sea salida: texto = "std::vector<std::string>{"
+    sea indice: numero = 0
+    mientras (indice < longitud(valores)) {
+        si (indice > 0) {
+            salida = salida + ", "
+        }
+        salida = salida + "\"" + valores[indice] + "\""
+        indice = indice + 1
+    }
+    retornar salida + "}"
+}
+
+funcion emitir_argumentos_core(
+    nodos: lista,
+    inicio: numero,
+    contexto: cualquiera
+): texto {
+    sea salida: texto = "std::vector<Value>{"
+    sea indice: numero = inicio
+    mientras (indice < longitud(nodos)) {
+        si (indice > inicio) {
+            salida = salida + ", "
+        }
+        salida = salida + emitir_expresion_core(nodos[indice], contexto)
+        indice = indice + 1
+    }
+    retornar salida + "}"
+}
+
+funcion emitir_llamada_core(
+    nodo: cualquiera,
+    contexto: cualquiera
+): texto {
+    sea nombre: texto = nodo.valor
+    sea argumentos: lista = nodo.hijos
+    sea vector: texto = emitir_argumentos_core(argumentos, 0, contexto)
+    si (nombre == "longitud") {
+        retornar "cfv_length(" + emitir_expresion_core(argumentos[0], contexto) + ")"
+    }
+    si (nombre == "a_texto") {
+        retornar "cfv_text(cfv_format(" +
+            emitir_expresion_core(argumentos[0], contexto) + "))"
+    }
+    si (nombre == "agregar") {
+        retornar "cfv_append(" +
+            emitir_expresion_core(argumentos[0], contexto) + ", " +
+            emitir_expresion_core(argumentos[1], contexto) + ")"
+    }
+    si (nombre == "afirmar") {
+        retornar "cfv_assert(" +
+            emitir_expresion_core(argumentos[0], contexto) + ", " +
+            emitir_expresion_core(argumentos[1], contexto) + ")"
+    }
+    si (nombre == "argumentos_programa") {
+        retornar "cfv_arguments()"
+    }
+    si (nombre == "leer_archivo") {
+        retornar "cfv_read_file(" +
+            emitir_expresion_core(argumentos[0], contexto) + ")"
+    }
+    si (nombre == "escribir_archivo") {
+        retornar "cfv_write_file(" +
+            emitir_expresion_core(argumentos[0], contexto) + ", " +
+            emitir_expresion_core(argumentos[1], contexto) + ")"
+    }
+    si (nombre == "eliminar_archivo") {
+        retornar "cfv_remove_file(" +
+            emitir_expresion_core(argumentos[0], contexto) + ")"
+    }
+    si (nombre == "compilar_cpp_nativo") {
+        retornar "cfv_compile_cpp(" +
+            emitir_expresion_core(argumentos[0], contexto) + ", " +
+            emitir_expresion_core(argumentos[1], contexto) + ")"
+    }
+    sea indice_tipo: numero = indice_tipo_nativo_core(contexto, nombre)
+    si (indice_tipo >= 0) {
+        sea tipos: lista = contexto.tipos
+        sea tipo: cualquiera = tipos[indice_tipo]
+        retornar "cfv_object(\"" + nombre + "\", " +
+            vector_textos_cpp_core(tipo.campos) + ", " + vector + ")"
+    }
+    retornar "cfv_fn_" + nombre + "(" + vector + ")"
+}
+
+funcion emitir_binario_core(
+    nodo: cualquiera,
+    contexto: cualquiera
+): texto {
+    sea hijos: lista = nodo.hijos
+    sea izquierdo: texto = emitir_expresion_core(hijos[0], contexto)
+    sea derecho: texto = emitir_expresion_core(hijos[1], contexto)
+    si (nodo.valor == "+") {
+        retornar "cfv_add(" + izquierdo + ", " + derecho + ")"
+    }
+    si (nodo.valor == "-") {
+        retornar "cfv_sub(" + izquierdo + ", " + derecho + ")"
+    }
+    si (nodo.valor == "*") {
+        retornar "cfv_mul(" + izquierdo + ", " + derecho + ")"
+    }
+    si (nodo.valor == "/") {
+        retornar "cfv_div(" + izquierdo + ", " + derecho + ")"
+    }
+    si (nodo.valor == "%") {
+        retornar "cfv_mod(" + izquierdo + ", " + derecho + ")"
+    }
+    si (nodo.valor == "==") {
+        retornar "cfv_bool(cfv_equal(" + izquierdo + ", " + derecho + "))"
+    }
+    si (nodo.valor == "!=") {
+        retornar "cfv_bool(!cfv_equal(" + izquierdo + ", " + derecho + "))"
+    }
+    si (
+        nodo.valor == "<" o nodo.valor == "<=" o
+        nodo.valor == ">" o nodo.valor == ">="
+    ) {
+        retornar "cfv_compare(" + izquierdo + ", " + derecho +
+            ", \"" + nodo.valor + "\")"
+    }
+    si (nodo.valor == "y") {
+        retornar "cfv_bool(cfv_truth(" + izquierdo +
+            ") && cfv_truth(" + derecho + "))"
+    }
+    si (nodo.valor == "o") {
+        retornar "cfv_bool(cfv_truth(" + izquierdo +
+            ") || cfv_truth(" + derecho + "))"
+    }
+    afirmar(falso, "operador no emitible '" + nodo.valor + "'")
+    retornar ""
+}
+
+funcion emitir_expresion_core(
+    nodo: cualquiera,
+    contexto: cualquiera
+): texto {
     si (nodo.tipo == "Numero") {
-        retornar "Valor(" + nodo.valor + ")"
+        retornar "cfv_number(" + nodo.valor + ")"
     }
     si (nodo.tipo == "Texto") {
-        retornar "Valor(std::string(" + nodo.valor + "))"
+        retornar "cfv_text(" + nodo.valor + ")"
+    }
+    si (nodo.tipo == "Booleano") {
+        si (nodo.valor == "verdadero") {
+            retornar "cfv_bool(true)"
+        }
+        retornar "cfv_bool(false)"
     }
     si (nodo.tipo == "Identificador") {
+        si (nodo.valor == "este") {
+            retornar "cfv_este"
+        }
         retornar nombre_cpp_core(nodo.valor)
     }
     sea hijos: lista = nodo.hijos
     si (nodo.tipo == "Mover") {
-        retornar "mover_core(" + emitir_expresion_core(hijos[0]) + ")"
+        retornar emitir_expresion_core(hijos[0], contexto)
+    }
+    si (nodo.tipo == "Lista") {
+        retornar "cfv_list(" + emitir_argumentos_core(hijos, 0, contexto) + ")"
     }
     si (nodo.tipo == "Binario") {
-        sea izquierdo: texto = emitir_expresion_core(hijos[0])
-        sea derecho: texto = emitir_expresion_core(hijos[1])
-        si (nodo.valor == "+") {
-            retornar "sumar(" + izquierdo + ", " + derecho + ")"
+        retornar emitir_binario_core(nodo, contexto)
+    }
+    si (nodo.tipo == "Unario") {
+        si (nodo.valor == "no") {
+            retornar "cfv_bool(!cfv_truth(" +
+                emitir_expresion_core(hijos[0], contexto) + "))"
         }
-        si (nodo.valor == "-") {
-            retornar "restar(" + izquierdo + ", " + derecho + ")"
-        }
-        si (nodo.valor == "*") {
-            retornar "multiplicar(" + izquierdo + ", " + derecho + ")"
-        }
-        si (nodo.valor == "/") {
-            retornar "dividir(" + izquierdo + ", " + derecho + ")"
-        }
+        retornar "cfv_neg(" +
+            emitir_expresion_core(hijos[0], contexto) + ")"
+    }
+    si (nodo.tipo == "Llamada") {
+        retornar emitir_llamada_core(nodo, contexto)
+    }
+    si (nodo.tipo == "Indice") {
+        retornar "cfv_index(" +
+            emitir_expresion_core(hijos[0], contexto) + ", " +
+            emitir_expresion_core(hijos[1], contexto) + ")"
+    }
+    si (nodo.tipo == "Miembro") {
+        retornar "cfv_member(" +
+            emitir_expresion_core(hijos[0], contexto) +
+            ", \"" + nodo.valor + "\")"
+    }
+    si (nodo.tipo == "LlamadaMetodo") {
+        retornar "cfv_method_" + nodo.valor + "(" +
+            emitir_expresion_core(hijos[0], contexto) + ", " +
+            emitir_argumentos_core(hijos, 1, contexto) + ")"
     }
     afirmar(
         falso,
-        "B3 no puede emitir el nodo de expresión '" + nodo.tipo + "'"
+        "B5 no puede emitir el nodo de expresión '" + nodo.tipo + "'"
     )
     retornar ""
 }
 
-funcion emitir_sentencia_core(nodo: cualquiera): texto {
+funcion emitir_bloque_core(
+    bloque: cualquiera,
+    contexto: cualquiera,
+    sangria: texto
+): texto {
+    sea salida: texto = ""
+    sea sentencias: lista = bloque.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(sentencias)) {
+        salida = salida +
+            emitir_sentencia_core(sentencias[indice], contexto, sangria)
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion emitir_objetivo_asignacion_core(
+    objetivo: cualquiera,
+    contexto: cualquiera
+): texto {
+    si (objetivo.tipo == "Identificador") {
+        retornar nombre_cpp_core(objetivo.valor)
+    }
+    si (objetivo.tipo == "Miembro") {
+        sea hijos_objetivo: lista = objetivo.hijos
+        sea objeto: cualquiera = hijos_objetivo[0]
+        sea objeto_emitido: texto = emitir_expresion_core(objeto, contexto)
+        retornar "cfv_member_ref(" +
+            objeto_emitido +
+            ", \"" + objetivo.valor + "\")"
+    }
+    afirmar(falso, "objetivo de asignación no soportado")
+    retornar ""
+}
+
+funcion emitir_sentencia_core(
+    nodo: cualquiera,
+    contexto: cualquiera,
+    sangria: texto
+): texto {
     sea hijos: lista = nodo.hijos
     si (nodo.tipo == "Declaracion") {
         sea nombre: texto = nombre_declaracion_core(nodo.valor)
-        retornar
-            "        Valor " + nombre_cpp_core(nombre) + " = " +
-            emitir_expresion_core(hijos[0]) + ";\n"
+        retornar sangria + "Value " + nombre_cpp_core(nombre) + " = " +
+            emitir_expresion_core(hijos[0], contexto) + ";\n"
     }
     si (nodo.tipo == "Mostrar") {
-        retornar
-            "        mostrar_core(" +
-            emitir_expresion_core(hijos[0]) + ");\n"
+        retornar sangria + "cfv_print(" +
+            emitir_expresion_core(hijos[0], contexto) + ");\n"
     }
-    afirmar(falso, "B3 no puede emitir la sentencia '" + nodo.tipo + "'")
+    si (nodo.tipo == "Asignacion") {
+        retornar sangria +
+            emitir_objetivo_asignacion_core(hijos[0], contexto) + " = " +
+            emitir_expresion_core(hijos[1], contexto) + ";\n"
+    }
+    si (nodo.tipo == "Expresion") {
+        retornar sangria + "(void)(" +
+            emitir_expresion_core(hijos[0], contexto) + ");\n"
+    }
+    si (nodo.tipo == "Retornar") {
+        si (longitud(hijos) == 0) {
+            retornar sangria + "return Value();\n"
+        }
+        retornar sangria + "return " +
+            emitir_expresion_core(hijos[0], contexto) + ";\n"
+    }
+    si (nodo.tipo == "Si") {
+        sea salida: texto = sangria + "if (cfv_truth(" +
+            emitir_expresion_core(hijos[0], contexto) + ")) {\n"
+        salida = salida + emitir_bloque_core(
+            hijos[1], contexto, sangria + "    "
+        )
+        salida = salida + sangria + "}"
+        si (longitud(hijos) > 2) {
+            salida = salida + " else {\n" + emitir_bloque_core(
+                hijos[2], contexto, sangria + "    "
+            ) + sangria + "}"
+        }
+        retornar salida + "\n"
+    }
+    si (nodo.tipo == "Mientras") {
+        retornar sangria + "while (cfv_truth(" +
+            emitir_expresion_core(hijos[0], contexto) + ")) {\n" +
+            emitir_bloque_core(hijos[1], contexto, sangria + "    ") +
+            sangria + "}\n"
+    }
+    si (nodo.tipo == "Vacia") {
+        retornar ""
+    }
+    afirmar(falso, "B5 no puede emitir la sentencia '" + nodo.tipo + "'")
     retornar ""
+}
+
+funcion emitir_parametros_funcion_core(
+    nodo: cualquiera,
+    nombre: texto,
+    metodo: booleano
+): texto {
+    sea hijos: lista = nodo.hijos
+    sea limite: numero = longitud(hijos) - 1
+    sea salida: texto = ""
+    sea indice: numero = 0
+    mientras (indice < limite) {
+        sea nodo_parametro: cualquiera = hijos[indice]
+        sea parametro: texto = nombre_declaracion_core(nodo_parametro.valor)
+        salida = salida + "    Value " + nombre_cpp_core(parametro) +
+            " = cfv_arg(cfv_args, " + a_texto(indice) +
+            ", \"" + nombre + "\");\n"
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion emitir_funcion_core(
+    nodo: cualquiera,
+    contexto: cualquiera,
+    metodo: booleano
+): texto {
+    sea nombre: texto = nombre_firma_core(nodo.valor)
+    sea encabezado: texto = "static Value cfv_fn_" + nombre +
+        "(const std::vector<Value>& cfv_args) {\n"
+    si (metodo) {
+        encabezado = "static Value cfv_method_" + nombre +
+            "(Value cfv_este, const std::vector<Value>& cfv_args) {\n"
+    }
+    sea hijos: lista = nodo.hijos
+    sea bloque: cualquiera = hijos[longitud(hijos) - 1]
+    retornar encabezado +
+        emitir_parametros_funcion_core(nodo, nombre, metodo) +
+        emitir_bloque_core(bloque, contexto, "    ") +
+        "    return Value();\n}\n"
+}
+
+funcion prototipos_core(contexto: cualquiera): texto {
+    sea salida: texto = ""
+    sea funciones: lista = contexto.funciones
+    sea indice: numero = 0
+    mientras (indice < longitud(funciones)) {
+        salida = salida + "static Value cfv_fn_" + funciones[indice] +
+            "(const std::vector<Value>&);\n"
+        indice = indice + 1
+    }
+    sea metodos: lista = contexto.metodos
+    indice = 0
+    mientras (indice < longitud(metodos)) {
+        salida = salida + "static Value cfv_method_" + metodos[indice] +
+            "(Value, const std::vector<Value>&);\n"
+        indice = indice + 1
+    }
+    retornar salida + "\n"
+}
+
+funcion definiciones_core(
+    programa: cualquiera,
+    contexto: cualquiera
+): texto {
+    sea salida: texto = ""
+    sea declaraciones: lista = programa.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(declaraciones)) {
+        sea nodo: cualquiera = declaraciones[indice]
+        si (nodo.tipo == "Funcion") {
+            salida = salida + emitir_funcion_core(nodo, contexto, falso)
+        }
+        si (nodo.tipo == "Clase") {
+            sea miembros: lista = nodo.hijos
+            sea cursor: numero = 0
+            mientras (cursor < longitud(miembros)) {
+                sea miembro_actual: cualquiera = miembros[cursor]
+                si (miembro_actual.tipo == "Metodo") {
+                    salida = salida +
+                        emitir_funcion_core(miembro_actual, contexto, verdadero)
+                }
+                cursor = cursor + 1
+            }
+        }
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion cuerpo_principal_core(
+    programa: cualquiera,
+    contexto: cualquiera
+): texto {
+    sea salida: texto =
+        "int main(int argc, char** argv) {\n" +
+        "    try {\n" +
+        "        cfv_process_args.clear();\n" +
+        "        for (int index = 0; index < argc; ++index) {\n" +
+        "            cfv_process_args.emplace_back(std::string(argv[index]));\n" +
+        "        }\n"
+    sea declaraciones: lista = programa.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(declaraciones)) {
+        sea nodo: cualquiera = declaraciones[indice]
+        si (
+            nodo.tipo != "Funcion" y
+            nodo.tipo != "Estructura" y
+            nodo.tipo != "Clase"
+        ) {
+            salida = salida +
+                emitir_sentencia_core(nodo, contexto, "        ")
+        }
+        indice = indice + 1
+    }
+    retornar salida +
+        "        return 0;\n" +
+        "    } catch (const std::exception& error) {\n" +
+        "        std::cerr << \"[C-Forge Core Runtime Error] \" " +
+        "<< error.what() << '\\n';\n" +
+        "        return 1;\n" +
+        "    }\n" +
+        "}\n"
 }
 
 funcion emitir_programa_core(programa: cualquiera): cualquiera {
@@ -137,13 +518,10 @@ funcion emitir_programa_core(programa: cualquiera): cualquiera {
     si (no semantica.valido) {
         retornar ResultadoEmisionCore(falso, "", semantica.errores)
     }
-    sea codigo: texto = encabezado_cpp_core()
-    sea sentencias: lista = programa.hijos
-    sea indice: numero = 0
-    mientras (indice < longitud(sentencias)) {
-        codigo = codigo + emitir_sentencia_core(sentencias[indice])
-        indice = indice + 1
-    }
-    codigo = codigo + pie_cpp_core()
+    sea contexto: cualquiera = contexto_emision_core(programa)
+    sea codigo: texto = runtime_cpp_core() +
+        prototipos_core(contexto) +
+        definiciones_core(programa, contexto) +
+        cuerpo_principal_core(programa, contexto)
     retornar ResultadoEmisionCore(verdadero, codigo, [])
 }

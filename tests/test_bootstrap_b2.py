@@ -55,7 +55,7 @@ class BootstrapB2Tests(unittest.TestCase):
         source = (ROOT / "bootstrap/core_semantics.cfv").read_text(
             encoding="utf-8"
         )
-        grammar = (ROOT / "docs/CORE-GRAMMAR-0.4.ebnf").read_text(
+        grammar = (ROOT / "docs/CORE-GRAMMAR-0.5.ebnf").read_text(
             encoding="utf-8"
         )
         self.assertIn("clase SimboloCore", source)
@@ -64,7 +64,7 @@ class BootstrapB2Tests(unittest.TestCase):
         self.assertIn("CFB2001", source)
         self.assertIn("CFB2002", source)
         self.assertIn("CFB2003", source)
-        self.assertIn('"mover", "(", expresion, ")"', grammar)
+        self.assertIn("identificador, \"(\", [ argumentos ], \")\"", grammar)
         self.assertNotIn('extern("', source)
 
     @unittest.skipUnless(shutil.which("clang++"), "clang++ no disponible")

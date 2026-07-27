@@ -4,7 +4,7 @@
 estructura ResultadoCompilacionCore {
     valido: booleano
     codigo: texto
-    errores: lista
+    errores: cualquiera
 }
 
 funcion compilar_fuente_stage1(fuente: texto): cualquiera {
@@ -43,11 +43,7 @@ funcion diagnosticos_stage1(resultado: cualquiera): texto {
 sea argumentos_stage1: lista = argumentos_programa()
 afirmar(
     longitud(argumentos_stage1) == 4,
-    "uso: cforge-stage1 archivo.cfv -o ejecutable"
-)
-afirmar(
-    argumentos_stage1[2] == "-o",
-    "uso: cforge-stage1 archivo.cfv -o ejecutable"
+    "uso: cforge-stage1 archivo.cfv (-o ejecutable | --emitir-cpp salida.cpp)"
 )
 
 sea entrada_stage1: texto = argumentos_stage1[1]
@@ -59,13 +55,25 @@ afirmar(
     diagnosticos_stage1(resultado_stage1)
 )
 
-sea temporal_stage1: texto = salida_stage1 + ".stage1.cpp"
-escribir_archivo(temporal_stage1, resultado_stage1.codigo)
-sea nativo_stage1: booleano =
-    compilar_cpp_nativo(temporal_stage1, salida_stage1)
-eliminar_archivo(temporal_stage1)
-afirmar(
-    nativo_stage1,
-    "el backend C++ no pudo producir el ejecutable nativo"
-)
-mostrar("C-Forge Stage 1 creó: " + salida_stage1)
+si (argumentos_stage1[2] == "--emitir-cpp") {
+    escribir_archivo(salida_stage1, resultado_stage1.codigo)
+    mostrar("C-Forge Stage 1 emitió: " + salida_stage1)
+} sino {
+    afirmar(
+        argumentos_stage1[2] == "-o",
+        "uso: cforge-stage1 archivo.cfv (-o ejecutable | --emitir-cpp salida.cpp)"
+    )
+    // El nombre temporal depende de la fuente, no del nombre del ejecutable.
+    // Así Stage 2 y Stage 3 entregan al enlazador una unidad idénticamente
+    // nombrada y se elimina otro origen de metadatos no reproducibles.
+    sea temporal_stage1: texto = entrada_stage1 + ".stage1.cpp"
+    escribir_archivo(temporal_stage1, resultado_stage1.codigo)
+    sea nativo_stage1: booleano =
+        compilar_cpp_nativo(temporal_stage1, salida_stage1)
+    eliminar_archivo(temporal_stage1)
+    afirmar(
+        nativo_stage1,
+        "el backend C++ no pudo producir el ejecutable nativo"
+    )
+    mostrar("C-Forge Stage 1 creó: " + salida_stage1)
+}

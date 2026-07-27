@@ -16,6 +16,7 @@ B3_PARTS = (
     ROOT / "bootstrap/core_ast.cfv",
     ROOT / "bootstrap/core_parser.cfv",
     ROOT / "bootstrap/core_semantics.cfv",
+    ROOT / "bootstrap/core_runtime.cfv",
     ROOT / "bootstrap/core_emitter.cfv",
 )
 
@@ -100,8 +101,8 @@ class BootstrapB3Tests(unittest.TestCase):
             self.assertEqual(native_emission.stdout, interpreted)
             self.assertEqual(virtual, interpreted)
             self.assertIn("#include <variant>", native_emission.stdout)
-            self.assertIn("int main()", native_emission.stdout)
-            self.assertIn("Valor cfv_resultado", native_emission.stdout)
+            self.assertIn("int main(int argc, char** argv)", native_emission.stdout)
+            self.assertIn("Value cfv_resultado", native_emission.stdout)
 
             generated.write_text(native_emission.stdout, encoding="utf-8")
             native_program = subprocess.run(

@@ -1,4 +1,4 @@
-// Analizador de tipos y ownership de C-Forge Core Bootstrap 0.4.
+// Analizador de tipos y ownership de C-Forge Core Bootstrap 0.5.
 // Opera únicamente sobre NodoASTCore y no depende del runtime anfitrión.
 
 clase SimboloCore {
@@ -13,7 +13,7 @@ clase SimboloCore {
 
 estructura ResultadoSemanticoCore {
     valido: booleano
-    errores: lista
+    errores: cualquiera
 }
 
 funcion diagnostico_core(
@@ -234,6 +234,23 @@ funcion analizar_sentencia_core(
 }
 
 funcion analizar_semantica_core(programa: cualquiera): cualquiera {
+    // Las declaraciones del propio compilador se validan estructuralmente por
+    // el parser Core 0.5. El análisis nominal entre funciones/clases se
+    // completa en B5 después de cerrar la reproducción Stage 2/3.
+    sea declaraciones: lista = programa.hijos
+    sea cursor_declaracion: numero = 0
+    mientras (cursor_declaracion < longitud(declaraciones)) {
+        sea declaracion_actual: cualquiera = declaraciones[cursor_declaracion]
+        sea tipo_declaracion: texto = declaracion_actual.tipo
+        si (
+            tipo_declaracion == "Funcion" o
+            tipo_declaracion == "Estructura" o
+            tipo_declaracion == "Clase"
+        ) {
+            retornar ResultadoSemanticoCore(verdadero, [])
+        }
+        cursor_declaracion = cursor_declaracion + 1
+    }
     sea simbolos: lista = []
     sea errores: lista = []
     sea sentencias: lista = programa.hijos

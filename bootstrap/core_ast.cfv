@@ -1,11 +1,11 @@
-// AST canónico de C-Forge Core Bootstrap 0.4.
+// AST canónico de C-Forge Core Bootstrap 0.5.
 // No contiene objetos del runtime anfitrión: solo textos, números y listas.
 
 estructura NodoASTCore {
     tipo: texto
     valor: texto
     linea: numero
-    hijos: lista
+    hijos: cualquiera
 }
 
 funcion nodo_ast_core(tipo: texto, valor: texto, linea: numero): cualquiera {
@@ -16,7 +16,7 @@ funcion nodo_ast_core_con_hijos(
     tipo: texto,
     valor: texto,
     linea: numero,
-    hijos: lista
+    hijos: cualquiera
 ): cualquiera {
     retornar NodoASTCore(tipo, valor, linea, hijos)
 }

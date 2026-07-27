@@ -105,9 +105,9 @@
     {
       "id": "autonomous-native-core",
       "name": "Compilador autoalojado y núcleo autónomo",
-      "status": "planned",
-      "scope": "B4 verificado: Stage 0 construye un compilador Stage 1 escrito en C-Forge que compila programas Core 0.4 a ejecutables sin Python; Stage 2/3, paridad de lenguaje y runtime autónomo siguen pendientes",
-      "evidence": ["docs/COMPLETENESS-POLICY.md", "docs/BOOTSTRAP.md", "docs/CORE-DIRECTION.md", "docs/CORE-GRAMMAR-0.4.ebnf", "docs/C-FORGE-2.0-DRAFT.md", "docs/GRAMMAR-2.0-DRAFT.ebnf", "bootstrap/stage0/cforge_bootstrap.cpp", "bootstrap/fixtures/minimal.cfv", "bootstrap/core_lexer.cfv", "bootstrap/core_ast.cfv", "bootstrap/core_parser.cfv", "bootstrap/core_semantics.cfv", "bootstrap/core_emitter.cfv", "bootstrap/core_driver.cfv", "bootstrap/stage1/cforge_stage1.cfv", "bootstrap/fixtures/parser_b1_driver.cfv", "bootstrap/fixtures/semantics_b2_driver.cfv", "bootstrap/fixtures/emitter_b3_driver.cfv", "tests/test_bootstrap_stage0.py", "tests/test_bootstrap_b1.py", "tests/test_bootstrap_b2.py", "tests/test_bootstrap_b3.py", "tests/test_bootstrap_b4.py", "tests/test_professional_tooling.py"]
+      "status": "partial",
+      "scope": "B5 verificado: el compilador C-Forge Core 0.5 está autoalojado; Stage 2/3 producen C++ y binarios idénticos byte por byte sin Python. Paridad con todo C-Forge 2.0 y runtime/toolchain autónomos siguen pendientes",
+      "evidence": ["docs/COMPLETENESS-POLICY.md", "docs/BOOTSTRAP.md", "docs/CORE-DIRECTION.md", "docs/CORE-GRAMMAR-0.5.ebnf", "docs/C-FORGE-2.0-DRAFT.md", "docs/GRAMMAR-2.0-DRAFT.ebnf", "bootstrap/stage0/cforge_bootstrap.cpp", "bootstrap/fixtures/minimal.cfv", "bootstrap/core_lexer.cfv", "bootstrap/core_ast.cfv", "bootstrap/core_parser.cfv", "bootstrap/core_semantics.cfv", "bootstrap/core_runtime.cfv", "bootstrap/core_emitter.cfv", "bootstrap/core_driver.cfv", "bootstrap/stage1/cforge_stage1.cfv", "bootstrap/fixtures/parser_b1_driver.cfv", "bootstrap/fixtures/semantics_b2_driver.cfv", "bootstrap/fixtures/emitter_b3_driver.cfv", "tests/test_bootstrap_stage0.py", "tests/test_bootstrap_b1.py", "tests/test_bootstrap_b2.py", "tests/test_bootstrap_b3.py", "tests/test_bootstrap_b4.py", "tests/test_bootstrap_b5.py", "tests/test_professional_tooling.py"]
     },
     {
       "id": "critical-production",
@@ -115,6 +115,13 @@
       "status": "not-certified",
       "scope": "Requiere auditoría profesional, LTS, builds firmados y cumplimiento",
       "evidence": ["docs/EXTERNAL-AUDIT-SCOPE.md", "SECURITY.md"]
+    },
+    {
+      "id": "autonomous-runtime",
+      "name": "Runtime autónomo sin dependencias externas",
+      "status": "planned",
+      "scope": "Runtime, biblioteca estándar, enlazador y gestor de paquetes escritos en C-Forge sin necesitar Python, C++, JVM, .NET, Node ni LLVM en uso normal. Corresponde al hito B6.",
+      "evidence": ["docs/BOOTSTRAP.md"]
     }
   ]
 }

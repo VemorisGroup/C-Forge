@@ -1,5 +1,5 @@
 // Primer componente del compilador de C-Forge escrito en C-Forge.
-// Alcance congelado: lexer de C-Forge Core Bootstrap 0.1.
+// Alcance congelado: lexer de C-Forge Core Bootstrap 0.5.
 
 estructura TokenCore {
     tipo: texto

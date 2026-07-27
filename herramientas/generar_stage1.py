@@ -10,6 +10,7 @@ PARTS = (
     ROOT / "bootstrap/core_ast.cfv",
     ROOT / "bootstrap/core_parser.cfv",
     ROOT / "bootstrap/core_semantics.cfv",
+    ROOT / "bootstrap/core_runtime.cfv",
     ROOT / "bootstrap/core_emitter.cfv",
     ROOT / "bootstrap/core_driver.cfv",
 )

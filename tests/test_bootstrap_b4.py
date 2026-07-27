@@ -89,7 +89,7 @@ class BootstrapB4Tests(unittest.TestCase):
             )
             self.assertIn("C-Forge Stage 1 creó:", compile_result.stdout)
             self.assertTrue(program.is_file())
-            self.assertFalse(Path(str(program) + ".stage1.cpp").exists())
+            self.assertFalse(Path(str(program_source) + ".stage1.cpp").exists())
             self.assertNotIn("python", linked_libraries(stage1).lower())
 
             execution = run([str(program)])

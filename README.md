@@ -97,9 +97,9 @@ print(datos.len())
 - **[Parcial]** WebAssembly emite WAT para un subconjunto, no para todo C-Forge.
 - **[Parcial]** Empaquetado para macOS, Linux y Windows; la validación física y
   los catálogos públicos aún no están completos.
-- **[Planeado]** Compilador autoalojado y núcleo autónomo. B4 ya posee un
-  compilador Stage 1 escrito en C-Forge, construido por Stage 0 y capaz de
-  compilar programas Core sin Python. Stage 2/3 reproducible y el runtime
+- **[Parcial]** Compilador autoalojado y núcleo autónomo. B5 verifica que el
+  compilador C-Forge Core 0.5 produce Stage 2/3 idénticos byte por byte sin
+  Python. La paridad con todo C-Forge 2.0 y el runtime completamente
   independiente siguen pendientes; consulta
   [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md).
 - **[No certificado]** Uso bancario o crítico; requiere auditoría profesional,
@@ -127,16 +127,15 @@ cforge vm bootstrap/core_lexer.cfv
 ```
 
 El primer bloque verifica que Stage 0 produzca código máquina; los dos últimos
-comprueban el lexer que formará parte de Stage 1. B1 está verificado, pero esto
-no significa que C-Forge sea autoalojado. La condición definitiva será que Stage 2
-y Stage 3 recompilen las mismas fuentes `.cfv` y produzcan artefactos
-reproducibles equivalentes. La dirección nativa completa está en
+comprueban el lexer de Stage 1. B5 verifica que Stage 2 y Stage 3 recompilen
+las mismas fuentes `.cfv` y produzcan artefactos reproducibles equivalentes.
+Esto autoaloja C-Forge Core 0.5; la dirección nativa completa está en
 [`docs/CORE-DIRECTION.md`](docs/CORE-DIRECTION.md).
 
 Los hitos B1/B2 añaden [`core_ast.cfv`](bootstrap/core_ast.cfv),
 [`core_parser.cfv`](bootstrap/core_parser.cfv),
 [`core_semantics.cfv`](bootstrap/core_semantics.cfv) y la
-[`gramática Core 0.4`](docs/CORE-GRAMMAR-0.4.ebnf). B3 agrega
+[`gramática Core 0.5`](docs/CORE-GRAMMAR-0.5.ebnf). B3 agrega
 [`core_emitter.cfv`](bootstrap/core_emitter.cfv). B4 agrega
 [`core_driver.cfv`](bootstrap/core_driver.cfv) y la unidad autocontenida
 [`cforge_stage1.cfv`](bootstrap/stage1/cforge_stage1.cfv). Sus pruebas ensamblan esas

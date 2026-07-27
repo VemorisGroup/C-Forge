@@ -47,12 +47,13 @@ def vm_output(path: Path) -> str:
 
 class BootstrapB1Tests(unittest.TestCase):
     def test_core_grammar_ast_and_parser_are_cforge_sources(self):
-        grammar = (ROOT / "docs/CORE-GRAMMAR-0.4.ebnf").read_text(
+        grammar = (ROOT / "docs/CORE-GRAMMAR-0.5.ebnf").read_text(
             encoding="utf-8"
         )
         ast = (ROOT / "bootstrap/core_ast.cfv").read_text(encoding="utf-8")
         parser = (ROOT / "bootstrap/core_parser.cfv").read_text(encoding="utf-8")
-        self.assertIn("programa          = { sentencia }, EOF", grammar)
+        self.assertIn("programa          = { declaracion_superior }, EOF", grammar)
+        self.assertIn("funcion           = \"funcion\"", grammar)
         self.assertIn("estructura NodoASTCore", ast)
         self.assertIn("funcion ast_core_canonico", ast)
         self.assertIn("funcion parsear_tokens_core", parser)
@@ -97,7 +98,7 @@ class BootstrapB1Tests(unittest.TestCase):
 
             lines = interpreted.splitlines()
             self.assertEqual(len(lines), 3)
-            self.assertTrue(lines[0].startswith("Programa:8:Core-0.4@3["))
+            self.assertTrue(lines[0].startswith("Programa:8:Core-0.5@3["))
             self.assertIn("Binario:1:+", lines[0])
             self.assertIn("Binario:1:*", lines[0])
             self.assertIn('Texto:4:"C-"', lines[1])

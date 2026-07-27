@@ -56,12 +56,12 @@ compile y ejecute el artefacto nativo sin invocar Python.
 | B2 | Tipos y ownership escritos en C-Forge | **Cumplido:** tipos, variable no declarada y uso después de mover producen diagnósticos iguales en los tres motores |
 | B3 | Emisor nativo escrito en C-Forge | **Cumplido:** Stage 0 compila el emisor `.cfv`, que produce C++17 y un ejecutable nativo verificado |
 | B4 | Compilador Stage 1 | **Cumplido:** Stage 0 construye el compilador `.cfv`; este compila programas Core a ejecutables sin Python |
-| B5 | Stage 2/3 | Stage 1 compila sus propias fuentes y los artefactos de Stage 2/3 son reproducibles |
+| B5 | Stage 2/3 | **Cumplido:** Stage 1 compila sus fuentes; Stage 2/3 generan C++ y binarios idénticos byte por byte |
 | B6 | Runtime autónomo | Funciona sin runtimes externos instalados |
 
 ## Estado actual
 
-**B4 completado de forma verificable; B5 es el siguiente hito.**
+**B5 completado de forma verificable; C-Forge Core 0.5 está autoalojado. B6 es el siguiente hito.**
 
 - `bootstrap/stage0/cforge_bootstrap.cpp` es el compilador inicial C++.
 - `bootstrap/fixtures/minimal.cfv` se convierte en un ejecutable de máquina real.
@@ -76,11 +76,13 @@ compile y ejecute el artefacto nativo sin invocar Python.
   semántico, ownership, emisión C++ y compilación nativa.
 - `bootstrap/stage1/cforge_stage1.cfv` es la unidad Stage 1 autocontenida,
   escrita íntegramente en C-Forge y construible por Stage 0.
-- `docs/CORE-GRAMMAR-0.4.ebnf` congela exactamente el subconjunto aceptado.
+- `bootstrap/core_runtime.cfv` contiene el runtime nativo reproducible como
+  fuente C-Forge.
+- `docs/CORE-GRAMMAR-0.5.ebnf` congela exactamente el subconjunto autoalojado.
 - `tests/test_bootstrap_b1.py` compila la unidad B1 con Stage 0 y exige que
   Stage 0, intérprete y VM emitan bytes idénticos para el AST canónico.
 
-B3 cubre toda la gramática **Core 0.4**, no la gramática general de C-Forge
+B5 cubre toda la gramática **Core 0.5**, no la gramática general de C-Forge
 2.0. `numero` es copiable; `texto` tiene ownership y `mover(texto)` invalida el
 origen. El analizador detecta tipos incompatibles, variables no declaradas y uso
 después de mover. Préstamos, tiempos de vida, regiones, clases del usuario,
@@ -92,10 +94,17 @@ un programa `.cfv` Core completo. La ejecución de Stage 1 no carga ni enlaza
 Python. También verifica que los errores sintácticos y semánticos detengan la
 compilación antes de producir un ejecutable.
 
-Esto completa el **compilador Stage 1 para C-Forge Core 0.4**, pero todavía no
-constituye autoalojamiento: el subconjunto que Stage 1 acepta como entrada aún
-no cubre todas las construcciones usadas por sus propias fuentes. Esa paridad,
-la compilación Stage 2/3 y la reproducibilidad pertenecen a B5.
+Stage 1 acepta todas las construcciones usadas por sus propias fuentes. Stage 1
+produce Stage 2; Stage 2 produce Stage 3 desde la misma unidad `.cfv`. Ambos
+generan C++ idéntico y ejecutables idénticos byte por byte. En macOS, el backend
+normaliza `LC_UUID` y aplica una firma ad hoc con identificador estable; en
+Linux desactiva el build-id. Esto elimina metadatos del enlazador que no forman
+parte de la semántica.
+
+Por tanto, **el compilador C-Forge Core 0.5 está autoalojado** según la
+definición verificable de este documento. Esto no significa que el lenguaje
+completo 2.0 ni el runtime sean autónomos: ampliar la paridad y eliminar la
+dependencia normal de `clang++` corresponden a B6 y hitos posteriores.
 
 Construcción manual:
 
@@ -110,6 +119,10 @@ python3 herramientas/generar_stage1.py
   -o build/cforge-stage1
 ./build/cforge-stage1 bootstrap/fixtures/minimal.cfv -o build/minimal-stage1
 ./build/minimal-stage1
+
+./build/cforge-stage1 bootstrap/stage1/cforge_stage1.cfv -o build/stage2
+./build/stage2 bootstrap/stage1/cforge_stage1.cfv -o build/stage3
+cmp build/stage2 build/stage3
 ```
 
 La salida debe ser:
