@@ -776,6 +776,11 @@ funcion eval_builtin(nombre: texto, args: lista, env: lista, fns: cualquiera): c
         retornar "__ok__"
     }
     si (nombre == "argumentos_programa") {
+        // En modo nativo, los args del programa se guardan en fns["__prog_args__"]
+        // para evitar que el intérprete se vea a sí mismo en los args
+        si (tiene_clave(fns, "__prog_args__")) {
+            retornar fns["__prog_args__"]
+        }
         retornar argumentos_programa()
     }
     retornar "__no_builtin__"
@@ -1115,6 +1120,10 @@ mientras (ai_main < longitud(args_cfv)) {
 }
 sea eg: cualquiera = entorno_global[0]
 eg["__args__"] = args_usuario
+// Guardar args del programa en fns para que argumentos_programa() los devuelva
+// en vez de los args nativos (evita loop infinito en modo nativo self-hosting)
+sea fg: cualquiera = funciones_globales
+fg["__prog_args__"] = args_usuario
 
 sea resultado_final: lista = exec_bloque(ast_prog, entorno_global, funciones_globales)
 
