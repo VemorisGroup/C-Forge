@@ -16,9 +16,18 @@ outputs/cforge-master binary
 # Los .cfv son el lenguaje C-Forge
 *.cfv linguist-language=C-Forge linguist-detectable=true
 
-# Los .cpp/.h son código C++ generado desde .cfv — no contar
+# Código generado desde .cfv — no contar
 *.cpp linguist-generated=true
 *.h   linguist-generated=true
+*.ll  linguist-generated=true
+*.s   linguist-generated=true
 
-# Los .py son herramientas de soporte (backends legacy) — no contar
+# Herramientas de soporte — no contar
 *.py  linguist-vendored=true
+*.sh  linguist-vendored=true
+*.js  linguist-vendored=true
+*.cs  linguist-vendored=true
+*.c   linguist-vendored=true
+*.rb  linguist-vendored=true
+herramientas/vscode-cforgev/* linguist-vendored=true
+ejemplos/interop/CSharpNative/** linguist-vendored=true
