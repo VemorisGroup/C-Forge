@@ -32,11 +32,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python (solo para compilar — no va en el binario)
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Install clang++ (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -47,15 +42,26 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          # Windows runners traen LLVM preinstalado en C:/Program Files/LLVM/bin
           echo "C:/Program Files/LLVM/bin" >> $GITHUB_PATH
           clang++ --version || echo "clang++ no encontrado en ruta default"
 
-      - name: Compile cforgev.cfv to native binary
+      - name: Bootstrap — compile cforgev.cpp to temporary interpreter
         shell: bash
-        env:
-          PYTHONUTF8: "1"
-        run: python3 -X utf8 tools/build_native.py cforgev.cfv ${{ matrix.binary }}
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            clang++ -std=c++17 -O2 -Iinclude cforgev.cpp -o cforgev_bootstrap.exe
+          else
+            clang++ -std=c++17 -O2 -Iinclude cforgev.cpp -o cforgev_bootstrap
+          fi
+
+      - name: Self-host — use bootstrap to compile cforgev.cfv
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ./cforgev_bootstrap.exe compilador_nativo.cfv cforgev.cfv ${{ matrix.binary }}
+          else
+            ./cforgev_bootstrap compilador_nativo.cfv cforgev.cfv ${{ matrix.binary }}
+          fi
 
       - name: Smoke test
         shell: bash
