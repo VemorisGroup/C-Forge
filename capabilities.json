@@ -121,7 +121,7 @@
       "name": "Runtime autónomo sin dependencias externas",
       "status": "planned",
       "scope": "Runtime, biblioteca estándar, enlazador y gestor de paquetes escritos en C-Forge sin necesitar Python, C++, JVM, .NET, Node ni LLVM en uso normal. Corresponde al hito B6.",
-      "evidence": ["docs/BOOTSTRAP.md"]
+      "evidence": ["docs/BOOTSTRAP.md", "docs/RUNTIME-AUTONOMY.md", "bootstrap/fixtures/runtime_b6.cfv", "tests/test_bootstrap_b6.py"]
     }
   ]
 }

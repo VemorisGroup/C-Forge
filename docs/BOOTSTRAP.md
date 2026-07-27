@@ -57,7 +57,7 @@ compile y ejecute el artefacto nativo sin invocar Python.
 | B3 | Emisor nativo escrito en C-Forge | **Cumplido:** Stage 0 compila el emisor `.cfv`, que produce C++17 y un ejecutable nativo verificado |
 | B4 | Compilador Stage 1 | **Cumplido:** Stage 0 construye el compilador `.cfv`; este compila programas Core a ejecutables sin Python |
 | B5 | Stage 2/3 | **Cumplido:** Stage 1 compila sus fuentes; Stage 2/3 generan C++ y binarios idénticos byte por byte |
-| B6 | Runtime autónomo | Funciona sin runtimes externos instalados |
+| B6 | Runtime autónomo | **En progreso:** B6.1 verifica ejecución Core sin Python; toolchain, enlazador y biblioteca estándar autónomos siguen pendientes |
 
 ## Estado actual
 
@@ -105,6 +105,13 @@ Por tanto, **el compilador C-Forge Core 0.5 está autoalojado** según la
 definición verificable de este documento. Esto no significa que el lenguaje
 completo 2.0 ni el runtime sean autónomos: ampliar la paridad y eliminar la
 dependencia normal de `clang++` corresponden a B6 y hitos posteriores.
+
+B6.1 añade una prueba normativa que bloquea deliberadamente los comandos
+`python` y `python3`, ejecuta un programa Core con listas, argumentos y archivos,
+y comprueba que su binario no enlace Python. Los criterios y límites se
+documentan en [`RUNTIME-AUTONOMY.md`](RUNTIME-AUTONOMY.md). Esta fase demuestra
+autonomía de ejecución del runtime Core; todavía no elimina `clang++` del flujo
+de compilación.
 
 Construcción manual:
 

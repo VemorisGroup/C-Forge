@@ -1,0 +1,21 @@
+// Prueba normativa B6.1: el runtime generado funciona sin Python.
+
+estructura MarcaRuntimeB6 {
+    nombre: texto
+}
+
+sea argumentos: lista = argumentos_programa()
+afirmar(longitud(argumentos) == 2, "se esperaba una ruta temporal")
+
+sea ruta: texto = argumentos[1]
+sea valores: lista = [10, 20]
+agregar(valores, 12)
+
+escribir_archivo(ruta, "C-Forge Runtime B6")
+sea contenido: texto = leer_archivo(ruta)
+
+mostrar(contenido)
+mostrar(longitud(valores))
+mostrar(valores[2])
+
+afirmar(eliminar_archivo(ruta), "no se pudo eliminar el archivo temporal")
