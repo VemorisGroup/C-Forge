@@ -1,10 +1,24 @@
+# Líneas de fin de archivo
 *.cfv text eol=lf
-*.py text eol=lf
+*.py  text eol=lf
 *.cpp text eol=lf
-*.h text eol=lf
+*.h   text eol=lf
 *.json text eol=lf
-*.md text eol=lf
+*.md  text eol=lf
 *.svg text eol=lf
+
+# Binarios
 outputs/cforge-master binary
-*.png binary
+*.png  binary
 *.vsix binary
+
+# GitHub Linguist — estadísticas de lenguaje
+# Los .cfv son el lenguaje C-Forge
+*.cfv linguist-language=C-Forge linguist-detectable=true
+
+# Los .cpp/.h son código C++ generado desde .cfv — no contar
+*.cpp linguist-generated=true
+*.h   linguist-generated=true
+
+# Los .py son herramientas de soporte (backends legacy) — no contar
+*.py  linguist-vendored=true
