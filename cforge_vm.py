@@ -455,7 +455,11 @@ class VirtualMachine:
             elif op == "BUILD_MAP":
                 values = stack[-2 * arg:] if arg else []; self._drop(stack, 2 * arg)
                 stack.append({values[i]: values[i + 1] for i in range(0, len(values), 2)})
-            elif op == "UNARY": stack.append((not stack.pop()) if arg == "no" else -stack.pop())
+            elif op == "UNARY":
+                v = stack.pop()
+                if arg == "no": stack.append(not v)
+                elif arg == "~": stack.append(~int(v))
+                else: stack.append(-v)
             elif op == "BINARY":
                 right, left = stack.pop(), stack.pop(); stack.append(self._binary(arg, left, right))
             elif op == "INDEX":
@@ -524,6 +528,17 @@ class VirtualMachine:
         if op == "%":
             if right == 0: raise CForgevError("VM: no se puede dividir por cero en módulo")
             return int(left) % int(right)
+        if op == "&": return int(left) & int(right)
+        if op == "|": return int(left) | int(right)
+        if op == "^": return int(left) ^ int(right)
+        if op == "<<":
+            s = int(right)
+            if s < 0: raise CForgevError("VM: desplazamiento negativo no permitido")
+            return int(left) << s
+        if op == ">>":
+            s = int(right)
+            if s < 0: raise CForgevError("VM: desplazamiento negativo no permitido")
+            return int(left) >> s
         if op == "==": return left == right
         if op == "!=": return left != right
         if op == ">": return left > right

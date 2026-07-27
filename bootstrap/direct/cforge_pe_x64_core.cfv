@@ -1492,6 +1492,13 @@ funcion emitir_expresion_core_pe(nodo: cualquiera, contexto: cualquiera) {
             ])
             retornar 0
         }
+        si (nodo.valor == "%") {
+            // mov r10, rax  /  mov rax, rcx  /  cqo  /  idiv r10  /  mov rax, rdx
+            operacion_bytes_pe(contexto, [
+                73, 137, 194, 72, 137, 200, 72, 153, 73, 247, 250, 72, 137, 208
+            ])
+            retornar 0
+        }
         emitir_comparacion_core_pe(contexto, nodo.valor)
         retornar 0
     }

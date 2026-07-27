@@ -239,7 +239,7 @@ def ensure_system_dependency(
 TOKEN_RE = re.compile(
     r"(?P<SPACE>[ \t\r]+)|(?P<COMMENT>//[^\n]*)|(?P<NEWLINE>\n)|"
     r'(?P<STRING>"(?:\\.|[^"\\])*")|(?P<NUMBER>\d+(?:\.\d+)?)|'
-    r"(?P<IDENT>[A-Za-z_][A-Za-z0-9_]*)|(?P<OP><<|==|!=|>=|<=|[+\-*/%=(),;.:{}<>\[\]])|(?P<BAD>.)"
+    r"(?P<IDENT>[A-Za-z_][A-Za-z0-9_]*)|(?P<OP>>>|<<|==|!=|>=|<=|[+\-*/%&|^~=(),;.:{}<>\[\]])|(?P<BAD>.)"
 )
 
 
@@ -954,7 +954,7 @@ class Interpreter:
         return value
 
     def comparison(self) -> object:
-        value = self.addition()
+        value = self.bitwise_or()
         while self.match_value(">", ">=", "<", "<="):
             op = self.previous()
             right = self.addition()
@@ -975,6 +975,42 @@ class Interpreter:
                 value = value < right
             else:
                 value = value <= right
+        return value
+
+    def bitwise_or(self) -> object:
+        value = self.bitwise_xor()
+        while self.match_value("|"):
+            op = self.previous()
+            right = self.bitwise_xor()
+            value = calculate(value, op, right)
+        return value
+
+    def bitwise_xor(self) -> object:
+        value = self.bitwise_and()
+        while self.match_value("^"):
+            op = self.previous()
+            right = self.bitwise_and()
+            value = calculate(value, op, right)
+        return value
+
+    def bitwise_and(self) -> object:
+        value = self.shift()
+        while self.match_value("&"):
+            op = self.previous()
+            right = self.shift()
+            value = calculate(value, op, right)
+        return value
+
+    def shift(self) -> object:
+        value = self.addition()
+        while self.match_value("<<", ">>"):
+            op = self.previous()
+            # Si << está seguido de std o endl es la cadena cout — no consumir
+            if op.value == "<<" and self.check("IDENT") and self.peek().value in {"std", "endl"}:
+                self.current -= 1
+                break
+            right = self.addition()
+            value = calculate(value, op, right)
         return value
 
     def addition(self) -> object:
@@ -1010,6 +1046,12 @@ class Interpreter:
             if not isinstance(value, (int, float)):
                 raise CForgevError(f"Línea {self.previous().line}: '-' requiere un número")
             return -value
+        if self.match_value("~"):
+            token = self.previous()
+            value = self.unary()
+            if not isinstance(value, (int, float)):
+                raise CForgevError(f"Línea {token.line}: '~' requiere un número entero")
+            return ~int(value)
         return self.primary()
 
     def primary(self) -> object:
@@ -1874,6 +1916,22 @@ def calculate(left: object, op: Token, right: object) -> object:
         if right == 0:
             raise CForgevError(f"Línea {op.line}: no se puede dividir por cero en módulo")
         return int(left) % int(right)
+    if op.value == "&":
+        return int(left) & int(right)
+    if op.value == "|":
+        return int(left) | int(right)
+    if op.value == "^":
+        return int(left) ^ int(right)
+    if op.value == "<<":
+        shift = int(right)
+        if shift < 0:
+            raise CForgevError(f"Línea {op.line}: desplazamiento negativo no permitido")
+        return int(left) << shift
+    if op.value == ">>":
+        shift = int(right)
+        if shift < 0:
+            raise CForgevError(f"Línea {op.line}: desplazamiento negativo no permitido")
+        return int(left) >> shift
     if right == 0:
         raise CForgevError(f"Línea {op.line}: no se puede dividir por cero")
     return left / right

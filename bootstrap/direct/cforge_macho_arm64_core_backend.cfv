@@ -388,6 +388,13 @@ funcion emitir_expresion_arm(nodo: cualquiera, contexto: cualquiera) {
         si (nodo.valor == "-") { palabra_arm(contexto, 3405774880); retornar 0 }
         si (nodo.valor == "*") { palabra_arm(contexto, 2600500256); retornar 0 }
         si (nodo.valor == "/") { palabra_arm(contexto, 2596277280); retornar 0 }
+        si (nodo.valor == "%") {
+            // sdiv x2, x1, x0  →  x2 = x1 / x0 (cociente)
+            palabra_arm(contexto, 2596277282)
+            // msub x0, x2, x0, x1  →  x0 = x1 - x2*x0 (resto)
+            palabra_arm(contexto, 2600502336)
+            retornar 0
+        }
 
         palabra_arm(contexto, 3942645823)
         si (nodo.valor == "==") { palabra_arm(contexto, 2594117600); retornar 0 }

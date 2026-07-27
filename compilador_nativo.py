@@ -382,8 +382,36 @@ class Parser:
         return expression
 
     def comparison(self) -> Expr:
-        expression = self.addition()
+        expression = self.bitwise_or()
         while self.peek().value in {">", ">=", "<", "<="}:
+            op = self.advance().value
+            expression = ("binary", op, expression, self.bitwise_or())
+        return expression
+
+    def bitwise_or(self) -> Expr:
+        expression = self.bitwise_xor()
+        while self.peek().value == "|":
+            op = self.advance().value
+            expression = ("binary", op, expression, self.bitwise_xor())
+        return expression
+
+    def bitwise_xor(self) -> Expr:
+        expression = self.bitwise_and()
+        while self.peek().value == "^":
+            op = self.advance().value
+            expression = ("binary", op, expression, self.bitwise_and())
+        return expression
+
+    def bitwise_and(self) -> Expr:
+        expression = self.shift()
+        while self.peek().value == "&":
+            op = self.advance().value
+            expression = ("binary", op, expression, self.shift())
+        return expression
+
+    def shift(self) -> Expr:
+        expression = self.addition()
+        while self.peek().value in {"<<", ">>"}:
             op = self.advance().value
             expression = ("binary", op, expression, self.addition())
         return expression
@@ -409,6 +437,8 @@ class Parser:
             return ("unary", "no", self.unary())
         if self.take("-"):
             return ("unary", "-", self.unary())
+        if self.take("~"):
+            return ("unary", "~", self.unary())
         return self.primary()
 
     def primary(self) -> Expr:
@@ -886,6 +916,11 @@ static Value suma(const Value&a,const Value&b){ if(a.index()==1&&b.index()==1)re
 static Value resta(const Value&a,const Value&b){return numero(a)-numero(b);} static Value multiplica(const Value&a,const Value&b){return numero(a)*numero(b);}
 static Value divide(const Value&a,const Value&b){double d=numero(b);if(d==0)throw std::runtime_error("no se puede dividir por cero");return numero(a)/d;}
 static Value modulo(const Value&a,const Value&b){long long d=(long long)numero(b);if(d==0)throw std::runtime_error("no se puede dividir por cero en módulo");return (double)((long long)numero(a)%d);}
+static Value bit_and(const Value&a,const Value&b){return (double)((long long)numero(a)&(long long)numero(b));}
+static Value bit_or(const Value&a,const Value&b){return (double)((long long)numero(a)|(long long)numero(b));}
+static Value bit_xor(const Value&a,const Value&b){return (double)((long long)numero(a)^(long long)numero(b));}
+static Value bit_shl(const Value&a,const Value&b){int s=(int)numero(b);if(s<0)throw std::runtime_error("desplazamiento negativo no permitido");return (double)((long long)numero(a)<<s);}
+static Value bit_shr(const Value&a,const Value&b){int s=(int)numero(b);if(s<0)throw std::runtime_error("desplazamiento negativo no permitido");return (double)((long long)numero(a)>>s);}
 static Value compara(const Value&a,const Value&b,const std::string&o){if(o=="==")return a.data==b.data;if(o=="!=")return a.data!=b.data;if(a.index()==1&&b.index()==1){double x=numero(a),y=numero(b);if(o==">")return x>y;if(o==">=")return x>=y;if(o=="<")return x<y;return x<=y;}if(a.index()==2&&b.index()==2){auto x=std::get<std::string>(a.data),y=std::get<std::string>(b.data);if(o==">")return x>y;if(o==">=")return x>=y;if(o=="<")return x<y;return x<=y;}throw std::runtime_error("comparación entre tipos incompatibles");}
 static std::string cfv_number_text(double value){std::ostringstream stream;if(std::floor(value)==value)stream<<(long long)value;else stream<<value;return stream.str();}
 static std::string texto(const Value&v){if(v.index()==0)return "nulo";if(auto p=std::get_if<double>(&v.data))return cfv_number_text(*p);if(auto p=std::get_if<std::string>(&v.data))return *p;if(auto p=std::get_if<bool>(&v.data))return *p?"verdadero":"falso";if(auto p=std::get_if<Lista>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=", ";s+=texto((*p)->at(i));}return s+"]";}if(auto p=std::get_if<Mapa>(&v.data)){auto marker=(*p)->find("__opcion");if(marker!=(*p)->end()){auto has=(*p)->find("tiene");if(has==(*p)->end()||!verdad(has->second))return "ninguno";return "algunos("+texto((*p)->at("valor"))+")";}std::string s="{";bool first=true;for(auto&[k,x]:**p){if(!first)s+=", ";first=false;s+="\""+k+"\": "+texto(x);}return s+"}";}if(auto p=std::get_if<FastArray>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=", ";s+=cfv_number_text((*p)->at(i));}return s+"]";}if(auto p=std::get_if<DenseMatrix>(&v.data)){std::string s="[";for(size_t row=0;row<(*p)->rows;++row){if(row)s+=", ";s+="[";for(size_t column=0;column<(*p)->columns;++column){if(column)s+=", ";s+=cfv_number_text((*p)->values[row*(*p)->columns+column]);}s+="]";}return s+"]";}if(auto p=std::get_if<Tupla>(&v.data)){std::string s="(";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=", ";s+=texto((*p)->values[i]);}if((*p)->values.size()==1)s+=",";return s+")";}if(auto p=std::get_if<Conjunto>(&v.data)){std::string s="conjunto(";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=", ";s+=texto((*p)->values[i]);}return s+")";}throw std::runtime_error("ForgeValue desconocido");}
@@ -1441,9 +1476,13 @@ class Generator:
             return f"cfv_esperar({self.expr(expression[1])})"
         if kind == "unary":
             if expression[1] == "no": return f"Value{{!verdad({self.expr(expression[2])})}}"
+            if expression[1] == "~": return f"Value{{(double)(~(long long)numero({self.expr(expression[2])}))}}"
             return f"Value{{-numero({self.expr(expression[2])})}}"
         if kind == "binary":
-            functions = {"+":"suma","-":"resta","*":"multiplica","/":"divide","%":"modulo"}
+            functions = {
+                "+":"suma","-":"resta","*":"multiplica","/":"divide","%":"modulo",
+                "&":"bit_and","|":"bit_or","^":"bit_xor","<<":"bit_shl",">>":"bit_shr",
+            }
             op, left, right = expression[1], self.expr(expression[2]), self.expr(expression[3])
             if op == "y": return f"Value{{verdad({left}) && verdad({right})}}"
             if op == "o": return f"Value{{verdad({left}) || verdad({right})}}"

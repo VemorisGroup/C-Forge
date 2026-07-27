@@ -507,6 +507,23 @@ std::cout << value << std::endl;
         VirtualMachine(compile_source(source), output=vm_out.append).run()
         self.assertEqual("\n".join(vm_out) + "\n", "2\n2\n0\n")
 
+    def test_bitwise_operators_work_in_interpreter_and_vm(self) -> None:
+        source = """
+        mostrar(12 & 10)
+        mostrar(12 | 10)
+        mostrar(12 ^ 10)
+        mostrar(1 << 4)
+        mostrar(256 >> 3)
+        mostrar(~0)
+        """
+        # 12=0b1100, 10=0b1010: 12&10=8, 12|10=14, 12^10=6, 1<<4=16, 256>>3=32, ~0=-1
+        expected = "8\n14\n6\n16\n32\n-1\n"
+        self.assertEqual(self.output(source), expected)
+        from cforge_vm import VirtualMachine, compile_source
+        vm_out: list[str] = []
+        VirtualMachine(compile_source(source), output=vm_out.append).run()
+        self.assertEqual("\n".join(vm_out) + "\n", expected)
+
     @unittest.skipUnless(shutil.which("clang++"), "clang++ no disponible")
     def test_text_indexing_is_identical_in_interpreter_vm_and_native(self) -> None:
         source = 'sea lenguaje = "C-Forge"; mostrar(lenguaje[0]); mostrar(lenguaje[2]);'
