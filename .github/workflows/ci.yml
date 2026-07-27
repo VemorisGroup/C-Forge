@@ -8,6 +8,54 @@ permissions:
   contents: read
 
 jobs:
+  generar-pe-x64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construir Stage 0 y backend PE
+        shell: bash
+        run: |
+          clang++ -std=c++17 -O2 bootstrap/stage0/cforge_bootstrap.cpp \
+            -o cforge-stage0
+          ./cforge-stage0 bootstrap/direct/cforge_pe_x64.cfv \
+            -o cforge-pe-x64
+      - name: Emitir PE sin toolchain externo
+        shell: bash
+        run: |
+          mkdir sin-toolchain
+          for tool in clang++ clang g++ gcc cc cl link lld ld as python python3
+          do
+            printf '#!/bin/sh\nexit 97\n' > "sin-toolchain/$tool"
+            chmod +x "sin-toolchain/$tool"
+          done
+          PATH="$PWD/sin-toolchain" "$PWD/cforge-pe-x64" \
+            "$PWD/bootstrap/fixtures/machine_hello_windows_b6.cfv" \
+            -o "$PWD/cforge-pe-smoke.exe"
+          file cforge-pe-smoke.exe | grep 'PE32+ executable'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cforge-pe-x64-smoke
+          path: cforge-pe-smoke.exe
+          if-no-files-found: error
+
+  ejecutar-pe-x64:
+    needs: generar-pe-x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cforge-pe-x64-smoke
+      - name: Ejecutar PE generado por C-Forge
+        shell: pwsh
+        run: |
+          $salida = & .\cforge-pe-smoke.exe
+          if ($LASTEXITCODE -ne 0) {
+            throw "El PE terminó con código $LASTEXITCODE"
+          }
+          if ($salida -ne "Hola maquina Windows desde C-Forge") {
+            throw "Salida PE inesperada: $salida"
+          }
+
   portable:
     strategy:
       matrix:

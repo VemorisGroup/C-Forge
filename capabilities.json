@@ -120,8 +120,8 @@
       "id": "autonomous-runtime",
       "name": "Runtime autónomo sin dependencias externas",
       "status": "planned",
-      "scope": "Runtime, biblioteca estándar, enlazador y gestor de paquetes escritos en C-Forge sin necesitar Python, C++, JVM, .NET, Node ni LLVM en uso normal. Corresponde al hito B6.",
-      "evidence": ["docs/BOOTSTRAP.md", "docs/RUNTIME-AUTONOMY.md", "bootstrap/fixtures/runtime_b6.cfv", "bootstrap/direct/cforge_elf_x64.cfv", "bootstrap/direct/cforge_macho_arm64.cfv", "bootstrap/fixtures/machine_hello_b6.cfv", "tests/test_bootstrap_b6.py", "tests/test_bootstrap_b6_machine.py", "tests/test_bootstrap_b6_macho.py"]
+      "scope": "Runtime, biblioteca estándar, enlazador y gestor de paquetes escritos en C-Forge sin necesitar Python, C++, JVM, .NET, Node ni LLVM en uso normal. B6.4 amplía Mach-O ARM64 y B6.5 añade emisión PE32+ x86-64 directa con ejecución física en CI Windows; la autonomía completa sigue planeada.",
+      "evidence": ["docs/BOOTSTRAP.md", "docs/RUNTIME-AUTONOMY.md", "bootstrap/fixtures/runtime_b6.cfv", "bootstrap/direct/cforge_elf_x64.cfv", "bootstrap/direct/cforge_macho_arm64.cfv", "bootstrap/direct/cforge_macho_arm64_core.cfv", "bootstrap/direct/cforge_macho_arm64_core_backend.cfv", "bootstrap/direct/cforge_pe_x64.cfv", "bootstrap/fixtures/machine_hello_b6.cfv", "bootstrap/fixtures/machine_control_b6.cfv", "bootstrap/fixtures/machine_hello_windows_b6.cfv", "herramientas/generar_macho_core.py", "tests/test_bootstrap_b6.py", "tests/test_bootstrap_b6_machine.py", "tests/test_bootstrap_b6_macho.py", "tests/test_bootstrap_b6_macho_core.py", "tests/test_bootstrap_b6_pe.py", ".github/workflows/ci.yml"]
     }
   ]
 }

@@ -1,0 +1,561 @@
+// Backend Core B6.4. Se concatena con lexer, AST, parser y biblioteca Mach-O.
+
+estructura SimboloARMCore {
+    nombre: texto
+    desplazamiento: numero
+}
+
+estructura OperacionARMCore {
+    tipo: texto
+    valor: numero
+    nombre: texto
+}
+
+estructura DatoARMCore {
+    nombre: texto
+    bytes: lista
+}
+
+estructura ContextoARMCore {
+    operaciones: lista
+    simbolos: lista
+    datos: lista
+    contador: numero
+}
+
+funcion operacion_arm(
+    contexto: cualquiera,
+    tipo: texto,
+    valor: numero,
+    nombre: texto
+) {
+    agregar(contexto.operaciones, OperacionARMCore(tipo, valor, nombre))
+}
+
+funcion palabra_arm(contexto: cualquiera, palabra: numero) {
+    operacion_arm(contexto, "palabra", palabra, "")
+}
+
+funcion etiqueta_arm(contexto: cualquiera, nombre: texto) {
+    operacion_arm(contexto, "etiqueta", 0, nombre)
+}
+
+funcion nombre_unico_arm(contexto: cualquiera, prefijo: texto): texto {
+    sea nombre: texto = prefijo + "_" + a_texto(contexto.contador)
+    contexto.contador = contexto.contador + 1
+    retornar nombre
+}
+
+funcion nombre_declaracion_arm(valor: texto): texto {
+    sea nombre: texto = ""
+    sea indice: numero = 0
+    mientras (indice < longitud(valor) y valor[indice] != ":") {
+        nombre = nombre + valor[indice]
+        indice = indice + 1
+    }
+    retornar nombre
+}
+
+funcion digito_arm(caracter: texto): numero {
+    si (caracter == "0") { retornar 0 }
+    si (caracter == "1") { retornar 1 }
+    si (caracter == "2") { retornar 2 }
+    si (caracter == "3") { retornar 3 }
+    si (caracter == "4") { retornar 4 }
+    si (caracter == "5") { retornar 5 }
+    si (caracter == "6") { retornar 6 }
+    si (caracter == "7") { retornar 7 }
+    si (caracter == "8") { retornar 8 }
+    si (caracter == "9") { retornar 9 }
+    afirmar(falso, "literal numérico Core inválido")
+    retornar 0
+}
+
+funcion numero_ast_arm(valor: texto): numero {
+    sea resultado: numero = 0
+    sea indice: numero = 0
+    mientras (indice < longitud(valor)) {
+        resultado = resultado * 10 + digito_arm(valor[indice])
+        indice = indice + 1
+    }
+    retornar resultado
+}
+
+funcion texto_ast_arm(valor: texto): texto {
+    afirmar(longitud(valor) >= 2, "literal de texto inválido")
+    sea resultado: texto = ""
+    sea indice: numero = 1
+    mientras (indice + 1 < longitud(valor)) {
+        resultado = resultado + valor[indice]
+        indice = indice + 1
+    }
+    retornar resultado
+}
+
+funcion indice_simbolo_arm(contexto: cualquiera, nombre: texto): numero {
+    sea simbolos: lista = contexto.simbolos
+    sea indice: numero = 0
+    mientras (indice < longitud(simbolos)) {
+        si (simbolos[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion declarar_simbolo_arm(contexto: cualquiera, nombre: texto): numero {
+    afirmar(
+        indice_simbolo_arm(contexto, nombre) < 0,
+        "variable duplicada '" + nombre + "'"
+    )
+    sea desplazamiento: numero = longitud(contexto.simbolos) * 8
+    afirmar(desplazamiento < 256, "demasiadas variables para B6.4")
+    agregar(
+        contexto.simbolos,
+        SimboloARMCore(nombre, desplazamiento)
+    )
+    retornar desplazamiento
+}
+
+funcion desplazamiento_simbolo_arm(
+    contexto: cualquiera,
+    nombre: texto
+): numero {
+    sea indice: numero = indice_simbolo_arm(contexto, nombre)
+    afirmar(indice >= 0, "variable desconocida '" + nombre + "'")
+    sea simbolos: lista = contexto.simbolos
+    retornar simbolos[indice].desplazamiento
+}
+
+funcion emitir_mov_inmediato_arm(contexto: cualquiera, valor: numero) {
+    emitir_mov_registro_arm(contexto, valor, 0)
+}
+
+funcion emitir_mov_registro_arm(
+    contexto: cualquiera,
+    valor: numero,
+    registro: numero
+) {
+    afirmar(valor >= 0 y valor < 65536, "entero fuera del rango B6.4")
+    afirmar(registro >= 0 y registro < 32, "registro ARM64 inválido")
+    palabra_arm(contexto, 3531603968 + valor * 32 + registro)
+}
+
+funcion emitir_cargar_variable_arm(
+    contexto: cualquiera,
+    desplazamiento: numero
+) {
+    // x19 conserva la base del marco aunque la evaluación use la pila.
+    palabra_arm(contexto, 4181721696 + (desplazamiento / 8) * 1024)
+}
+
+funcion emitir_guardar_variable_arm(
+    contexto: cualquiera,
+    desplazamiento: numero
+) {
+    palabra_arm(contexto, 4177527392 + (desplazamiento / 8) * 1024)
+}
+
+funcion emitir_expresion_arm(nodo: cualquiera, contexto: cualquiera) {
+    si (nodo.tipo == "Numero") {
+        emitir_mov_inmediato_arm(contexto, numero_ast_arm(nodo.valor))
+        retornar 0
+    }
+    si (nodo.tipo == "Booleano") {
+        si (nodo.valor == "verdadero") {
+            emitir_mov_inmediato_arm(contexto, 1)
+        } sino {
+            emitir_mov_inmediato_arm(contexto, 0)
+        }
+        retornar 0
+    }
+    si (nodo.tipo == "Identificador") {
+        emitir_cargar_variable_arm(
+            contexto,
+            desplazamiento_simbolo_arm(contexto, nodo.valor)
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Unario") {
+        sea hijos_unarios: lista = nodo.hijos
+        emitir_expresion_arm(hijos_unarios[0], contexto)
+        si (nodo.valor == "-") {
+            palabra_arm(contexto, 3405775840)
+            retornar 0
+        }
+        si (nodo.valor == "no") {
+            palabra_arm(contexto, 4043309087)
+            palabra_arm(contexto, 2594117600)
+            retornar 0
+        }
+    }
+    si (nodo.tipo == "Binario") {
+        sea hijos: lista = nodo.hijos
+        emitir_expresion_arm(hijos[0], contexto)
+        palabra_arm(contexto, 4162785248)
+        emitir_expresion_arm(hijos[1], contexto)
+        palabra_arm(contexto, 4165011425)
+
+        si (nodo.valor == "+") { palabra_arm(contexto, 2332033056); retornar 0 }
+        si (nodo.valor == "-") { palabra_arm(contexto, 3405774880); retornar 0 }
+        si (nodo.valor == "*") { palabra_arm(contexto, 2600500256); retornar 0 }
+        si (nodo.valor == "/") { palabra_arm(contexto, 2596277280); retornar 0 }
+
+        palabra_arm(contexto, 3942645823)
+        si (nodo.valor == "==") { palabra_arm(contexto, 2594117600); retornar 0 }
+        si (nodo.valor == "!=") { palabra_arm(contexto, 2594113504); retornar 0 }
+        si (nodo.valor == "<") { palabra_arm(contexto, 2594154464); retornar 0 }
+        si (nodo.valor == "<=") { palabra_arm(contexto, 2594162656); retornar 0 }
+        si (nodo.valor == ">") { palabra_arm(contexto, 2594166752); retornar 0 }
+        si (nodo.valor == ">=") { palabra_arm(contexto, 2594158560); retornar 0 }
+    }
+    afirmar(
+        falso,
+        "B6.4 no puede emitir expresión '" + nodo.tipo + "'"
+    )
+}
+
+funcion registrar_texto_arm(contexto: cualquiera, texto: texto): texto {
+    sea nombre: texto = nombre_unico_arm(contexto, "dato")
+    sea bytes: lista = bytes_texto(texto)
+    agregar(bytes, 10)
+    agregar(contexto.datos, DatoARMCore(nombre, bytes))
+    retornar nombre
+}
+
+funcion emitir_mostrar_arm(nodo: cualquiera, contexto: cualquiera) {
+    sea hijos: lista = nodo.hijos
+    sea valor: cualquiera = hijos[0]
+    afirmar(
+        valor.tipo == "Texto",
+        "B6.4 mostrar todavía requiere un literal de texto"
+    )
+    sea literal: texto = texto_ast_arm(valor.valor)
+    sea nombre: texto = registrar_texto_arm(contexto, literal)
+    emitir_mov_registro_arm(contexto, 1, 0)
+    operacion_arm(contexto, "adr_dato", 1, nombre)
+    emitir_mov_registro_arm(
+        contexto,
+        longitud(bytes_texto(literal)) + 1,
+        2
+    )
+    emitir_mov_registro_arm(contexto, 4, 16)
+    palabra_arm(contexto, 3556773889)
+}
+
+funcion emitir_bloque_arm(nodo: cualquiera, contexto: cualquiera) {
+    sea sentencias: lista = nodo.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(sentencias)) {
+        emitir_sentencia_arm(sentencias[indice], contexto)
+        indice = indice + 1
+    }
+}
+
+funcion emitir_sentencia_arm(nodo: cualquiera, contexto: cualquiera) {
+    sea hijos: lista = nodo.hijos
+    si (nodo.tipo == "Declaracion") {
+        sea nombre: texto = nombre_declaracion_arm(nodo.valor)
+        sea desplazamiento: numero = declarar_simbolo_arm(contexto, nombre)
+        emitir_expresion_arm(hijos[0], contexto)
+        emitir_guardar_variable_arm(contexto, desplazamiento)
+        retornar 0
+    }
+    si (nodo.tipo == "Asignacion") {
+        sea objetivo: cualquiera = hijos[0]
+        afirmar(
+            objetivo.tipo == "Identificador",
+            "B6.4 solo asigna variables"
+        )
+        emitir_expresion_arm(hijos[1], contexto)
+        emitir_guardar_variable_arm(
+            contexto,
+            desplazamiento_simbolo_arm(contexto, objetivo.valor)
+        )
+        retornar 0
+    }
+    si (nodo.tipo == "Mostrar") {
+        emitir_mostrar_arm(nodo, contexto)
+        retornar 0
+    }
+    si (nodo.tipo == "Si") {
+        sea etiqueta_sino: texto = nombre_unico_arm(contexto, "sino")
+        sea etiqueta_fin: texto = nombre_unico_arm(contexto, "fin_si")
+        emitir_expresion_arm(hijos[0], contexto)
+        operacion_arm(contexto, "cbz", 0, etiqueta_sino)
+        emitir_bloque_arm(hijos[1], contexto)
+        si (longitud(hijos) > 2) {
+            operacion_arm(contexto, "b", 0, etiqueta_fin)
+            etiqueta_arm(contexto, etiqueta_sino)
+            emitir_bloque_arm(hijos[2], contexto)
+            etiqueta_arm(contexto, etiqueta_fin)
+        } sino {
+            etiqueta_arm(contexto, etiqueta_sino)
+        }
+        retornar 0
+    }
+    si (nodo.tipo == "Mientras") {
+        sea etiqueta_inicio: texto = nombre_unico_arm(contexto, "mientras")
+        sea etiqueta_fin: texto = nombre_unico_arm(contexto, "fin_mientras")
+        etiqueta_arm(contexto, etiqueta_inicio)
+        emitir_expresion_arm(hijos[0], contexto)
+        operacion_arm(contexto, "cbz", 0, etiqueta_fin)
+        emitir_bloque_arm(hijos[1], contexto)
+        operacion_arm(contexto, "b", 0, etiqueta_inicio)
+        etiqueta_arm(contexto, etiqueta_fin)
+        retornar 0
+    }
+    si (nodo.tipo == "Vacia") {
+        retornar 0
+    }
+    afirmar(falso, "B6.4 no puede emitir sentencia '" + nodo.tipo + "'")
+}
+
+funcion posicion_etiqueta_arm(
+    operaciones: lista,
+    nombre: texto
+): numero {
+    sea posicion: numero = 0
+    sea indice: numero = 0
+    mientras (indice < longitud(operaciones)) {
+        sea operacion: cualquiera = operaciones[indice]
+        si (operacion.tipo == "etiqueta" y operacion.nombre == nombre) {
+            retornar posicion
+        }
+        si (operacion.tipo != "etiqueta") {
+            posicion = posicion + 4
+        }
+        indice = indice + 1
+    }
+    afirmar(falso, "etiqueta ARM64 desconocida '" + nombre + "'")
+    retornar 0
+}
+
+funcion tamano_codigo_arm(operaciones: lista): numero {
+    sea posicion: numero = 0
+    sea indice: numero = 0
+    mientras (indice < longitud(operaciones)) {
+        sea tipo: texto = operaciones[indice].tipo
+        si (tipo != "etiqueta") {
+            posicion = posicion + 4
+        }
+        indice = indice + 1
+    }
+    retornar posicion
+}
+
+funcion posicion_dato_arm(
+    datos: lista,
+    nombre: texto,
+    inicio: numero
+): numero {
+    sea posicion: numero = inicio
+    sea indice: numero = 0
+    mientras (indice < longitud(datos)) {
+        si (datos[indice].nombre == nombre) {
+            retornar posicion
+        }
+        posicion = posicion + longitud(datos[indice].bytes)
+        indice = indice + 1
+    }
+    afirmar(falso, "dato ARM64 desconocido '" + nombre + "'")
+    retornar 0
+}
+
+funcion inmediato_rama_arm(delta: numero, bits: numero): numero {
+    sea limite: numero = 1
+    sea indice: numero = 0
+    mientras (indice < bits) {
+        limite = limite * 2
+        indice = indice + 1
+    }
+    si (delta < 0) {
+        retornar limite + delta
+    }
+    retornar delta
+}
+
+funcion resolver_operaciones_arm(contexto: cualquiera): lista {
+    sea bytes: lista = []
+    sea operaciones: lista = contexto.operaciones
+    sea posicion: numero = 0
+    sea indice: numero = 0
+    mientras (indice < longitud(operaciones)) {
+        sea operacion: cualquiera = operaciones[indice]
+        si (operacion.tipo == "palabra") {
+            agregar_le_macho(bytes, operacion.valor, 4)
+            posicion = posicion + 4
+        }
+        si (operacion.tipo == "b") {
+            sea destino_b: numero =
+                posicion_etiqueta_arm(operaciones, operacion.nombre)
+            sea delta_b: numero = (destino_b - posicion) / 4
+            agregar_le_macho(
+                bytes,
+                335544320 + inmediato_rama_arm(delta_b, 26),
+                4
+            )
+            posicion = posicion + 4
+        }
+        si (operacion.tipo == "cbz") {
+            sea destino_cbz: numero =
+                posicion_etiqueta_arm(operaciones, operacion.nombre)
+            sea delta_cbz: numero = (destino_cbz - posicion) / 4
+            agregar_le_macho(
+                bytes,
+                3019898880 + inmediato_rama_arm(delta_cbz, 19) * 32,
+                4
+            )
+            posicion = posicion + 4
+        }
+        si (operacion.tipo == "adr_dato") {
+            sea inicio_datos: numero = tamano_codigo_arm(operaciones)
+            sea destino_dato: numero = posicion_dato_arm(
+                contexto.datos,
+                operacion.nombre,
+                inicio_datos
+            )
+            sea delta_adr: numero = destino_dato - posicion
+            sea immlo: numero = delta_adr % 4
+            sea immhi: numero = (delta_adr - immlo) / 4
+            agregar_le_macho(
+                bytes,
+                268435456 + immlo * 536870912 + immhi * 32 + operacion.valor,
+                4
+            )
+            posicion = posicion + 4
+        }
+        indice = indice + 1
+    }
+    retornar bytes
+}
+
+funcion empaquetar_core_macho(
+    codigo: lista,
+    datos: lista
+): lista {
+    sea imagen: lista = []
+    agregar_le_macho(imagen, 4277009103, 4)
+    agregar_le_macho(imagen, 16777228, 4)
+    agregar_le_macho(imagen, 0, 4)
+    agregar_le_macho(imagen, 2, 4)
+    agregar_le_macho(imagen, 10, 4)
+    agregar_le_macho(imagen, 496, 4)
+    agregar_le_macho(imagen, 2097285, 4)
+    agregar_le_macho(imagen, 0, 4)
+
+    agregar_segmento_macho(imagen, "__PAGEZERO", 0, 4294967296, 0, 0, 0, 0, 0)
+    agregar_segmento_macho(
+        imagen, "__TEXT", 4294967296, 16384, 0, 16384, 5, 5, 1
+    )
+    agregar_nombre_macho(imagen, "__text", 16)
+    agregar_nombre_macho(imagen, "__TEXT", 16)
+    agregar_le_macho(imagen, 4294967824, 8)
+    agregar_le_macho(imagen, longitud(codigo), 8)
+    agregar_le_macho(imagen, 528, 4)
+    agregar_le_macho(imagen, 2, 4)
+    agregar_le_macho(imagen, 0, 4)
+    agregar_le_macho(imagen, 0, 4)
+    agregar_le_macho(imagen, 2147484672, 4)
+    agregar_le_macho(imagen, 0, 4)
+    agregar_le_macho(imagen, 0, 4)
+    agregar_le_macho(imagen, 0, 4)
+    agregar_segmento_macho(
+        imagen, "__LINKEDIT", 4294983680, 16384, 16384, 272, 1, 1, 0
+    )
+
+    agregar_lista_macho(imagen, [
+        14, 0, 0, 0, 32, 0, 0, 0, 12, 0, 0, 0
+    ])
+    agregar_lista_macho(imagen, bytes_texto("/usr/lib/dyld"))
+    agregar(imagen, 0)
+    agregar_ceros_macho(imagen, 6)
+    agregar_lista_macho(imagen, [
+        50, 0, 0, 0, 32, 0, 0, 0,
+        1, 0, 0, 0, 0, 0, 13, 0,
+        0, 0, 27, 0, 1, 0, 0, 0,
+        3, 0, 0, 0, 0, 0, 0, 0,
+        42, 0, 0, 0, 16, 0, 0, 0
+    ])
+    agregar_ceros_macho(imagen, 8)
+    agregar_le_macho(imagen, 2147483688, 4)
+    agregar_le_macho(imagen, 24, 4)
+    agregar_le_macho(imagen, 528, 8)
+    agregar_le_macho(imagen, 0, 8)
+    agregar_le_macho(imagen, 12, 4)
+    agregar_le_macho(imagen, 56, 4)
+    agregar_le_macho(imagen, 24, 4)
+    agregar_le_macho(imagen, 2, 4)
+    agregar_le_macho(imagen, 89063424, 4)
+    agregar_le_macho(imagen, 65536, 4)
+    agregar_lista_macho(imagen, bytes_texto("/usr/lib/libSystem.B.dylib"))
+    agregar(imagen, 0)
+    agregar_ceros_macho(imagen, 5)
+    agregar_le_macho(imagen, 29, 4)
+    agregar_le_macho(imagen, 16, 4)
+    agregar_le_macho(imagen, 16384, 4)
+    agregar_le_macho(imagen, 272, 4)
+    agregar_le_macho(imagen, 27, 4)
+    agregar_le_macho(imagen, 24, 4)
+    agregar_ceros_macho(imagen, 16)
+
+    afirmar(longitud(imagen) == 528, "cabecera Core Mach-O inválida")
+    agregar_lista_macho(imagen, codigo)
+    sea indice: numero = 0
+    mientras (indice < longitud(datos)) {
+        agregar_lista_macho(imagen, datos[indice].bytes)
+        indice = indice + 1
+    }
+    mientras (longitud(imagen) < 16384) {
+        agregar(imagen, 0)
+    }
+    afirmar(longitud(imagen) == 16384, "programa Core excede __TEXT")
+    agregar_lista_macho(imagen, firma_macho(imagen))
+    retornar imagen
+}
+
+funcion compilar_core_macho(fuente: texto): lista {
+    sea tokens: lista = tokenizar_core(fuente)
+    sea programa: cualquiera = parsear_tokens_core(tokens)
+    sea contexto: cualquiera = ContextoARMCore([], [], [], 0)
+    palabra_arm(contexto, 3506701311)
+    palabra_arm(contexto, 2432697331)
+    sea declaraciones: lista = programa.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(declaraciones)) {
+        sea nodo: cualquiera = declaraciones[indice]
+        afirmar(
+            nodo.tipo != "Funcion" y
+            nodo.tipo != "Clase" y
+            nodo.tipo != "Estructura",
+            "B6.4 todavía compila sentencias de nivel superior"
+        )
+        emitir_sentencia_arm(nodo, contexto)
+        indice = indice + 1
+    }
+    palabra_arm(contexto, 2432959487)
+    emitir_mov_registro_arm(contexto, 0, 0)
+    emitir_mov_registro_arm(contexto, 1, 16)
+    palabra_arm(contexto, 3556773889)
+    sea codigo: lista = resolver_operaciones_arm(contexto)
+    retornar empaquetar_core_macho(codigo, contexto.datos)
+}
+
+sea argumentos_core_arm: lista = argumentos_programa()
+afirmar(
+    longitud(argumentos_core_arm) == 4,
+    "uso: cforge-macho-core archivo.cfv -o ejecutable"
+)
+afirmar(argumentos_core_arm[2] == "-o", "se esperaba -o")
+sea fuente_core_arm: texto = leer_archivo(argumentos_core_arm[1])
+sea ejecutable_core_arm: lista = compilar_core_macho(fuente_core_arm)
+afirmar(
+    escribir_bytes(argumentos_core_arm[3], ejecutable_core_arm),
+    "no se pudo escribir Mach-O Core"
+)
+afirmar(
+    hacer_ejecutable(argumentos_core_arm[3]),
+    "no se pudo marcar Mach-O Core como ejecutable"
+)
+mostrar("C-Forge emitió Mach-O ARM64 Core: " + argumentos_core_arm[3])

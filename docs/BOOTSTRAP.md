@@ -126,6 +126,20 @@ la prueba bloquea `clang++`, ensamblador, enlazador, `codesign` y Python durante
 la emisión, y después ejecuta el binario resultante. El backend directo todavía
 cubre únicamente `mostrar("texto")`; no reemplaza aún al backend general.
 
+B6.4 conecta el frontend Core con ese objetivo Mach-O y añade variables
+numéricas, asignaciones, aritmética, comparaciones, `si`/`sino` y `mientras`.
+Las etiquetas y referencias a datos se resuelven dentro del emisor C-Forge, sin
+ensamblador ni enlazador externos. La cobertura continúa siendo deliberadamente
+parcial: funciones, colecciones y el runtime general permanecen fuera de este
+corte.
+
+B6.5 añade el objetivo Windows PE32+/x86-64. El emisor C-Forge construye la
+imagen PE, sus tres secciones, la tabla de importaciones de `KERNEL32.dll` y las
+instrucciones que llaman a `GetStdHandle`, `WriteFile` y `ExitProcess`. La
+emisión no ejecuta compilador, ensamblador, enlazador ni Python. Un trabajo de CI
+transporta el artefacto determinista y lo ejecuta en Windows x64. Esta primera
+fase PE cubre el programa mínimo `mostrar("texto")`.
+
 Construcción manual:
 
 ```bash

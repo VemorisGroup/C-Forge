@@ -72,3 +72,48 @@ resultado físicamente en Apple Silicon.
 B6.3 sigue limitado al programa mínimo `mostrar("texto")`. El siguiente trabajo
 es bajar el AST Core completo a instrucciones, añadir relocaciones internas y
 crear el objetivo PE x64 para Windows.
+
+## B6.4: control de flujo y aritmética Mach-O ARM64
+
+`bootstrap/direct/cforge_macho_arm64_core.cfv` integra el lexer, parser y AST
+Core con el emisor Mach-O. El ejecutable del backend, una vez construido por
+Stage 0, reconoce y baja directamente a instrucciones ARM64:
+
+- variables numéricas locales y asignaciones;
+- suma, resta, multiplicación y división entera con signo;
+- comparaciones `==`, `!=`, `<`, `<=`, `>` y `>=`;
+- bloques `si`/`sino`;
+- ciclos `mientras`;
+- salida de literales mediante `mostrar`.
+
+Las variables viven en un marco de pila de tamaño fijo cuya base se conserva en
+`x19`; las expresiones usan la pila sin desplazar las direcciones de las
+variables. Las ramas se resuelven en dos pasadas con etiquetas internas, y los
+datos de texto se referencian mediante `ADR`.
+
+La prueba física compila
+`bootstrap/fixtures/machine_control_b6.cfv`, bloquea compiladores,
+ensambladores, enlazadores, `codesign` y Python durante la emisión, valida la
+firma Mach-O y ejecuta el resultado en macOS ARM64. B6.4 todavía no implementa
+funciones de usuario, colecciones, texto dinámico ni llamadas al runtime.
+
+## B6.5: PE32+ x86-64 ejecutable en Windows
+
+`bootstrap/direct/cforge_pe_x64.cfv` implementa un emisor PE independiente:
+
+- cabecera DOS y firma `PE\0\0`;
+- cabecera opcional PE32+ para la arquitectura AMD64;
+- secciones `.text`, `.rdata` y `.data`;
+- tabla de importaciones e IAT para `KERNEL32.dll`;
+- llamadas nativas a `GetStdHandle`, `WriteFile` y `ExitProcess`;
+- código máquina x86-64 con la convención de llamadas de Windows;
+- imagen determinista de 2 KiB sin marcas de tiempo variables.
+
+La prueba local bloquea C/C++, ensambladores, enlazadores y Python durante la
+emisión, compara dos archivos byte por byte y valida todas las cabeceras,
+secciones, importaciones e instrucciones esenciales. El CI genera el mismo
+artefacto en macOS y lo ejecuta físicamente en un runner Windows x64.
+
+B6.5 es todavía un corte vertical mínimo: acepta `mostrar("texto")`. Variables,
+control de flujo y el frontend Core completo deben incorporarse al objetivo PE
+en una fase posterior.
