@@ -23,105 +23,201 @@
       "name": "Intérprete de referencia",
       "status": "verified-preview",
       "scope": "Sintaxis y semántica cubiertas por la suite de intérprete. Incluye operadores aritméticos (+, -, *, /, %), bitwise (&, |, ^, ~, <<, >>) y comparación completos.",
-      "evidence": ["tests/test_cforgev.py", "ejemplos/hola.cfv"]
+      "evidence": [
+        "tests/test_cforgev.py",
+        "ejemplos/hola.cfv"
+      ]
     },
     {
       "id": "bytecode-vm",
       "name": "Bytecode y VM propios",
       "status": "verified-preview",
       "scope": "Subconjunto seguro documentado, formato 1.1",
-      "evidence": ["cforge_vm.py", "tests/test_professional_tooling.py"]
+      "evidence": [
+        "cforge_vm.py",
+        "tests/test_professional_tooling.py"
+      ]
     },
     {
       "id": "ownership",
       "name": "Ownership y préstamos",
       "status": "experimental",
       "scope": "Movimientos, préstamos, regiones y Option; no es aún un verificador formal completo de tiempos de vida",
-      "evidence": ["cforge_memory.py", "docs/TYPE-SYSTEM-1.6.md"]
+      "evidence": [
+        "cforge_memory.py",
+        "docs/TYPE-SYSTEM-1.6.md"
+      ]
     },
     {
       "id": "llvm-backend",
       "name": "Backend LLVM",
       "status": "partial",
       "scope": "Escalares, textos, colecciones seleccionadas, objetos, módulos, genéricos básicos y FFI documentada",
-      "evidence": ["compilador_llvm.py", "docs/PRODUCTION-READINESS.md"]
+      "evidence": [
+        "compilador_llvm.py",
+        "docs/PRODUCTION-READINESS.md"
+      ]
     },
     {
       "id": "cpp17-backend",
       "name": "Backend C++17",
       "status": "experimental",
       "scope": "Traducción nativa del subconjunto aceptado por compilador_nativo.py",
-      "evidence": ["compilador_nativo.py", "tests/test_cforgev.py"]
+      "evidence": [
+        "compilador_nativo.py",
+        "tests/test_cforgev.py"
+      ]
     },
     {
       "id": "wasm-backend",
       "name": "Backend WebAssembly",
       "status": "partial",
       "scope": "Emisión WAT para un subconjunto; no cubre todo el lenguaje",
-      "evidence": ["compilador_wasm.py", "docs/PRODUCTION-READINESS.md"]
+      "evidence": [
+        "compilador_wasm.py",
+        "docs/PRODUCTION-READINESS.md"
+      ]
     },
     {
       "id": "polyglot-adapters",
       "name": "Adaptadores políglotas",
       "status": "partial",
       "scope": "C/C++, Python, Java, .NET, JavaScript y TypeScript con alcances y dependencias diferentes",
-      "evidence": ["docs/PRODUCTION-READINESS.md", "ejemplos/interop"]
+      "evidence": [
+        "docs/PRODUCTION-READINESS.md",
+        "ejemplos/interop"
+      ]
     },
     {
       "id": "async-concurrency",
       "name": "Async y concurrencia",
       "status": "partial",
       "scope": "Tareas, await y canales en backends documentados; paridad total pendiente",
-      "evidence": ["ejemplos/async_await_16.cfv", "ejemplos/concurrencia_16.cfv"]
+      "evidence": [
+        "ejemplos/async_await_16.cfv",
+        "ejemplos/concurrencia_16.cfv"
+      ]
     },
     {
       "id": "developer-tools",
       "name": "LSP, DAP, formatter y diagnósticos",
       "status": "experimental",
       "scope": "Implementaciones iniciales funcionales sin garantía de estabilidad",
-      "evidence": ["cforge_lsp.py", "cforge_dap.py", "tests/test_professional_tooling.py"]
+      "evidence": [
+        "cforge_lsp.py",
+        "cforge_dap.py",
+        "tests/test_professional_tooling.py"
+      ]
     },
     {
       "id": "package-manager",
       "name": "Gestor y registro de paquetes",
       "status": "partial",
       "scope": "Cliente, firmas e índice en repositorio; servicio público operado y cuentas pendientes",
-      "evidence": ["cforge_packages.py", "registry/index.json", "registry/README.md"]
+      "evidence": [
+        "cforge_packages.py",
+        "registry/index.json",
+        "registry/README.md"
+      ]
     },
     {
       "id": "gpu-jit-cluster",
       "name": "GPU, JIT y cluster",
       "status": "partial",
       "scope": "GPU emulada en CPU, JIT de perfilado y metadatos cluster; backends físicos pendientes",
-      "evidence": ["docs/PRODUCTION-READINESS.md", "ejemplos/arquitectura_10.cfv"]
+      "evidence": [
+        "docs/PRODUCTION-READINESS.md",
+        "ejemplos/arquitectura_10.cfv"
+      ]
     },
     {
       "id": "multiplatform-distribution",
       "name": "Distribución multiplataforma",
       "status": "partial",
       "scope": "CI y empaquetado preparados; validación física completa y catálogos pendientes",
-      "evidence": [".github/workflows/ci.yml", "docs/PLATFORM-VALIDATION.md"]
+      "evidence": [
+        ".github/workflows/ci.yml",
+        "docs/PLATFORM-VALIDATION.md"
+      ]
     },
     {
       "id": "autonomous-native-core",
       "name": "Compilador autoalojado y núcleo autónomo",
-      "status": "partial",
-      "scope": "B5 verificado: el compilador C-Forge Core 0.5 está autoalojado; Stage 2/3 producen C++ y binarios idénticos byte por byte sin Python. Paridad con todo C-Forge 2.0 y runtime/toolchain autónomos siguen pendientes",
-      "evidence": ["docs/COMPLETENESS-POLICY.md", "docs/BOOTSTRAP.md", "docs/CORE-DIRECTION.md", "docs/CORE-GRAMMAR-0.5.ebnf", "docs/C-FORGE-2.0-DRAFT.md", "docs/GRAMMAR-2.0-DRAFT.ebnf", "bootstrap/stage0/cforge_bootstrap.cpp", "bootstrap/fixtures/minimal.cfv", "bootstrap/core_lexer.cfv", "bootstrap/core_ast.cfv", "bootstrap/core_parser.cfv", "bootstrap/core_semantics.cfv", "bootstrap/core_runtime.cfv", "bootstrap/core_emitter.cfv", "bootstrap/core_driver.cfv", "bootstrap/stage1/cforge_stage1.cfv", "bootstrap/fixtures/parser_b1_driver.cfv", "bootstrap/fixtures/semantics_b2_driver.cfv", "bootstrap/fixtures/emitter_b3_driver.cfv", "tests/test_bootstrap_stage0.py", "tests/test_bootstrap_b1.py", "tests/test_bootstrap_b2.py", "tests/test_bootstrap_b3.py", "tests/test_bootstrap_b4.py", "tests/test_bootstrap_b5.py", "tests/test_professional_tooling.py"]
+      "status": "experimental",
+      "scope": "B8 verificado: cforgev.cfv es un intérprete completo de C-Forge escrito en C-Forge (~1100 líneas). B9 verificado: cforgev.cfv compilado a binario nativo con compilador_nativo.py; el binario corre programas .cfv sin Python ('./cforgev prog.cfv') y también en modo self-hosting ('./cforgev cforgev.cfv prog.cfv'). Paridad completa con C-Forge 2.0 y runtime/toolchain totalmente autónomos siguen pendientes.",
+      "evidence": [
+        "compilador_nativo.py",
+        "cforgev.cfv",
+        "docs/COMPLETENESS-POLICY.md",
+        "docs/BOOTSTRAP.md",
+        "docs/CORE-DIRECTION.md",
+        "docs/CORE-GRAMMAR-0.5.ebnf",
+        "docs/C-FORGE-2.0-DRAFT.md",
+        "docs/GRAMMAR-2.0-DRAFT.ebnf",
+        "bootstrap/stage0/cforge_bootstrap.cpp",
+        "bootstrap/fixtures/minimal.cfv",
+        "bootstrap/core_lexer.cfv",
+        "bootstrap/core_ast.cfv",
+        "bootstrap/core_parser.cfv",
+        "bootstrap/core_semantics.cfv",
+        "bootstrap/core_runtime.cfv",
+        "bootstrap/core_emitter.cfv",
+        "bootstrap/core_driver.cfv",
+        "bootstrap/stage1/cforge_stage1.cfv",
+        "bootstrap/fixtures/parser_b1_driver.cfv",
+        "bootstrap/fixtures/semantics_b2_driver.cfv",
+        "bootstrap/fixtures/emitter_b3_driver.cfv",
+        "tests/test_bootstrap_stage0.py",
+        "tests/test_bootstrap_b1.py",
+        "tests/test_bootstrap_b2.py",
+        "tests/test_bootstrap_b3.py",
+        "tests/test_bootstrap_b4.py",
+        "tests/test_bootstrap_b5.py",
+        "tests/test_professional_tooling.py"
+      ]
     },
     {
       "id": "critical-production",
       "name": "Producción bancaria o crítica",
       "status": "not-certified",
       "scope": "Requiere auditoría profesional, LTS, builds firmados y cumplimiento",
-      "evidence": ["docs/EXTERNAL-AUDIT-SCOPE.md", "SECURITY.md"]
+      "evidence": [
+        "docs/EXTERNAL-AUDIT-SCOPE.md",
+        "SECURITY.md"
+      ]
     },
     {
       "id": "autonomous-runtime",
       "name": "Runtime autónomo sin dependencias externas",
       "status": "planned",
       "scope": "Runtime, biblioteca estándar, enlazador y gestor de paquetes escritos en C-Forge sin necesitar Python, C++, JVM, .NET, Node ni LLVM en uso normal. B6.7 añade funciones no recursivas, listas numéricas indexables y texto dinámico a los objetivos directos Mach-O ARM64 y PE x64. La autonomía completa sigue planeada.",
-      "evidence": ["docs/BOOTSTRAP.md", "docs/RUNTIME-AUTONOMY.md", "bootstrap/fixtures/runtime_b6.cfv", "bootstrap/direct/cforge_elf_x64.cfv", "bootstrap/direct/cforge_macho_arm64.cfv", "bootstrap/direct/cforge_macho_arm64_core.cfv", "bootstrap/direct/cforge_macho_arm64_core_backend.cfv", "bootstrap/direct/cforge_pe_x64.cfv", "bootstrap/direct/cforge_pe_x64_core.cfv", "bootstrap/direct/cforge_pe_x64_core_backend.cfv", "bootstrap/fixtures/machine_hello_b6.cfv", "bootstrap/fixtures/machine_control_b6.cfv", "bootstrap/fixtures/machine_hello_windows_b6.cfv", "bootstrap/fixtures/machine_control_windows_b6.cfv", "bootstrap/fixtures/machine_runtime_b6.cfv", "herramientas/generar_macho_core.py", "herramientas/generar_pe_core.py", "tests/test_bootstrap_b6.py", "tests/test_bootstrap_b6_machine.py", "tests/test_bootstrap_b6_macho.py", "tests/test_bootstrap_b6_macho_core.py", "tests/test_bootstrap_b6_pe.py", "tests/test_bootstrap_b6_pe_core.py", "tests/test_bootstrap_b6_runtime_values.py", ".github/workflows/ci.yml"]
+      "evidence": [
+        "docs/BOOTSTRAP.md",
+        "docs/RUNTIME-AUTONOMY.md",
+        "bootstrap/fixtures/runtime_b6.cfv",
+        "bootstrap/direct/cforge_elf_x64.cfv",
+        "bootstrap/direct/cforge_macho_arm64.cfv",
+        "bootstrap/direct/cforge_macho_arm64_core.cfv",
+        "bootstrap/direct/cforge_macho_arm64_core_backend.cfv",
+        "bootstrap/direct/cforge_pe_x64.cfv",
+        "bootstrap/direct/cforge_pe_x64_core.cfv",
+        "bootstrap/direct/cforge_pe_x64_core_backend.cfv",
+        "bootstrap/fixtures/machine_hello_b6.cfv",
+        "bootstrap/fixtures/machine_control_b6.cfv",
+        "bootstrap/fixtures/machine_hello_windows_b6.cfv",
+        "bootstrap/fixtures/machine_control_windows_b6.cfv",
+        "bootstrap/fixtures/machine_runtime_b6.cfv",
+        "herramientas/generar_macho_core.py",
+        "herramientas/generar_pe_core.py",
+        "tests/test_bootstrap_b6.py",
+        "tests/test_bootstrap_b6_machine.py",
+        "tests/test_bootstrap_b6_macho.py",
+        "tests/test_bootstrap_b6_macho_core.py",
+        "tests/test_bootstrap_b6_pe.py",
+        "tests/test_bootstrap_b6_pe_core.py",
+        "tests/test_bootstrap_b6_runtime_values.py",
+        ".github/workflows/ci.yml"
+      ]
     }
   ]
 }

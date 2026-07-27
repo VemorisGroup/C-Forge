@@ -1,0 +1,109 @@
+name: Build cforgev native binary
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos-arm64
+            binary: cforgev
+          - os: ubuntu-latest
+            platform: linux-x64
+            binary: cforgev
+          - os: windows-latest
+            platform: windows-x64
+            binary: cforgev.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python (solo para compilar — no va en el binario)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install clang++ (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang
+
+      - name: Install clang++ (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Verify clang++ available (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # MSVC cl.exe disponible; crear wrapper clang++ → cl para compilador_nativo.py
+          which cl || true
+          # El compilador_nativo.py llama clang++ — instalamos LLVM en Windows
+          choco install llvm --no-progress -y
+          echo "C:/Program Files/LLVM/bin" >> $GITHUB_PATH
+
+      - name: Compile cforgev.cfv → native binary
+        shell: bash
+        run: |
+          python3 -c "
+          from pathlib import Path
+          from compilador_nativo import compile_native
+          import sys
+          binary = '${{ matrix.binary }}'
+          print(f'Compilando cforgev.cfv → {binary} ...')
+          result = compile_native(Path('cforgev.cfv'), Path(binary))
+          print(f'OK: {result}')
+          "
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          echo 'mostrar("C-Forge native OK en ${{ matrix.platform }}")' > /tmp/smoke.cfv
+          ./${{ matrix.binary }} /tmp/smoke.cfv
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cforgev-${{ matrix.platform }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+
+  # Adjuntar binarios al release de GitHub cuando se crea un tag vX.Y.Z
+  attach-to-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Rename binaries with platform suffix
+        run: |
+          mkdir release-bins
+          mv artifacts/cforgev-macos-arm64/cforgev    release-bins/cforgev-macos-arm64
+          mv artifacts/cforgev-linux-x64/cforgev      release-bins/cforgev-linux-x64
+          mv artifacts/cforgev-windows-x64/cforgev.exe release-bins/cforgev-windows-x64.exe
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.ref_name }}" release-bins/* \
+            --repo "${{ github.repository }}"
