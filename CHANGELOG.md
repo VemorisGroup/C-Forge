@@ -1,5 +1,116 @@
 # Historial de C-Forge
 
+## 2.3.0 — 2026-07-28
+
+### Nuevas funciones nativas (builtins)
+
+**Archivo y sistema de archivos:**
+- `archivo_copiar(src, dst)` — copiar archivo
+- `archivo_mover(src, dst)` — mover/renombrar archivo
+- `archivo_eliminar(ruta)` — eliminar archivo
+- `archivo_tam(ruta)` — tamaño en bytes
+- `directorio_crear(ruta)` — crear directorio (recursivo)
+- `directorio_eliminar(ruta)` — eliminar directorio y contenido
+- `directorio_listar(dir)` — listar entradas del directorio
+- `directorio_listar_rec(dir)` — listar recursivamente
+- `es_directorio(ruta)` — booleano
+- `es_archivo_regular(ruta)` — booleano
+
+**Rutas:**
+- `ruta_unir(lista)` o `ruta_unir(a,b,c)` — unir segmentos de ruta
+- `ruta_directorio(ruta)` — directorio padre
+- `ruta_nombre(ruta)` — nombre del archivo
+- `ruta_extension(ruta)` — extensión (.cfv)
+- `ruta_sin_extension(ruta)` — nombre sin extensión
+- `ruta_absoluta(ruta)` — ruta absoluta
+
+**Texto avanzado:**
+- `texto_repetir(texto, n)` — repetir texto N veces
+- `texto_invertir(texto)` — invertir string
+- `texto_contar(texto, sub)` — contar ocurrencias
+- `texto_posiciones(texto, sub)` — posiciones de todas las ocurrencias
+
+**Números:**
+- `numero_formato(n, decimales)` — formato con N decimales fijos
+- `numero_abs(n)` — valor absoluto
+
+**Colecciones:**
+- `lista_max(lista)` — máximo de una lista numérica
+- `lista_min(lista)` — mínimo de una lista numérica
+- `lista_suma(lista)` — suma de una lista numérica
+- `lista_promedio(lista)` — promedio de una lista numérica
+
+### Nueva stdlib (28 módulos)
+
+- `stdlib/archivo.cfv` — operaciones avanzadas de archivo/directorio
+- `stdlib/cli.cfv` — herramientas CLI (colores, tabla, progreso, menu)
+- `stdlib/matematica_avanzada.cfv` — estadísticas, regresión lineal, KNN, vectores
+- `stdlib/plantilla.cfv` — motor de plantillas HTML
+
+### Nuevos ejemplos
+
+- `ejemplos/ml_basico.cfv` — Machine Learning: estadística, regresión lineal, KNN
+- `ejemplos/cli_herramienta.cfv` — herramienta CLI completa con colores y tabla
+- `ejemplos/chat_tcp.cfv` — servidor de chat HTTP multi-sala
+
+---
+
+## 2.2.0 — 2026-07-28
+
+### Nuevas funciones nativas
+
+- `json_texto`, `json_bonito`, `json_parsear` — JSON nativo sin dependencias
+- `db_abrir`, `db_cerrar`, `db_ejecutar`, `db_consulta`, `db_consulta_p`, `db_ultimo_id`, `db_transaccion`, `db_confirmar`, `db_revertir` — SQLite integrado
+- `http_post`, `http_put`, `http_delete`, `http_solicitud` — cliente HTTP completo
+- `regex_coincidir`, `regex_buscar`, `regex_reemplazar`, `regex_grupos` — regex nativo
+- `canal_nuevo`, `canal_enviar`, `canal_recibir`, `canal_cerrar`, `canal_tam` — canales concurrentes
+- `fecha_ahora`, `fecha_formatear`, `tiempo_ms`, `tiempo_segundos` — fecha/hora nativa
+- `lista_unica`, `lista_aplanar`, `lista_zip` — colecciones avanzadas
+- `mapa_claves`, `mapa_valores`, `mapa_entradas`, `mapa_fusionar` — operaciones de mapa
+- `texto_relleno`, `texto_relleno_der`, `texto_formato` — texto avanzado
+- `env_obtener`, `env_establecer`, `proceso_ejecutar`, `salir`, `pausa` — sistema
+
+### Nueva stdlib (v2.2)
+
+- `stdlib/db.cfv` — SQLite ORM completo
+- `stdlib/pruebas.cfv` — framework de testing
+- `stdlib/log.cfv` — logging con colores y niveles
+- `stdlib/validar.cfv` — validación de datos y esquemas
+- `stdlib/http_cliente.cfv` — cliente HTTP de alto nivel
+- `stdlib/concurrencia.cfv` — canales, mutex, reintentos
+
+### Nuevos ejemplos (v2.2)
+
+- `ejemplos/app_banco.cfv` — app bancaria completa con SQLite, JWT, transacciones
+- `ejemplos/api_rest.cfv` — API REST con CRUD completo
+- `ejemplos/juego_2d.cfv` — Snake con SDL2
+- `ejemplos/juego_3d.cfv` — cubo 3D con OpenGL
+- `ejemplos/test_suite.cfv` — suite de pruebas unitarias completa
+
+---
+
+## 2.1.0 — 2026-07-28
+
+- Templates Android (JNI + NDK) en `herramientas/android-cforgev/`
+- Templates iOS (Swift + ObjC++) en `herramientas/ios-cforgev/`
+- OpenGL 3D: `gl_iniciar`, `gl_programa_basico`, `gl_malla_cubo`, `gl_dibujar_malla`, matrices MVP
+- SDL2 bindings: `juego_iniciar`, `juego_eventos`, `sdl_dibujar_rect`, `sdl_delay`
+- Plugin Unreal Engine 5: `CForgeSubsystem.h`, `CForgeRuntime.cpp`
+- Plugin Unity: `CForge.cs`, `CForgePlugin.cs`
+- `stdlib/sdl.cfv` y `stdlib/gl.cfv`
+
+---
+
+## 2.0.0 — 2026-07-26
+
+- Servidor HTTP nativo (POSIX sockets): `web_escuchar`, `web_solicitud`, `web_responder`
+- Criptografía real OpenSSL: SHA-256, HMAC-SHA256, AES-256-CBC, PBKDF2, JWT HS256
+- `stdlib/web.cfv`, `stdlib/crypto.cfv`
+- Package manager `cfpkg`
+- Install script `install.sh`
+
+---
+
 ## 1.6.0-developer-preview — en desarrollo
 
 - Comienza C-Forge Core Bootstrap B0: contrato Stage 0/1/2/3, subconjunto

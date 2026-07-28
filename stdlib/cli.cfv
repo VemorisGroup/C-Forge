@@ -1,0 +1,216 @@
+// stdlib/cli.cfv — Herramientas para crear CLI (command-line interfaces) en C-Forge
+// Permite crear herramientas de linea de comandos profesionales
+
+// ── Colores ANSI ──────────────────────────────────────────────────────────────
+sea CLI_RESET  = "\033[0m"
+sea CLI_BOLD   = "\033[1m"
+sea CLI_DIM    = "\033[2m"
+sea CLI_RED    = "\033[31m"
+sea CLI_GREEN  = "\033[32m"
+sea CLI_YELLOW = "\033[33m"
+sea CLI_BLUE   = "\033[34m"
+sea CLI_MAGENTA= "\033[35m"
+sea CLI_CYAN   = "\033[36m"
+sea CLI_WHITE  = "\033[37m"
+sea CLI_BG_RED = "\033[41m"
+sea CLI_BG_GREEN = "\033[42m"
+
+// Funciones de color
+funcion rojo(t: texto): texto { retornar CLI_RED + t + CLI_RESET }
+funcion verde(t: texto): texto { retornar CLI_GREEN + t + CLI_RESET }
+funcion amarillo(t: texto): texto { retornar CLI_YELLOW + t + CLI_RESET }
+funcion azul(t: texto): texto { retornar CLI_BLUE + t + CLI_RESET }
+funcion magenta(t: texto): texto { retornar CLI_MAGENTA + t + CLI_RESET }
+funcion cian(t: texto): texto { retornar CLI_CYAN + t + CLI_RESET }
+funcion negrita(t: texto): texto { retornar CLI_BOLD + t + CLI_RESET }
+funcion tenue(t: texto): texto { retornar CLI_DIM + t + CLI_RESET }
+
+// ── Mensajes ──────────────────────────────────────────────────────────────────
+
+funcion cli_ok(msg: texto): nulo {
+    mostrar(verde("✓ ") + msg)
+}
+
+funcion cli_error(msg: texto): nulo {
+    mostrar(rojo("✗ ERROR: ") + msg)
+}
+
+funcion cli_advertencia(msg: texto): nulo {
+    mostrar(amarillo("⚠ ") + msg)
+}
+
+funcion cli_info(msg: texto): nulo {
+    mostrar(azul("ℹ ") + msg)
+}
+
+funcion cli_paso(n: numero, total: numero, msg: texto): nulo {
+    sea prefix = azul("[" + n + "/" + total + "]")
+    mostrar(prefix + " " + msg)
+}
+
+// ── Barra de progreso ──────────────────────────────────────────────────────────
+
+funcion barra_progreso(actual: numero, total: numero, ancho: numero): texto {
+    sea porcentaje = actual / total
+    sea relleno = entero_cerca(porcentaje * ancho)
+    sea vacio = ancho - relleno
+    sea barra = texto_repetir("█", relleno) + texto_repetir("░", vacio)
+    sea pct = entero_cerca(porcentaje * 100)
+    retornar "[" + verde(barra) + "] " + pct + "%"
+}
+
+funcion entero_cerca(n: numero): numero {
+    retornar n - (n % 1)
+}
+
+// ── Tabla en terminal ──────────────────────────────────────────────────────────
+
+funcion cli_tabla(encabezados: lista, filas: lista): nulo {
+    // Calcular anchos de columna
+    sea anchos = []
+    para h en encabezados {
+        agregar(anchos, longitud(h))
+    }
+    para fila en filas {
+        para i en rango(0, longitud(fila)) {
+            sea len = longitud(fila[i] + "")
+            si (len > anchos[i]) { anchos[i] = len }
+        }
+    }
+    // Linea superior
+    sea sep = "+"
+    para a en anchos {
+        sep = sep + texto_repetir("-", a + 2) + "+"
+    }
+    mostrar(sep)
+    // Encabezados
+    sea fila_h = "|"
+    para i en rango(0, longitud(encabezados)) {
+        sea h = encabezados[i]
+        sea pad = anchos[i] - longitud(h)
+        fila_h = fila_h + " " + negrita(h) + texto_repetir(" ", pad) + " |"
+    }
+    mostrar(fila_h)
+    mostrar(sep)
+    // Filas
+    para fila en filas {
+        sea fila_t = "|"
+        para i en rango(0, longitud(fila)) {
+            sea val = fila[i] + ""
+            sea pad = anchos[i] - longitud(val)
+            fila_t = fila_t + " " + val + texto_repetir(" ", pad) + " |"
+        }
+        mostrar(fila_t)
+    }
+    mostrar(sep)
+}
+
+// ── Parser de argumentos ───────────────────────────────────────────────────────
+
+// Parsear args de linea de comandos
+// Formato: --flag, --key=value, --key value, posicional
+funcion cli_parsear_args(args: lista): mapa {
+    sea resultado = {"flags": [], "opciones": {}, "posicionales": []}
+    sea i = 0
+    sea n = longitud(args)
+    mientras (i < n) {
+        sea arg = args[i]
+        si (texto_empieza_con(arg, "--")) {
+            sea sin_dash = subcadena(arg, 2, longitud(arg))
+            si (texto_contiene(sin_dash, "=")) {
+                sea partes = texto_dividir(sin_dash, "=")
+                resultado["opciones"][partes[0]] = partes[1]
+            } sino si (i + 1 < n y !texto_empieza_con(args[i + 1], "-")) {
+                resultado["opciones"][sin_dash] = args[i + 1]
+                i = i + 1
+            } sino {
+                agregar(resultado["flags"], sin_dash)
+            }
+        } sino si (texto_empieza_con(arg, "-") y longitud(arg) == 2) {
+            agregar(resultado["flags"], subcadena(arg, 1, 2))
+        } sino {
+            agregar(resultado["posicionales"], arg)
+        }
+        i = i + 1
+    }
+    retornar resultado
+}
+
+// Mostrar ayuda
+funcion cli_ayuda(nombre: texto, descripcion: texto, opciones: lista): nulo {
+    mostrar("")
+    mostrar(negrita(nombre) + " — " + descripcion)
+    mostrar("")
+    mostrar(negrita("USO:"))
+    mostrar("  " + nombre + " [opciones] [argumentos]")
+    mostrar("")
+    mostrar(negrita("OPCIONES:"))
+    para op en opciones {
+        sea flag = op[0]
+        sea desc = op[1]
+        sea pad = texto_relleno_der(flag, 20, " ")
+        mostrar("  " + cian(pad) + desc)
+    }
+    mostrar("")
+}
+
+// Spinner de espera (basico)
+funcion cli_espera(msg: texto, segundos: numero): nulo {
+    sea frames = ["|", "/", "-", "\\"]
+    sea ms_por_frame = 100
+    sea total_frames = entero_cerca(segundos * 1000 / ms_por_frame)
+    para i en rango(0, total_frames) {
+        sea frame = frames[i % 4]
+        mostrar("\r" + azul(frame) + " " + msg + "...")
+        hilo_dormir(ms_por_frame)
+    }
+    mostrar("\r" + verde("✓") + " " + msg + " completado.")
+}
+
+// ── Menus ─────────────────────────────────────────────────────────────────────
+
+funcion cli_menu(titulo: texto, opciones: lista): texto {
+    mostrar("")
+    mostrar(negrita(titulo))
+    mostrar(texto_repetir("─", longitud(titulo)))
+    para i en rango(0, longitud(opciones)) {
+        mostrar("  " + cian((i + 1) + ")") + " " + opciones[i])
+    }
+    mostrar("")
+    sea eleccion = leer_entrada("  Elige una opcion: ")
+    retornar eleccion
+}
+
+// ── Confirmacion ──────────────────────────────────────────────────────────────
+
+funcion cli_confirmar(pregunta: texto): booleano {
+    sea resp = leer_entrada(amarillo("? ") + pregunta + " [s/N]: ")
+    retornar resp == "s" o resp == "S" o resp == "si" o resp == "Si"
+}
+
+// ── Formatear duracion ─────────────────────────────────────────────────────────
+
+funcion formatear_ms(ms: numero): texto {
+    si (ms < 1000) { retornar ms + "ms" }
+    si (ms < 60000) { retornar numero_formato(ms / 1000, 1) + "s" }
+    sea minutos = entero_cerca(ms / 60000)
+    sea segs = entero_cerca((ms % 60000) / 1000)
+    retornar minutos + "m " + segs + "s"
+}
+
+// ── Banner ────────────────────────────────────────────────────────────────────
+
+funcion cli_banner(titulo: texto, version: texto, autor: texto): nulo {
+    sea ancho = 50
+    sea borde = texto_repetir("═", ancho)
+    mostrar(cian("╔" + borde + "╗"))
+    sea pad_titulo = entero_cerca((ancho - longitud(titulo)) / 2)
+    mostrar(cian("║") + texto_repetir(" ", pad_titulo) + negrita(titulo) +
+            texto_repetir(" ", ancho - pad_titulo - longitud(titulo)) + cian("║"))
+    sea info = "v" + version + " — " + autor
+    sea pad_info = entero_cerca((ancho - longitud(info)) / 2)
+    mostrar(cian("║") + texto_repetir(" ", pad_info) + tenue(info) +
+            texto_repetir(" ", ancho - pad_info - longitud(info)) + cian("║"))
+    mostrar(cian("╚" + borde + "╝"))
+    mostrar("")
+}

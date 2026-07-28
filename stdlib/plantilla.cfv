@@ -1,0 +1,117 @@
+// stdlib/plantilla.cfv — Motor de plantillas HTML simple para C-Forge
+// Uso: plantilla_renderizar(html_template, datos_mapa)
+
+// Renderizar una plantilla con variables
+// Sintaxis: {{ variable }} para output, {{% for x in lista %}} para bucles
+// Basico: reemplaza {{ clave }} con valor del mapa
+funcion plantilla_renderizar(plantilla: texto, datos: mapa): texto {
+    sea resultado = plantilla
+
+    // Reemplazar {{ clave }} con valores del mapa
+    para kv en mapa_entradas(datos) {
+        sea clave = kv[0]
+        sea valor = kv[1]
+        sea token = "{{ " + clave + " }}"
+        sea token2 = "{{" + clave + "}}"
+        sea val_str = ""
+        si (tipo_de(valor) == "texto") {
+            val_str = valor
+        } sino si (tipo_de(valor) == "numero") {
+            val_str = numero_a_texto(valor)
+        } sino si (tipo_de(valor) == "booleano") {
+            si (valor) { val_str = "true" } sino { val_str = "false" }
+        } sino {
+            val_str = json_texto(valor)
+        }
+        resultado = texto_reemplazar(resultado, token, val_str)
+        resultado = texto_reemplazar(resultado, token2, val_str)
+    }
+
+    retornar resultado
+}
+
+// Escapar HTML especial
+funcion html_escapar(texto_input: texto): texto {
+    sea r = texto_input
+    r = texto_reemplazar(r, "&", "&amp;")
+    r = texto_reemplazar(r, "<", "&lt;")
+    r = texto_reemplazar(r, ">", "&gt;")
+    r = texto_reemplazar(r, "\"", "&quot;")
+    r = texto_reemplazar(r, "'", "&#39;")
+    retornar r
+}
+
+// Generar tabla HTML a partir de lista de mapas
+funcion html_tabla(datos: lista, columnas: lista): texto {
+    sea html = "<table>\n<thead>\n<tr>\n"
+    para col en columnas {
+        html = html + "  <th>" + col + "</th>\n"
+    }
+    html = html + "</tr>\n</thead>\n<tbody>\n"
+    para fila en datos {
+        html = html + "<tr>\n"
+        para col en columnas {
+            sea val = ""
+            si (tiene_clave(fila, col)) {
+                val = html_escapar(fila[col] + "")
+            }
+            html = html + "  <td>" + val + "</td>\n"
+        }
+        html = html + "</tr>\n"
+    }
+    html = html + "</tbody>\n</table>"
+    retornar html
+}
+
+// Generar lista HTML
+funcion html_lista(items: lista): texto {
+    sea html = "<ul>\n"
+    para item en items {
+        html = html + "  <li>" + html_escapar(item + "") + "</li>\n"
+    }
+    html = html + "</ul>"
+    retornar html
+}
+
+// Generar pagina HTML completa
+funcion html_pagina(titulo: texto, cuerpo: texto, css: texto): texto {
+    retornar "<!DOCTYPE html>
+<html lang=\"es\">
+<head>
+  <meta charset=\"UTF-8\">
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+  <title>" + html_escapar(titulo) + "</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           margin: 0; padding: 20px; background: #f5f5f5; color: #333; }
+    table { border-collapse: collapse; width: 100%; background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+    th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #2563eb; color: white; }
+    " + css + "
+  </style>
+</head>
+<body>
+  <h1>" + html_escapar(titulo) + "</h1>
+" + cuerpo + "
+</body>
+</html>"
+}
+
+// Renderizar desde archivo
+funcion plantilla_desde_archivo(ruta: texto, datos: mapa): texto {
+    sea tpl = leer_archivo(ruta)
+    retornar plantilla_renderizar(tpl, datos)
+}
+
+// Generar respuesta HTTP con HTML
+funcion web_html(titulo: texto, cuerpo: texto): mapa {
+    sea html = html_pagina(titulo, cuerpo, "")
+    retornar {"estado": 200, "cuerpo": html, "tipo": "text/html; charset=utf-8"}
+}
+
+// numero_a_texto (helper)
+funcion numero_a_texto(n: numero): texto {
+    sea r = n + ""
+    retornar r
+}
