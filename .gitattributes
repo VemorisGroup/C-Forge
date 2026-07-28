@@ -8,7 +8,7 @@
 *.yml  text eol=lf
 
 # Binarios
-outputs/cforge-master binary
+outputs/cforge-master binary linguist-vendored=true
 *.png  binary
 *.vsix binary
 *.exe  binary
