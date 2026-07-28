@@ -1,0 +1,116 @@
+// stdlib/io.cfv — Utilidades de entrada/salida para C-Forge
+// Inspirado en Java BufferedReader, C# StreamReader, Python builtins
+//
+// Uso: importar "stdlib/io.cfv"
+// Requiere: texto_repetir, texto_dividir, texto_recortar, lista_unir, piso, a_texto
+
+// ── Salida con formato ────────────────────────────────────────────────────
+
+// Mostrar lista de valores con separador — como Python print(*vals, sep=...)
+funcion io_mostrar_sep(vals: lista, sep: texto): nulo {
+    sea linea: texto = ""
+    sea i: numero = 0
+    mientras (i < longitud(vals)) {
+        si (i > 0) { linea = linea + sep }
+        linea = linea + a_texto(vals[i])
+        i = i + 1
+    }
+    mostrar(linea)
+}
+
+// Imprimir línea de separación
+funcion io_separador(ancho: numero, car: texto): nulo {
+    mostrar(texto_repetir(car, ancho))
+}
+
+// Mostrar tabla de filas (lista de listas)
+funcion io_tabla(filas: lista): nulo {
+    para fila en filas {
+        sea linea: texto = ""
+        sea i: numero = 0
+        mientras (i < longitud(fila)) {
+            si (i > 0) { linea = linea + " | " }
+            linea = linea + a_texto(fila[i])
+            i = i + 1
+        }
+        mostrar(linea)
+    }
+}
+
+// Barra de progreso — como tqdm en Python
+funcion io_barra_progreso(actual: numero, total: numero, ancho: numero): texto {
+    sea pct: numero = piso(actual * 100 / total)
+    sea lleno: numero = piso(actual * ancho / total)
+    sea barra: texto = texto_repetir("#", lleno) + texto_repetir(".", ancho - lleno)
+    retornar "[" + barra + "] " + a_texto(pct) + "%"
+}
+
+// ── Archivos ──────────────────────────────────────────────────────────────
+
+// Leer archivo como lista de líneas — como Java Files.readAllLines / Python readlines()
+funcion io_leer_lineas(ruta: texto): lista {
+    sea contenido: texto = leer_archivo(ruta)
+    retornar texto_dividir(contenido, "\n")
+}
+
+// Escribir lista de líneas a archivo
+funcion io_escribir_lineas(ruta: texto, lineas: lista): nulo {
+    sea contenido: texto = lista_unir(lineas, "\n")
+    escribir_archivo(ruta, contenido)
+}
+
+// Agregar texto a un archivo existente (append)
+funcion io_agregar_a_archivo(ruta: texto, texto_nuevo: texto): nulo {
+    sea contenido: texto = ""
+    si (existe_archivo(ruta)) {
+        contenido = leer_archivo(ruta)
+    }
+    escribir_archivo(ruta, contenido + texto_nuevo)
+}
+
+// Leer CSV como lista de listas de texto
+funcion io_leer_csv(ruta: texto): lista {
+    sea lineas: lista = io_leer_lineas(ruta)
+    sea resultado: lista = []
+    para linea en lineas {
+        sea recortada: texto = texto_recortar(linea)
+        si (longitud(recortada) > 0) {
+            agregar(resultado, texto_dividir(recortada, ","))
+        }
+    }
+    retornar resultado
+}
+
+// Escribir CSV desde lista de listas
+funcion io_escribir_csv(ruta: texto, filas: lista): nulo {
+    sea lineas: lista = []
+    para fila en filas {
+        sea partes: lista = []
+        para campo en fila {
+            agregar(partes, a_texto(campo))
+        }
+        agregar(lineas, lista_unir(partes, ","))
+    }
+    io_escribir_lineas(ruta, lineas)
+}
+
+// Leer JSON simple (mapa plano clave:valor de texto)
+// No soporta anidado — usa leer_archivo + parse manual para estructuras complejas
+funcion io_leer_json_simple(ruta: texto): cualquiera {
+    sea contenido: texto = leer_archivo(ruta)
+    // Formato esperado: { "clave": "valor", ... }
+    sea resultado: cualquiera = {}
+    sea partes: lista = texto_dividir(contenido, "\"")
+    sea i: numero = 1
+    mientras (i + 2 < longitud(partes)) {
+        sea clave: texto = texto_recortar(partes[i])
+        sea sep: texto = texto_recortar(partes[i + 1])
+        si (texto_contiene(sep, ":")) {
+            sea valor: texto = texto_recortar(partes[i + 2])
+            sea r: cualquiera = resultado
+            r[clave] = valor
+        }
+        i = i + 4
+    }
+    retornar resultado
+}

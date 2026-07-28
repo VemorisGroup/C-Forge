@@ -1,0 +1,185 @@
+// stdlib/lista.cfv — Operaciones de colecciones para C-Forge
+// Inspirado en C# LINQ, Java Streams, Python itertools, C++ <algorithm>
+//
+// Uso: importar "stdlib/lista.cfv"
+
+// ── Rango ─────────────────────────────────────────────────────────────────
+
+// [inicio, fin) con paso 1 — equivale a range() en Python / Enumerable.Range en C#
+funcion rango(inicio: numero, fin: numero): lista {
+    retornar lista_rango(inicio, fin)
+}
+
+// [inicio, fin) con paso personalizado
+funcion rango_paso(inicio: numero, fin: numero, paso: numero): lista {
+    sea resultado: lista = []
+    sea i: numero = inicio
+    mientras (i < fin) {
+        agregar(resultado, i)
+        i = i + paso
+    }
+    retornar resultado
+}
+
+// ── Agregación ────────────────────────────────────────────────────────────
+
+// Suma numérica — como LINQ Sum() / Java IntStream.sum()
+funcion lst_suma(lst: lista): numero {
+    sea total: numero = 0
+    para x en lst { total = total + x }
+    retornar total
+}
+
+// Producto de todos los elementos
+funcion lst_producto(lst: lista): numero {
+    sea total: numero = 1
+    para x en lst { total = total * x }
+    retornar total
+}
+
+// Mínimo — como LINQ Min() / Java Stream.min()
+funcion lst_min(lst: lista): cualquiera {
+    afirmar(longitud(lst) > 0, "lst_min: lista vacía")
+    sea m: cualquiera = lst[0]
+    sea i: numero = 1
+    mientras (i < longitud(lst)) {
+        si (lst[i] < m) { m = lst[i] }
+        i = i + 1
+    }
+    retornar m
+}
+
+// Máximo — como LINQ Max() / Java Stream.max()
+funcion lst_max(lst: lista): cualquiera {
+    afirmar(longitud(lst) > 0, "lst_max: lista vacía")
+    sea m: cualquiera = lst[0]
+    sea i: numero = 1
+    mientras (i < longitud(lst)) {
+        si (lst[i] > m) { m = lst[i] }
+        i = i + 1
+    }
+    retornar m
+}
+
+// Promedio — como LINQ Average() / Java IntStream.average()
+funcion lst_promedio(lst: lista): numero {
+    afirmar(longitud(lst) > 0, "lst_promedio: lista vacía")
+    retornar lst_suma(lst) / longitud(lst)
+}
+
+// ── Búsqueda ──────────────────────────────────────────────────────────────
+
+// Índice de un elemento (-1 si no existe) — como Java indexOf / C# IndexOf
+funcion lst_indice(lst: lista, val: cualquiera): numero {
+    sea i: numero = 0
+    mientras (i < longitud(lst)) {
+        si (lst[i] == val) { retornar i }
+        i = i + 1
+    }
+    retornar -1
+}
+
+// Contar ocurrencias — como LINQ Count(x => x == val) / Python list.count()
+funcion lst_contar(lst: lista, val: cualquiera): numero {
+    sea cnt: numero = 0
+    para x en lst {
+        si (x == val) { cnt = cnt + 1 }
+    }
+    retornar cnt
+}
+
+// ¿La lista está vacía?
+funcion lst_vacia(lst: lista): booleano {
+    retornar longitud(lst) == 0
+}
+
+// ── Transformación ────────────────────────────────────────────────────────
+
+// Rebanada [inicio, fin) — como Python list[a:b] / LINQ Skip+Take
+funcion lst_rebanar(lst: lista, inicio: numero, fin: numero): lista {
+    sea resultado: lista = []
+    sea i: numero = inicio
+    mientras (i < fin y i < longitud(lst)) {
+        agregar(resultado, lst[i])
+        i = i + 1
+    }
+    retornar resultado
+}
+
+// Primeros n elementos — LINQ Take / Java Stream.limit()
+funcion lst_tomar(lst: lista, n: numero): lista {
+    retornar lst_rebanar(lst, 0, n)
+}
+
+// Saltar primeros n — LINQ Skip / Java Stream.skip()
+funcion lst_saltar(lst: lista, n: numero): lista {
+    retornar lst_rebanar(lst, n, longitud(lst))
+}
+
+// Concatenar dos listas — como Java addAll / C# Concat()
+funcion lst_concat(a: lista, b: lista): lista {
+    sea resultado: lista = lista_invertir(lista_invertir(a))
+    para x en b { agregar(resultado, x) }
+    retornar resultado
+}
+
+// Eliminar duplicados conservando orden — como LINQ Distinct() / Python dict.fromkeys()
+funcion lst_unico(lst: lista): lista {
+    sea resultado: lista = []
+    para x en lst {
+        si (no lista_contiene(resultado, x)) {
+            agregar(resultado, x)
+        }
+    }
+    retornar resultado
+}
+
+// Intercalar un separador entre elementos
+funcion lst_intercalar(lst: lista, sep: cualquiera): lista {
+    sea resultado: lista = []
+    sea i: numero = 0
+    mientras (i < longitud(lst)) {
+        si (i > 0) { agregar(resultado, sep) }
+        agregar(resultado, lst[i])
+        i = i + 1
+    }
+    retornar resultado
+}
+
+// ── Combinación ───────────────────────────────────────────────────────────
+
+// Zip: pares de dos listas — como Python zip() / LINQ Zip()
+funcion lst_zip(a: lista, b: lista): lista {
+    sea resultado: lista = []
+    sea n: numero = longitud(a)
+    si (longitud(b) < n) { n = longitud(b) }
+    sea i: numero = 0
+    mientras (i < n) {
+        agregar(resultado, [a[i], b[i]])
+        i = i + 1
+    }
+    retornar resultado
+}
+
+// Indices: lista de [indice, valor] — como Python enumerate()
+funcion lst_enumerar(lst: lista): lista {
+    sea resultado: lista = []
+    sea i: numero = 0
+    mientras (i < longitud(lst)) {
+        agregar(resultado, [i, lst[i]])
+        i = i + 1
+    }
+    retornar resultado
+}
+
+// Convertir lista a mapa índice→valor
+funcion lst_a_mapa(lst: lista): cualquiera {
+    sea resultado: cualquiera = {}
+    sea i: numero = 0
+    mientras (i < longitud(lst)) {
+        sea r: cualquiera = resultado
+        r[a_texto(i)] = lst[i]
+        i = i + 1
+    }
+    retornar resultado
+}

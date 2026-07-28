@@ -1,0 +1,170 @@
+// stdlib/matematica.cfv — Utilidades matemáticas para C-Forge
+// Inspirado en C++ <cmath>, Java Math, C# Math, Python math
+//
+// Uso: importar "stdlib/matematica.cfv"
+
+// ── Constantes ────────────────────────────────────────────────────────────
+
+sea MAT_PI: numero = 3.14159265358979323846
+sea MAT_E: numero = 2.71828182845904523536
+sea MAT_TAU: numero = 6.28318530717958647692
+sea MAT_PHI: numero = 1.61803398874989484820
+sea MAT_INF: numero = 99999999999999999999999999999999999999.0
+
+// ── Restricción ───────────────────────────────────────────────────────────
+
+// Limitar valor entre min y max — como C# Math.Clamp / C++17 std::clamp
+funcion mat_clamp(val: numero, min_v: numero, max_v: numero): numero {
+    si (val < min_v) { retornar min_v }
+    si (val > max_v) { retornar max_v }
+    retornar val
+}
+
+// Interpolación lineal — como GLSL mix / Unity Mathf.Lerp
+funcion mat_lerp(a: numero, b: numero, t: numero): numero {
+    retornar a + (b - a) * t
+}
+
+// Signo (-1, 0 o 1) — como Java Math.signum / C++ std::signbit
+funcion mat_signo(n: numero): numero {
+    si (n > 0) { retornar 1 }
+    si (n < 0) { retornar -1 }
+    retornar 0
+}
+
+// ── Redondeo ──────────────────────────────────────────────────────────────
+
+// Redondear a d decimales — como Java Math.round / C# Math.Round
+funcion mat_redondear_d(n: numero, d: numero): numero {
+    sea factor: numero = potencia(10, d)
+    retornar redondear(n * factor) / factor
+}
+
+// ── Teoría de números ─────────────────────────────────────────────────────
+
+// MCD — algoritmo de Euclides (como Java BigInteger.gcd / C++ std::gcd en C++17)
+funcion mat_mcd(a: numero, b: numero): numero {
+    sea aa: numero = absoluto(a)
+    sea bb: numero = absoluto(b)
+    mientras (bb != 0) {
+        sea temp: numero = bb
+        bb = aa - piso(aa / bb) * bb
+        aa = temp
+    }
+    retornar aa
+}
+
+// MCM — mínimo común múltiplo (como Java lcm / C++ std::lcm en C++17)
+funcion mat_mcm(a: numero, b: numero): numero {
+    si (a == 0 o b == 0) { retornar 0 }
+    retornar absoluto(a * b) / mat_mcd(a, b)
+}
+
+// ¿Es primo? — O(√n)
+funcion mat_es_primo(n: numero): booleano {
+    si (n < 2) { retornar falso }
+    si (n == 2) { retornar verdadero }
+    si (n - piso(n / 2) * 2 == 0) { retornar falso }
+    sea i: numero = 3
+    mientras (i * i <= n) {
+        si (n - piso(n / i) * i == 0) { retornar falso }
+        i = i + 2
+    }
+    retornar verdadero
+}
+
+// Lista de primos hasta n (Criba optimizada)
+funcion mat_primos_hasta(n: numero): lista {
+    sea resultado: lista = []
+    sea i: numero = 2
+    mientras (i <= n) {
+        si (mat_es_primo(i)) { agregar(resultado, i) }
+        i = i + 1
+    }
+    retornar resultado
+}
+
+// ── Combinatoria ──────────────────────────────────────────────────────────
+
+// Factorial iterativo — como Java Math.factorial / Python math.factorial
+funcion mat_factorial(n: numero): numero {
+    afirmar(n >= 0, "factorial requiere n >= 0")
+    sea resultado: numero = 1
+    sea i: numero = 2
+    mientras (i <= n) {
+        resultado = resultado * i
+        i = i + 1
+    }
+    retornar resultado
+}
+
+// Coeficiente binomial C(n, k) — como Java combinatorial / Python math.comb (3.8+)
+funcion mat_comb(n: numero, k: numero): numero {
+    si (k < 0 o k > n) { retornar 0 }
+    si (k == 0 o k == n) { retornar 1 }
+    sea k2: numero = k
+    si (n - k < k2) { k2 = n - k }
+    sea resultado: numero = 1
+    sea i: numero = 0
+    mientras (i < k2) {
+        resultado = resultado * (n - i) / (i + 1)
+        i = i + 1
+    }
+    retornar redondear(resultado)
+}
+
+// ── Sucesiones ────────────────────────────────────────────────────────────
+
+// Fibonacci iterativo — como Java Fibonacci / Python
+funcion mat_fibonacci(n: numero): numero {
+    si (n <= 0) { retornar 0 }
+    si (n == 1) { retornar 1 }
+    sea a: numero = 0
+    sea b: numero = 1
+    sea i: numero = 2
+    mientras (i <= n) {
+        sea temp: numero = a + b
+        a = b
+        b = temp
+        i = i + 1
+    }
+    retornar b
+}
+
+// Primeros n números de Fibonacci
+funcion mat_fibonacci_lista(n: numero): lista {
+    sea resultado: lista = []
+    sea i: numero = 0
+    mientras (i < n) {
+        agregar(resultado, mat_fibonacci(i))
+        i = i + 1
+    }
+    retornar resultado
+}
+
+// ── Potencias y logaritmos ────────────────────────────────────────────────
+
+// Potencia entera por exponenciación rápida — O(log exp)
+funcion mat_pow_int(base: numero, exp: numero): numero {
+    si (exp == 0) { retornar 1 }
+    si (exp < 0) { retornar 1 / mat_pow_int(base, 0 - exp) }
+    sea resultado: numero = 1
+    sea b: numero = base
+    sea e: numero = exp
+    mientras (e > 0) {
+        si (e - piso(e / 2) * 2 == 1) { resultado = resultado * b }
+        b = b * b
+        e = piso(e / 2)
+    }
+    retornar resultado
+}
+
+// Suma aritmética 1..n — Gauss
+funcion mat_suma_1_n(n: numero): numero {
+    retornar n * (n + 1) / 2
+}
+
+// Suma de cuadrados 1² + ... + n²
+funcion mat_suma_cuadrados(n: numero): numero {
+    retornar n * (n + 1) * (2 * n + 1) / 6
+}

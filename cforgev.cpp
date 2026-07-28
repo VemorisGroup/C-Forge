@@ -160,13 +160,37 @@ static Value cfv_array_fast(const Value&input){auto list=std::get_if<Lista>(&inp
 static Value cfv_matrix(const Value&rows_value,const Value&columns_value,const Value&fill_value=Value{0.0}){double rows_number=numero(rows_value),columns_number=numero(columns_value),fill=numero(fill_value);if(rows_number<0||columns_number<0||std::floor(rows_number)!=rows_number||std::floor(columns_number)!=columns_number||rows_number*columns_number>10000000.0)throw std::runtime_error("dimensiones de matrix inválidas");auto matrix=std::make_shared<CfvDenseMatrix>();matrix->rows=(size_t)rows_number;matrix->columns=(size_t)columns_number;matrix->values.assign(matrix->rows*matrix->columns,fill);return matrix;}
 #ifdef _WIN32
 static Value cfv_net_send(const Value&,const Value&,const Value&){throw std::runtime_error("net_send requiere backend Winsock");}
-static Value cfv_net_listen(const Value&,const Value&=Value{5000.0}){throw std::runtime_error("net_listen requiere backend Winsock");}
+static Value cfv_net_listen(const Value&){throw std::runtime_error("net_listen requiere backend Winsock");}
+static Value cfv_net_listen(const Value&,const Value&){throw std::runtime_error("net_listen requiere backend Winsock");}
 #else
 struct CfvSocket{int value=-1;explicit CfvSocket(int descriptor=-1):value(descriptor){}~CfvSocket(){if(value>=0)::close(value);}CfvSocket(const CfvSocket&)=delete;CfvSocket&operator=(const CfvSocket&)=delete;};
 static Value cfv_net_send(const Value&host_value,const Value&port_value,const Value&data_value){if(host_value.index()!=2||data_value.index()!=2)throw std::runtime_error("net_send requiere host, puerto y texto");int port=(int)numero(port_value);if(port<1||port>65535)throw std::runtime_error("puerto inválido");addrinfo hints{};hints.ai_family=AF_UNSPEC;hints.ai_socktype=SOCK_STREAM;addrinfo*raw=nullptr;auto port_text=std::to_string(port);if(getaddrinfo(std::get<std::string>(host_value.data).c_str(),port_text.c_str(),&hints,&raw)!=0)throw std::runtime_error("no se pudo resolver el host");std::unique_ptr<addrinfo,decltype(&freeaddrinfo)>addresses(raw,freeaddrinfo);int descriptor=-1;for(auto*entry=raw;entry;entry=entry->ai_next){descriptor=socket(entry->ai_family,entry->ai_socktype,entry->ai_protocol);if(descriptor>=0&&connect(descriptor,entry->ai_addr,entry->ai_addrlen)==0)break;if(descriptor>=0)::close(descriptor);descriptor=-1;}CfvSocket connection(descriptor);if(descriptor<0)throw std::runtime_error("net_send no pudo conectar");const auto&data=std::get<std::string>(data_value.data);size_t sent=0;while(sent<data.size()){ssize_t count=send(descriptor,data.data()+sent,data.size()-sent,0);if(count<=0)throw std::runtime_error("net_send perdió la conexión");sent+=(size_t)count;}return (double)sent;}
 static Value cfv_net_listen(const Value&port_value,const Value&timeout_value=Value{5000.0}){int port=(int)numero(port_value),timeout=(int)numero(timeout_value);if(port<1||port>65535||timeout<0)throw std::runtime_error("puerto o timeout inválido");CfvSocket server(socket(AF_INET,SOCK_STREAM,0));if(server.value<0)throw std::runtime_error("net_listen no pudo crear socket");int reuse=1;setsockopt(server.value,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));sockaddr_in address{};address.sin_family=AF_INET;address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);address.sin_port=htons((uint16_t)port);if(bind(server.value,(sockaddr*)&address,sizeof(address))!=0||listen(server.value,1)!=0)throw std::runtime_error("net_listen no pudo abrir el puerto");fd_set set;FD_ZERO(&set);FD_SET(server.value,&set);timeval wait{timeout/1000,(timeout%1000)*1000};int ready=select(server.value+1,&set,nullptr,nullptr,&wait);if(ready==0)throw std::runtime_error("net_listen agotó el tiempo de espera");if(ready<0)throw std::runtime_error("net_listen falló esperando conexión");sockaddr_storage peer{};socklen_t peer_size=sizeof(peer);CfvSocket client(accept(server.value,(sockaddr*)&peer,&peer_size));if(client.value<0)throw std::runtime_error("net_listen no pudo aceptar conexión");std::string data;char buffer[65536];for(;;){ssize_t count=recv(client.value,buffer,sizeof(buffer),0);if(count<0)throw std::runtime_error("net_listen falló recibiendo datos");if(count==0)break;data.append(buffer,(size_t)count);}char host[NI_MAXHOST]={0};getnameinfo((sockaddr*)&peer,peer_size,host,sizeof(host),nullptr,0,NI_NUMERICHOST);auto result=std::make_shared<std::map<std::string,Value>>();(*result)["datos"]=data;(*result)["host"]=std::string(host);(*result)["puerto"]=(double)port;return result;}
 #endif
 static Value cfv_raiz(const Value&v){double n=numero(v);if(n<0)throw std::runtime_error("no existe raíz real negativa");return std::sqrt(n);}static Value cfv_absoluto(const Value&v){return std::abs(numero(v));}static Value cfv_redondear(const Value&v){return std::round(numero(v));}static Value cfv_potencia(const Value&a,const Value&b){return std::pow(numero(a),numero(b));}
+// ── nuevas funciones stdlib ────────────────────────────────────────────────
+static Value cfv_texto_mayusculas(const Value&v){if(v.index()!=2)throw std::runtime_error("texto_mayusculas requiere texto");std::string s=std::get<std::string>(v.data);for(auto&c:s)c=(char)std::toupper((unsigned char)c);return s;}
+static Value cfv_texto_minusculas(const Value&v){if(v.index()!=2)throw std::runtime_error("texto_minusculas requiere texto");std::string s=std::get<std::string>(v.data);for(auto&c:s)c=(char)std::tolower((unsigned char)c);return s;}
+static Value cfv_texto_recortar(const Value&v){if(v.index()!=2)throw std::runtime_error("texto_recortar requiere texto");std::string s=std::get<std::string>(v.data);size_t a=s.find_first_not_of(" \t\r\n");size_t b=s.find_last_not_of(" \t\r\n");if(a==std::string::npos)return std::string("");return s.substr(a,b-a+1);}
+static Value cfv_texto_empieza_con(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_empieza_con requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&pre=std::get<std::string>(p.data);return (bool)(s.size()>=pre.size()&&s.compare(0,pre.size(),pre)==0);}
+static Value cfv_texto_termina_con(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_termina_con requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&suf=std::get<std::string>(p.data);return (bool)(s.size()>=suf.size()&&s.compare(s.size()-suf.size(),suf.size(),suf)==0);}
+static Value cfv_texto_contiene(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_contiene requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&sub=std::get<std::string>(p.data);return (bool)(s.find(sub)!=std::string::npos);}
+static Value cfv_texto_indice(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_indice requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&sub=std::get<std::string>(p.data);size_t pos=s.find(sub);return pos==std::string::npos?(double)-1:(double)pos;}
+static Value cfv_texto_repetir(const Value&v,const Value&n){if(v.index()!=2)throw std::runtime_error("texto_repetir requiere texto y número");const auto&s=std::get<std::string>(v.data);int cnt=(int)numero(n);if(cnt<=0)return std::string("");std::string r;r.reserve(s.size()*(size_t)cnt);for(int i=0;i<cnt;i++)r+=s;return r;}
+static Value cfv_texto_reemplazar(const Value&v,const Value&oldV,const Value&newV){if(v.index()!=2||oldV.index()!=2||newV.index()!=2)throw std::runtime_error("texto_reemplazar requiere tres textos");std::string s=std::get<std::string>(v.data);const auto&viejo=std::get<std::string>(oldV.data);const auto&nuevo=std::get<std::string>(newV.data);if(viejo.empty())return s;size_t pos=0;while((pos=s.find(viejo,pos))!=std::string::npos){s.replace(pos,viejo.size(),nuevo);pos+=nuevo.size();}return s;}
+static Value cfv_texto_dividir(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_dividir requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&sep=std::get<std::string>(p.data);auto result=std::make_shared<std::vector<Value>>();if(sep.empty()){for(char c:s)result->push_back(Value{std::string(1,c)});return Value{result};}size_t start=0,pos=0;while((pos=s.find(sep,start))!=std::string::npos){result->push_back(Value{s.substr(start,pos-start)});start=pos+sep.size();}result->push_back(Value{s.substr(start)});return Value{result};}
+static Value cfv_texto_a_numero(const Value&v){if(v.index()!=2)throw std::runtime_error("texto_a_numero requiere texto");try{return std::stod(std::get<std::string>(v.data));}catch(...){throw std::runtime_error("texto_a_numero: no es un número válido");}}
+static Value cfv_numero_a_texto(const Value&v){return Value{texto(v)};}
+static Value cfv_piso(const Value&v){return std::floor(numero(v));}
+static Value cfv_techo(const Value&v){return std::ceil(numero(v));}
+static Value cfv_maximo(const Value&a,const Value&b){return numero(a)>=numero(b)?a:b;}
+static Value cfv_minimo(const Value&a,const Value&b){return numero(a)<=numero(b)?a:b;}
+static Value cfv_lista_ordenar(const Value&v){if(v.index()!=4)throw std::runtime_error("lista_ordenar requiere una lista");auto copy=std::make_shared<std::vector<Value>>(*std::get<Lista>(v.data));std::sort(copy->begin(),copy->end(),[](const Value&x,const Value&y){if(x.index()==2&&y.index()==2)return std::get<std::string>(x.data)<std::get<std::string>(y.data);if(x.index()==1&&y.index()==1)return std::get<double>(x.data)<std::get<double>(y.data);return false;});return Value{copy};}
+static Value cfv_lista_invertir(const Value&v){if(v.index()!=4)throw std::runtime_error("lista_invertir requiere una lista");auto copy=std::make_shared<std::vector<Value>>(*std::get<Lista>(v.data));std::reverse(copy->begin(),copy->end());return Value{copy};}
+static Value cfv_lista_contiene(const Value&v,const Value&item){if(v.index()!=4)throw std::runtime_error("lista_contiene requiere una lista");for(const auto&el:*std::get<Lista>(v.data))if(texto(el)==texto(item))return Value{true};return Value{false};}
+static Value cfv_lista_unir(const Value&v,const Value&sep){if(v.index()!=4)throw std::runtime_error("lista_unir requiere una lista");const auto&list=*std::get<Lista>(v.data);std::string separator=sep.index()==2?std::get<std::string>(sep.data):",";std::string result;for(size_t i=0;i<list.size();i++){if(i)result+=separator;result+=texto(list[i]);}return Value{result};}
+static Value cfv_lista_rango(const Value&a,const Value&b){double start=numero(a),end=numero(b);auto result=std::make_shared<std::vector<Value>>();for(double i=start;i<end;i+=1.0)result->push_back(Value{i});return Value{result};}
+static Value cfv_lista_aplanar(const Value&v){if(v.index()!=4)throw std::runtime_error("lista_aplanar requiere una lista");auto result=std::make_shared<std::vector<Value>>();std::function<void(const Value&)>flatten=[&](const Value&x){if(x.index()==4){for(const auto&el:*std::get<Lista>(x.data))flatten(el);}else{result->push_back(x);}};flatten(v);return Value{result};}
 static Value cfv_tiempo_actual(){using namespace std::chrono;return duration<double>(system_clock::now().time_since_epoch()).count();}
 static Value cfv_argumentos_global;
 static Value cfv_argumentos(){return cfv_argumentos_global;}
@@ -811,6 +835,15 @@ Value cfv_parse_sentencia(Value cfv_p) {
     size_t cfv_cuerpo_tipo = 4;
     return cfv_nodo(Value{std::string("Funcion", 7)}, cfv_fn_nombre, crear_lista({cfv_nodo(Value{std::string("Params", 6)}, Value{}, cfv_params), cfv_nodo(Value{std::string("Bloque", 6)}, Value{}, cfv_cuerpo)}));
   }
+  // importar "ruta"
+  if (verdad(cfv_ver(cfv_p, Value{std::string("importar")}))) {
+    (void)(cfv_avanzar(cfv_p));
+    (void)(cfv_afirmar(cfv_ver_tipo(cfv_p, Value{std::string("STRING")}), Value{std::string("importar: se esperaba ruta de archivo entre comillas")}));
+    Value cfv_ruta_tok = cfv_avanzar(cfv_p);
+    size_t cfv_ruta_tok_tipo = 99;
+    (void)(cfv_tomar(cfv_p, Value{std::string(";")}));
+    return cfv_nodo(Value{std::string("Importar")}, indice(cfv_ruta_tok, Value{std::string("lexema")}), crear_lista({}));
+  }
   if (verdad(cfv_ver(cfv_p, Value{std::string("mostrar", 7)}))) {
     (void)(cfv_avanzar(cfv_p));
     (void)(cfv_requerir(cfv_p, Value{std::string("(", 1)}, Value{std::string("Se esperaba '('", 15)}));
@@ -1395,6 +1428,19 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
     (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("leer_archivo requiere un argumento", 34)}));
     return cfv_leer_archivo(indice(cfv_args, Value{0.0}));
   }
+  if (verdad(compara(cfv_nombre, Value{std::string("escribir_archivo", 16)}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("escribir_archivo requiere dos argumentos", 40)}));
+    (void)(cfv_escribir_archivo(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0})));
+    return Value{true};
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sys_run", 7)}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("sys_run requiere un argumento", 29)}));
+    return cfv_sys_run(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("existe_archivo", 14)}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("existe_archivo requiere un argumento", 36)}));
+    return cfv_existe_archivo(indice(cfv_args, Value{0.0}));
+  }
   if (verdad(compara(cfv_nombre, Value{std::string("afirmar", 7)}, "=="))) {
     if (verdad(compara(cfv_longitud(cfv_args), Value{2.0}, "=="))) {
       (void)(cfv_afirmar(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0})));
@@ -1408,6 +1454,117 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
       return indice(cfv_fns, Value{std::string("__prog_args__", 13)});
     }
     return cfv_argumentos_programa();
+  }
+  // ── subcadena / texto ─────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("subcadena")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{3.0}, "=="), Value{std::string("subcadena requiere 3 argumentos")}));
+    return cfv_subcadena(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}), indice(cfv_args, Value{2.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_mayusculas")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("texto_mayusculas requiere 1 argumento")}));
+    return cfv_texto_mayusculas(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_minusculas")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("texto_minusculas requiere 1 argumento")}));
+    return cfv_texto_minusculas(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_recortar")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("texto_recortar requiere 1 argumento")}));
+    return cfv_texto_recortar(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_empieza_con")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("texto_empieza_con requiere 2 argumentos")}));
+    return cfv_texto_empieza_con(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_termina_con")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("texto_termina_con requiere 2 argumentos")}));
+    return cfv_texto_termina_con(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_contiene")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("texto_contiene requiere 2 argumentos")}));
+    return cfv_texto_contiene(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_indice")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("texto_indice requiere 2 argumentos")}));
+    return cfv_texto_indice(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_repetir")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("texto_repetir requiere 2 argumentos")}));
+    return cfv_texto_repetir(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_reemplazar")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{3.0}, "=="), Value{std::string("texto_reemplazar requiere 3 argumentos")}));
+    return cfv_texto_reemplazar(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}), indice(cfv_args, Value{2.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_dividir")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("texto_dividir requiere 2 argumentos")}));
+    return cfv_texto_dividir(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_a_numero")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("texto_a_numero requiere 1 argumento")}));
+    return cfv_texto_a_numero(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("numero_a_texto")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("numero_a_texto requiere 1 argumento")}));
+    return cfv_numero_a_texto(indice(cfv_args, Value{0.0}));
+  }
+  // ── Matemáticas extras ────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("piso")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("piso requiere 1 argumento")}));
+    return cfv_piso(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("techo")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("techo requiere 1 argumento")}));
+    return cfv_techo(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("maximo")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("maximo requiere 2 argumentos")}));
+    return cfv_maximo(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("minimo")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("minimo requiere 2 argumentos")}));
+    return cfv_minimo(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  // ── Lista extras ──────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_ordenar")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("lista_ordenar requiere 1 argumento")}));
+    return cfv_lista_ordenar(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_invertir")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("lista_invertir requiere 1 argumento")}));
+    return cfv_lista_invertir(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_contiene")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("lista_contiene requiere 2 argumentos")}));
+    return cfv_lista_contiene(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_unir")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("lista_unir requiere 2 argumentos")}));
+    return cfv_lista_unir(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_rango")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("lista_rango requiere 2 argumentos")}));
+    return cfv_lista_rango(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_aplanar")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("lista_aplanar requiere 1 argumento")}));
+    return cfv_lista_aplanar(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("absoluto")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("absoluto requiere 1 argumento")}));
+    return cfv_absoluto(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("redondear")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("redondear requiere 1 argumento")}));
+    return cfv_redondear(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("potencia")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("potencia requiere 2 argumentos")}));
+    return cfv_potencia(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("raiz")}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("raiz requiere 1 argumento")}));
+    return cfv_raiz(indice(cfv_args, Value{0.0}));
   }
   return Value{std::string("__no_builtin__", 14)};
   return Value{};
@@ -1828,6 +1985,16 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
     (void)(cfv_eval_expr(cfv_stmt, cfv_env, cfv_fns));
     return crear_lista({Value{std::string("normal", 6)}, Value{}});
   }
+  if (verdad(compara(cfv_t, Value{std::string("Importar")}, "=="))) {
+    Value cfv_ruta_raw = indice(cfv_stmt, Value{std::string("valor")});
+    Value cfv_ruta_imp = cfv_subcadena(cfv_ruta_raw, Value{1.0}, resta(cfv_longitud(cfv_ruta_raw), Value{1.0}));
+    Value cfv_fuente_imp = cfv_leer_archivo(cfv_ruta_imp);
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_fuente_imp), Value{0.0}, ">"), suma(Value{std::string("importar: no se pudo leer '")}, suma(cfv_ruta_imp, Value{std::string("'")}))));
+    Value cfv_tokens_imp = cfv_tokenizar(cfv_fuente_imp);
+    Value cfv_ast_imp = cfv_parsear(cfv_tokens_imp);
+    (void)(cfv_exec_bloque(cfv_ast_imp, cfv_env, cfv_fns));
+    return crear_lista({Value{std::string("normal")}, Value{}});
+  }
   (void)(cfv_afirmar(Value{false}, suma(suma(Value{std::string("sentencia no implementada tipo '", 32)}, cfv_t), Value{std::string("'", 1)})));
   return crear_lista({Value{std::string("normal", 6)}, Value{}});
   return Value{};
@@ -1838,7 +2005,12 @@ Value cfv_llamar_metodo(Value objeto,const std::string& nombre,std::vector<Value
 }
 int main(int argc, char** argv){
   try {
-    cfv_base_archivos = std::filesystem::path("/Users/javier/Documents/Codex/2026-07-20/bri");
+    if (argc > 1) {
+      auto script_path = std::filesystem::weakly_canonical(std::filesystem::path(argv[1]));
+      cfv_base_archivos = script_path.has_parent_path() ? script_path.parent_path() : std::filesystem::current_path();
+    } else {
+      cfv_base_archivos = std::filesystem::current_path();
+    }
     auto cfv_args_lista = std::make_shared<std::vector<Value>>();
     for(int i=1;i<argc;++i) cfv_args_lista->push_back(Value{std::string(argv[i])});
     cfv_argumentos_global = Value{cfv_args_lista};

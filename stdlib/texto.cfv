@@ -1,0 +1,152 @@
+// stdlib/texto.cfv — Operaciones de texto para C-Forge
+// Inspirado en C# string, Java String, Python str
+//
+// Uso: importar "stdlib/texto.cfv"
+// Requiere funciones nativas: texto_mayusculas, texto_minusculas, texto_recortar,
+//   texto_dividir, texto_reemplazar, texto_contiene, texto_indice, texto_repetir,
+//   texto_empieza_con, texto_termina_con, subcadena, lista_unir, a_texto
+
+// ── Verificación ─────────────────────────────────────────────────────────
+
+funcion txt_vacio(s: texto): booleano {
+    retornar longitud(s) == 0
+}
+
+// ¿Es dígito ASCII?
+funcion txt_es_digito(c: texto): booleano {
+    retornar c >= "0" y c <= "9"
+}
+
+// ¿Es letra ASCII?
+funcion txt_es_letra(c: texto): booleano {
+    retornar (c >= "a" y c <= "z") o (c >= "A" y c <= "Z")
+}
+
+// ¿El texto representa un número válido?
+funcion txt_es_numero(s: texto): booleano {
+    sea n: numero = longitud(s)
+    si (n == 0) { retornar falso }
+    sea i: numero = 0
+    si (s[0] == "-" o s[0] == "+") { i = 1 }
+    si (i >= n) { retornar falso }
+    sea tiene_punto: booleano = falso
+    mientras (i < n) {
+        sea c: texto = s[i]
+        si (c == ".") {
+            si (tiene_punto) { retornar falso }
+            tiene_punto = verdadero
+        } sino si (c < "0" o c > "9") {
+            retornar falso
+        }
+        i = i + 1
+    }
+    retornar verdadero
+}
+
+// ── Capitalización ────────────────────────────────────────────────────────
+
+// Primera letra mayúscula, resto minúscula — como C# ToTitleCase parcial
+funcion txt_capitalizar(s: texto): texto {
+    sea n: numero = longitud(s)
+    si (n == 0) { retornar s }
+    retornar texto_mayusculas(subcadena(s, 0, 1)) + texto_minusculas(subcadena(s, 1, n))
+}
+
+// Título: capitalizar primera letra de cada palabra — como Python str.title()
+funcion txt_titulo(s: texto): texto {
+    sea palabras: lista = texto_dividir(s, " ")
+    sea resultado: lista = []
+    para p en palabras {
+        agregar(resultado, txt_capitalizar(p))
+    }
+    retornar lista_unir(resultado, " ")
+}
+
+// ── Alineación ────────────────────────────────────────────────────────────
+
+// Relleno izquierdo — como C# PadLeft / Python str.rjust()
+funcion txt_relleno_izq(s: texto, ancho: numero, car: texto): texto {
+    sea resultado: texto = s
+    mientras (longitud(resultado) < ancho) {
+        resultado = car + resultado
+    }
+    retornar resultado
+}
+
+// Relleno derecho — como C# PadRight / Python str.ljust()
+funcion txt_relleno_der(s: texto, ancho: numero, car: texto): texto {
+    sea resultado: texto = s
+    mientras (longitud(resultado) < ancho) {
+        resultado = resultado + car
+    }
+    retornar resultado
+}
+
+// Centrar texto — como Python str.center()
+funcion txt_centrar(s: texto, ancho: numero): texto {
+    sea espacio: numero = ancho - longitud(s)
+    si (espacio <= 0) { retornar s }
+    sea izq: numero = espacio / 2
+    sea der: numero = espacio - izq
+    sea res: texto = txt_relleno_izq(s, longitud(s) + izq, " ")
+    retornar txt_relleno_der(res, ancho, " ")
+}
+
+// ── Búsqueda y recuento ───────────────────────────────────────────────────
+
+// Número de ocurrencias de sub en s — como Python str.count()
+funcion txt_contar(s: texto, sub: texto): numero {
+    si (longitud(sub) == 0) { retornar 0 }
+    sea partes: lista = texto_dividir(s, sub)
+    retornar longitud(partes) - 1
+}
+
+// ── Formato ───────────────────────────────────────────────────────────────
+
+// Interpolación básica: {0}, {1}... — como C# string.Format() / Python str.format()
+funcion txt_formato(plantilla: texto, valores: lista): texto {
+    sea resultado: texto = plantilla
+    sea i: numero = 0
+    mientras (i < longitud(valores)) {
+        resultado = texto_reemplazar(resultado, "{" + a_texto(i) + "}", a_texto(valores[i]))
+        i = i + 1
+    }
+    retornar resultado
+}
+
+// Repetir texto n veces — como Python "x" * n / Java String.repeat()
+funcion txt_repetir(s: texto, n: numero): texto {
+    retornar texto_repetir(s, n)
+}
+
+// Unir lista en texto — como Python str.join() / Java Collectors.joining()
+funcion txt_unir(lst: lista, sep: texto): texto {
+    retornar lista_unir(lst, sep)
+}
+
+// ── Separación y agrupación ───────────────────────────────────────────────
+
+// Dividir en líneas — como Python splitlines()
+funcion txt_lineas(s: texto): lista {
+    retornar texto_dividir(s, "\n")
+}
+
+// Separar CSV simple (sin comillas)
+funcion txt_csv(linea: texto): lista {
+    retornar texto_dividir(linea, ",")
+}
+
+// ── Normalización ─────────────────────────────────────────────────────────
+
+// Recortar y colapsar espacios múltiples en uno
+funcion txt_normalizar(s: texto): texto {
+    sea recortado: texto = texto_recortar(s)
+    sea partes: lista = texto_dividir(recortado, " ")
+    sea resultado: lista = []
+    para p en partes {
+        si (longitud(texto_recortar(p)) > 0) {
+            agregar(resultado, texto_recortar(p))
+        }
+    }
+    retornar lista_unir(resultado, " ")
+}

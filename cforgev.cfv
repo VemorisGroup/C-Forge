@@ -42,7 +42,7 @@ funcion es_alfanum(c: texto): booleano {
     retornar es_letra(c) o es_digito(c)
 }
 
-funcion subcadena(fuente: texto, inicio: numero, fin: numero): texto {
+funcion sub_interna(fuente: texto, inicio: numero, fin: numero): texto {
     sea resultado: texto = ""
     sea i: numero = inicio
     mientras (i < fin) {
@@ -89,14 +89,14 @@ funcion tokenizar(fuente: texto): lista {
                     pos = pos + 1
                 }
             }
-            agregar(tokens, Token("NUMBER", subcadena(fuente, inicio, pos), linea))
+            agregar(tokens, Token("NUMBER", sub_interna(fuente, inicio, pos), linea))
 
         } sino si (es_letra(c)) {
             sea inicio: numero = pos
             mientras (pos < n y es_alfanum(fuente[pos])) {
                 pos = pos + 1
             }
-            sea lex: texto = subcadena(fuente, inicio, pos)
+            sea lex: texto = sub_interna(fuente, inicio, pos)
             agregar(tokens, Token("IDENT", lex, linea))
 
         } sino si (c == "\"") {
@@ -354,6 +354,15 @@ funcion parse_sentencia(p: cualquiera): cualquiera {
         }
         sea cuerpo: lista = parse_bloque(p)
         retornar nodo("Funcion", fn_nombre, [nodo("Params", nulo, params), nodo("Bloque", nulo, cuerpo)])
+    }
+
+    // importar "ruta/archivo.cfv"
+    si (ver(p, "importar")) {
+        avanzar(p)
+        afirmar(ver_tipo(p, "STRING"), "importar: se esperaba ruta de archivo entre comillas")
+        sea ruta_tok: cualquiera = avanzar(p)
+        tomar(p, ";")
+        retornar nodo("Importar", ruta_tok["lexema"], [])
     }
 
     // mostrar directo
@@ -796,6 +805,118 @@ funcion eval_builtin(nombre: texto, args: lista, env: lista, fns: cualquiera): c
         }
         retornar argumentos_programa()
     }
+    // ── subcadena / texto ───────────────────────────────────────────────────
+    si (nombre == "subcadena") {
+        afirmar(longitud(args) == 3, "subcadena requiere 3 argumentos")
+        retornar sub_interna(args[0], args[1], args[2])
+    }
+    si (nombre == "texto_mayusculas") {
+        afirmar(longitud(args) == 1, "texto_mayusculas requiere 1 argumento")
+        retornar texto_mayusculas(args[0])
+    }
+    si (nombre == "texto_minusculas") {
+        afirmar(longitud(args) == 1, "texto_minusculas requiere 1 argumento")
+        retornar texto_minusculas(args[0])
+    }
+    si (nombre == "texto_recortar") {
+        afirmar(longitud(args) == 1, "texto_recortar requiere 1 argumento")
+        retornar texto_recortar(args[0])
+    }
+    si (nombre == "texto_empieza_con") {
+        afirmar(longitud(args) == 2, "texto_empieza_con requiere 2 argumentos")
+        retornar texto_empieza_con(args[0], args[1])
+    }
+    si (nombre == "texto_termina_con") {
+        afirmar(longitud(args) == 2, "texto_termina_con requiere 2 argumentos")
+        retornar texto_termina_con(args[0], args[1])
+    }
+    si (nombre == "texto_contiene") {
+        afirmar(longitud(args) == 2, "texto_contiene requiere 2 argumentos")
+        retornar texto_contiene(args[0], args[1])
+    }
+    si (nombre == "texto_indice") {
+        afirmar(longitud(args) == 2, "texto_indice requiere 2 argumentos")
+        retornar texto_indice(args[0], args[1])
+    }
+    si (nombre == "texto_repetir") {
+        afirmar(longitud(args) == 2, "texto_repetir requiere 2 argumentos")
+        retornar texto_repetir(args[0], args[1])
+    }
+    si (nombre == "texto_reemplazar") {
+        afirmar(longitud(args) == 3, "texto_reemplazar requiere 3 argumentos")
+        retornar texto_reemplazar(args[0], args[1], args[2])
+    }
+    si (nombre == "texto_dividir") {
+        afirmar(longitud(args) == 2, "texto_dividir requiere 2 argumentos")
+        retornar texto_dividir(args[0], args[1])
+    }
+    si (nombre == "texto_a_numero") {
+        afirmar(longitud(args) == 1, "texto_a_numero requiere 1 argumento")
+        retornar texto_a_numero(args[0])
+    }
+    si (nombre == "numero_a_texto") {
+        afirmar(longitud(args) == 1, "numero_a_texto requiere 1 argumento")
+        retornar numero_a_texto(args[0])
+    }
+    // ── Matemáticas extras ─────────────────────────────────────────────────
+    si (nombre == "piso") {
+        afirmar(longitud(args) == 1, "piso requiere 1 argumento")
+        retornar piso(args[0])
+    }
+    si (nombre == "techo") {
+        afirmar(longitud(args) == 1, "techo requiere 1 argumento")
+        retornar techo(args[0])
+    }
+    si (nombre == "maximo") {
+        afirmar(longitud(args) == 2, "maximo requiere 2 argumentos")
+        retornar maximo(args[0], args[1])
+    }
+    si (nombre == "minimo") {
+        afirmar(longitud(args) == 2, "minimo requiere 2 argumentos")
+        retornar minimo(args[0], args[1])
+    }
+    // ── Lista extras ────────────────────────────────────────────────────────
+    si (nombre == "lista_ordenar") {
+        afirmar(longitud(args) == 1, "lista_ordenar requiere 1 argumento")
+        retornar lista_ordenar(args[0])
+    }
+    si (nombre == "lista_invertir") {
+        afirmar(longitud(args) == 1, "lista_invertir requiere 1 argumento")
+        retornar lista_invertir(args[0])
+    }
+    si (nombre == "lista_contiene") {
+        afirmar(longitud(args) == 2, "lista_contiene requiere 2 argumentos")
+        retornar lista_contiene(args[0], args[1])
+    }
+    si (nombre == "lista_unir") {
+        afirmar(longitud(args) == 2, "lista_unir requiere 2 argumentos")
+        retornar lista_unir(args[0], args[1])
+    }
+    si (nombre == "lista_rango") {
+        afirmar(longitud(args) == 2, "lista_rango requiere 2 argumentos")
+        retornar lista_rango(args[0], args[1])
+    }
+    si (nombre == "lista_aplanar") {
+        afirmar(longitud(args) == 1, "lista_aplanar requiere 1 argumento")
+        retornar lista_aplanar(args[0])
+    }
+    si (nombre == "absoluto") {
+        afirmar(longitud(args) == 1, "absoluto requiere 1 argumento")
+        retornar absoluto(args[0])
+    }
+    si (nombre == "redondear") {
+        afirmar(longitud(args) == 1, "redondear requiere 1 argumento")
+        retornar redondear(args[0])
+    }
+    si (nombre == "potencia") {
+        afirmar(longitud(args) == 2, "potencia requiere 2 argumentos")
+        retornar potencia(args[0], args[1])
+    }
+    si (nombre == "raiz") {
+        afirmar(longitud(args) == 1, "raiz requiere 1 argumento")
+        retornar raiz(args[0])
+    }
+
     retornar "__no_builtin__"
 }
 
@@ -809,7 +930,7 @@ funcion eval_expr(nodo_e: cualquiera, env: lista, fns: cualquiera): cualquiera {
     si (t == "Texto") {
         sea raw: texto = nodo_e["valor"]
         sea n: numero = longitud(raw)
-        retornar subcadena(raw, 1, n - 1)
+        retornar sub_interna(raw, 1, n - 1)
     }
 
     si (t == "Booleano") {
@@ -1096,6 +1217,17 @@ funcion exec_stmt(stmt: cualquiera, env: lista, fns: cualquiera): lista {
 
     si (t == "Asignacion") {
         eval_expr(stmt, env, fns)
+        retornar ["normal", nulo]
+    }
+
+    si (t == "Importar") {
+        sea ruta_raw: texto = stmt["valor"]
+        sea ruta_imp: texto = sub_interna(ruta_raw, 1, longitud(ruta_raw) - 1)
+        sea fuente_imp: texto = leer_archivo(ruta_imp)
+        afirmar(longitud(fuente_imp) > 0, "importar: no se pudo leer '" + ruta_imp + "'")
+        sea tokens_imp: lista = tokenizar(fuente_imp)
+        sea ast_imp: lista = parsear(tokens_imp)
+        exec_bloque(ast_imp, env, fns)
         retornar ["normal", nulo]
     }
 

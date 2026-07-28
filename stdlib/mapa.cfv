@@ -1,0 +1,122 @@
+// stdlib/mapa.cfv — Utilidades de mapa para C-Forge
+// Inspirado en C# Dictionary<K,V>, Java HashMap, Python dict
+//
+// Uso: importar "stdlib/mapa.cfv"
+
+// ── Acceso seguro ─────────────────────────────────────────────────────────
+
+// Obtener con valor por defecto — como C# TryGetValue / Java getOrDefault
+funcion mapa_get(m: cualquiera, clave: texto, por_defecto: cualquiera): cualquiera {
+    si (tiene_clave(m, clave)) {
+        retornar m[clave]
+    }
+    retornar por_defecto
+}
+
+// ¿El mapa tiene la clave?
+funcion mapa_tiene(m: cualquiera, clave: texto): booleano {
+    retornar tiene_clave(m, clave)
+}
+
+// Tamaño del mapa
+funcion mapa_tamano(m: cualquiera): numero {
+    retornar longitud(claves(m))
+}
+
+// ¿El mapa está vacío?
+funcion mapa_vacio(m: cualquiera): booleano {
+    retornar longitud(claves(m)) == 0
+}
+
+// ── Construcción ──────────────────────────────────────────────────────────
+
+// Fusionar dos mapas (b sobreescribe a) — como C# new Dictionary + Merge / Python **a, **b
+funcion mapa_fusionar(a: cualquiera, b: cualquiera): cualquiera {
+    sea resultado: cualquiera = {}
+    para k en claves(a) {
+        sea r: cualquiera = resultado
+        r[k] = a[k]
+    }
+    para k en claves(b) {
+        sea r: cualquiera = resultado
+        r[k] = b[k]
+    }
+    retornar resultado
+}
+
+// Construir mapa desde lista de pares [[clave, valor], ...]
+funcion mapa_desde_pares(pares: lista): cualquiera {
+    sea resultado: cualquiera = {}
+    para par en pares {
+        sea r: cualquiera = resultado
+        r[a_texto(par[0])] = par[1]
+    }
+    retornar resultado
+}
+
+// ── Iteración ─────────────────────────────────────────────────────────────
+
+// Lista de valores del mapa — como C# Values / Java values()
+funcion mapa_valores(m: cualquiera): lista {
+    sea resultado: lista = []
+    para k en claves(m) {
+        agregar(resultado, m[k])
+    }
+    retornar resultado
+}
+
+// Lista de pares [clave, valor] — como Java entrySet() / Python items()
+funcion mapa_pares(m: cualquiera): lista {
+    sea resultado: lista = []
+    para k en claves(m) {
+        agregar(resultado, [k, m[k]])
+    }
+    retornar resultado
+}
+
+// ── Transformación ────────────────────────────────────────────────────────
+
+// Invertir mapa (valores → claves) — útil cuando los valores son únicos
+funcion mapa_invertir(m: cualquiera): cualquiera {
+    sea resultado: cualquiera = {}
+    para k en claves(m) {
+        sea r: cualquiera = resultado
+        r[a_texto(m[k])] = k
+    }
+    retornar resultado
+}
+
+// Frecuencia de elementos de una lista — como Python Counter / Java Collectors.groupingBy
+funcion mapa_frecuencia(lst: lista): cualquiera {
+    sea resultado: cualquiera = {}
+    para x en lst {
+        sea clave: texto = a_texto(x)
+        si (tiene_clave(resultado, clave)) {
+            sea r: cualquiera = resultado
+            r[clave] = resultado[clave] + 1
+        } sino {
+            sea r: cualquiera = resultado
+            r[clave] = 1
+        }
+    }
+    retornar resultado
+}
+
+// Agrupar lista por clave derivada de cada elemento
+// fn_clave debe ser el NOMBRE de una función definida en el scope del llamante
+// (uso manual: agrupar la lista fuera y llamar a mapa_desde_pares)
+// Versión simple: agrupar por resultado de a_texto(elemento)
+funcion mapa_agrupar_por_texto(lst: lista): cualquiera {
+    sea resultado: cualquiera = {}
+    para x en lst {
+        sea clave: texto = a_texto(x)
+        si (tiene_clave(resultado, clave)) {
+            sea grupo: lista = resultado[clave]
+            agregar(grupo, x)
+        } sino {
+            sea r: cualquiera = resultado
+            r[clave] = [x]
+        }
+    }
+    retornar resultado
+}
