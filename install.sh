@@ -78,17 +78,63 @@ echo ""
 echo -e "  ${BLUE}Compilando interprete...${NC}"
 echo -e "  ${CXX} -std=c++20 -O2 ..."
 
-# Intentar con Python support, fallback sin Python
+# Detectar OpenSSL
+OPENSSL_FLAGS=""
+if [ "$OS" = "Darwin" ]; then
+    # macOS: Homebrew OpenSSL
+    for prefix in /opt/homebrew/opt/openssl@3 /usr/local/opt/openssl@3 /opt/homebrew/opt/openssl /usr/local/opt/openssl; do
+        if [ -f "$prefix/include/openssl/sha.h" ]; then
+            OPENSSL_FLAGS="-DCFV_WITH_OPENSSL -I$prefix/include -L$prefix/lib -lcrypto -lssl"
+            echo -e "  OpenSSL encontrado en $prefix"
+            break
+        fi
+    done
+elif [ "$OS" = "Linux" ]; then
+    # Linux: buscar libcrypto.so.3
+    for lib_dir in /usr/lib/aarch64-linux-gnu /usr/lib/x86_64-linux-gnu /usr/lib; do
+        if [ -f "$lib_dir/libcrypto.so.3" ]; then
+            NODE_INC=""
+            [ -d /usr/include/node/openssl ] && NODE_INC="-I/usr/include/node"
+            OPENSSL_FLAGS="-DCFV_WITH_OPENSSL $NODE_INC $lib_dir/libcrypto.so.3 $lib_dir/libssl.so.3"
+            echo -e "  OpenSSL encontrado en $lib_dir"
+            break
+        fi
+    done
+    # Fallback: pkg-config
+    if [ -z "$OPENSSL_FLAGS" ] && command -v pkg-config &>/dev/null && pkg-config --exists openssl 2>/dev/null; then
+        OPENSSL_FLAGS="-DCFV_WITH_OPENSSL $(pkg-config --cflags --libs openssl)"
+        echo -e "  OpenSSL via pkg-config"
+    fi
+fi
+if [ -z "$OPENSSL_FLAGS" ]; then
+    echo -e "  ${YELLOW}OpenSSL no encontrado — compilando sin criptografia AES (sha256 puro-C++ disponible)${NC}"
+fi
+
+PYTHON_FLAGS=$(python3-config --includes --ldflags 2>/dev/null || echo "")
+
+# Intentar con Python + OpenSSL, luego combinaciones, luego basico
 if $CXX -std=c++20 -O2 \
     -o "$TMP_DIR/${BINARY_NAME}" \
     "$TMP_DIR/cforgev.cpp" \
-    $(python3-config --includes --ldflags 2>/dev/null || echo "") \
+    $PYTHON_FLAGS $OPENSSL_FLAGS \
     2>/dev/null; then
-    echo -e "  OK compilado con soporte Python"
+    echo -e "  OK compilado con Python + OpenSSL"
+elif $CXX -std=c++20 -O2 \
+    -o "$TMP_DIR/${BINARY_NAME}" \
+    "$TMP_DIR/cforgev.cpp" \
+    $OPENSSL_FLAGS \
+    2>/dev/null; then
+    echo -e "  OK compilado con OpenSSL"
+elif $CXX -std=c++20 -O2 \
+    -o "$TMP_DIR/${BINARY_NAME}" \
+    "$TMP_DIR/cforgev.cpp" \
+    $PYTHON_FLAGS \
+    2>/dev/null; then
+    echo -e "  OK compilado con Python"
 elif $CXX -std=c++20 -O2 \
     -o "$TMP_DIR/${BINARY_NAME}" \
     "$TMP_DIR/cforgev.cpp" 2>&1; then
-    echo -e "  OK compilado (sin soporte Python)"
+    echo -e "  OK compilado (basico)"
 else
     echo -e "${RED}  Error al compilar. Reporta el error en github.com/${REPO}/issues${NC}"
     exit 1

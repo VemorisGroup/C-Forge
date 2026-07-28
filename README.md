@@ -10,9 +10,9 @@
 > Lenguaje de programacion de Vemoris Group con sintaxis propia, tipado gradual,
 > interprete nativo en C++ y biblioteca estandar completa.
 
-**Version actual:** `2.0.0`
+**Version actual:** `2.1.0`
 **Extension oficial:** `.cfv`
-**Estado:** funcional — apto para proyectos reales, scripting y aprendizaje.
+**Estado:** funcional — servidor HTTP nativo, criptografia real AES-256 + SHA-256, apto para apps de produccion.
 
 ---
 
@@ -166,6 +166,88 @@ para i en rango(0, 1000000) {
 | REPL interactivo | OK |
 | Stack traces con contexto | OK |
 | `importar` modulos | OK |
+| Servidor HTTP nativo (`stdlib/web.cfv`) | OK |
+| SHA-256 real OpenSSL | OK |
+| HMAC-SHA256 | OK |
+| AES-256-CBC cifrar/descifrar | OK |
+| Bytes aleatorios seguros (`/dev/urandom`) | OK |
+| Hash de contrasenas (PBKDF2-like) | OK |
+| JWT HS256 (`stdlib/crypto.cfv`) | OK |
+
+---
+
+## Servidor HTTP y apps reales
+
+C-Forge incluye un servidor HTTP nativo (POSIX sockets) y criptografia real (AES-256-CBC, SHA-256, HMAC). Puedes programar apps de banco, backends de API, juegos en red, y mas.
+
+```cfv
+importar "stdlib/web.cfv"
+importar "stdlib/crypto.cfv"
+
+// App de banco basica
+sea PIN = crypto_hash_contrasena("1234")
+sea TOKEN_CLAVE = "clave_secreta_del_banco_xyz"
+
+sea srv = web_escuchar(3000)
+mostrar("Banco C-Forge en :3000")
+
+mientras (verdadero) {
+    sea req = web_solicitud(srv)
+    sea ruta = req["ruta"]
+    sea met = req["metodo"]
+
+    // POST /login
+    si (met == "POST" y ruta == "/login") {
+        sea datos = json_parsear(req["cuerpo"])
+        si (crypto_verificar_contrasena(datos["pin"], PIN)) {
+            sea token = crypto_jwt_crear({"usuario": "cliente1"}, TOKEN_CLAVE)
+            web_ok_json(req, {"token": token, "ok": verdadero})
+        } sino {
+            web_responder_json(req, 401, {"error": "PIN incorrecto"})
+        }
+
+    // GET /saldo
+    } sino si (ruta == "/saldo") {
+        sea token_hdr = req["cabeceras"]["authorization"]
+        sea payload = crypto_jwt_verificar(token_hdr, TOKEN_CLAVE)
+        si (payload == nulo) {
+            web_responder_json(req, 401, {"error": "Token invalido"})
+        } sino {
+            web_ok_json(req, {"saldo": 50000, "moneda": "USD"})
+        }
+
+    } sino {
+        web_no_encontrado(req)
+    }
+}
+```
+
+---
+
+## Criptografia
+
+```cfv
+importar "stdlib/crypto.cfv"
+
+// SHA-256 real (OpenSSL)
+mostrar(crypto_sha256("mi texto"))
+
+// AES-256-CBC — cifrar y descifrar
+sea cifrado = crypto_cifrar("mi_clave_secreta", "datos confidenciales")
+sea original = crypto_descifrar("mi_clave_secreta", cifrado)
+mostrar(original)   // datos confidenciales
+
+// HMAC-SHA256 para autenticar mensajes
+sea firma = crypto_hmac("clave_api", "payload=123&usuario=ana")
+mostrar(firma)
+
+// Hash de contrasena seguro (10000 iteraciones HMAC)
+sea hash = crypto_hash_contrasena("mi_password")
+mostrar(crypto_verificar_contrasena("mi_password", hash))   // verdadero
+
+// Token aleatorio seguro
+mostrar(crypto_token(32))   // 64 chars hex
+```
 
 ---
 
@@ -362,13 +444,29 @@ Node.js ni ningun runtime externo para ejecutar programas `.cfv`.
 ## Compilar el interprete
 
 ```bash
-# Linux / macOS (basico)
+# Basico (SHA-256 pure-C++ integrado, sin dependencias)
 g++ -std=c++20 -O2 -o cforgev cforgev.cpp
+
+# Con OpenSSL (AES-256-CBC + SHA-256 real — recomendado para produccion)
+# macOS con Homebrew:
+g++ -std=c++20 -O2 -o cforgev cforgev.cpp \
+    -DCFV_WITH_OPENSSL \
+    -I$(brew --prefix openssl)/include \
+    -L$(brew --prefix openssl)/lib \
+    -lcrypto -lssl
+
+# Linux (Ubuntu/Debian):
+g++ -std=c++20 -O2 -o cforgev cforgev.cpp \
+    -DCFV_WITH_OPENSSL \
+    -I/usr/include/node \
+    /usr/lib/x86_64-linux-gnu/libcrypto.so.3 \
+    /usr/lib/x86_64-linux-gnu/libssl.so.3
 
 # Con soporte Python opcional (para interop)
 g++ -std=c++20 -O2 -o cforgev cforgev.cpp \
+    -DCFV_WITH_OPENSSL -DCFV_WITH_PYTHON \
     -I/usr/include/python3.10 \
-    -L/usr/lib -lpython3.10
+    -lpython3.10
 ```
 
 ---

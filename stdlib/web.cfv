@@ -1,0 +1,107 @@
+// stdlib/web.cfv — Servidor HTTP nativo para C-Forge
+// Uso: importar "stdlib/web.cfv"
+//
+// Ejemplo basico:
+//   sea srv = web_escuchar(3000)
+//   mientras (verdadero) {
+//       sea req = web_solicitud(srv)
+//       web_responder(req, 200, "Hola!")
+//   }
+
+// Iniciar servidor en un puerto. Retorna un ID de servidor.
+funcion web_escuchar(puerto: numero): numero {
+    retornar servidor_http_escuchar(puerto)
+}
+
+// Esperar la proxima peticion. Bloquea hasta recibir una.
+// Retorna un mapa con: metodo, ruta, query, cuerpo, cabeceras, ip, _srv_id
+funcion web_solicitud(srv: numero): mapa {
+    retornar servidor_http_solicitud(srv)
+}
+
+// Enviar respuesta HTTP.
+// req: el mapa de solicitud devuelto por web_solicitud
+// estado: codigo HTTP (200, 201, 400, 404, 500...)
+// cuerpo: texto del cuerpo
+// tipo: Content-Type (por defecto "text/plain; charset=utf-8")
+funcion web_responder(req: mapa, estado: numero, cuerpo: texto, tipo: texto): nulo {
+    sea srv_id = req["_srv_id"]
+    servidor_http_responder(srv_id, estado, cuerpo, tipo)
+}
+
+// Enviar respuesta JSON. Convierte el mapa/lista a JSON automaticamente.
+funcion web_responder_json(req: mapa, estado: numero, datos: cualquiera): nulo {
+    sea j = json_serializar(datos)
+    sea srv_id = req["_srv_id"]
+    servidor_http_responder(srv_id, estado, j, "application/json; charset=utf-8")
+}
+
+// Respuesta 200 OK con texto
+funcion web_ok(req: mapa, cuerpo: texto): nulo {
+    web_responder(req, 200, cuerpo, "text/plain; charset=utf-8")
+}
+
+// Respuesta 200 OK con JSON
+funcion web_ok_json(req: mapa, datos: cualquiera): nulo {
+    web_responder_json(req, 200, datos)
+}
+
+// Respuesta 404 Not Found
+funcion web_no_encontrado(req: mapa): nulo {
+    web_responder(req, 404, "404 No encontrado", "text/plain; charset=utf-8")
+}
+
+// Respuesta 500 Error interno
+funcion web_error(req: mapa, msg: texto): nulo {
+    web_responder(req, 500, msg, "text/plain; charset=utf-8")
+}
+
+// Cerrar servidor
+funcion web_cerrar(srv: numero): nulo {
+    servidor_http_cerrar(srv)
+}
+
+// Parsear query string  "a=1&b=2" → mapa {a: "1", b: "2"}
+funcion web_parsear_query(qs: texto): mapa {
+    sea resultado = {}
+    si (longitud(qs) == 0) { retornar resultado }
+    sea partes = texto_dividir(qs, "&")
+    para p en partes {
+        sea kv = texto_dividir(p, "=")
+        si (longitud(kv) >= 2) {
+            sea k = url_decodificar(kv[0])
+            sea v = url_decodificar(kv[1])
+            resultado[k] = v
+        } sino {
+            resultado[url_decodificar(p)] = ""
+        }
+    }
+    retornar resultado
+}
+
+// Iniciar servidor con router simple.
+// rutas: mapa de "METODO /ruta" -> funcion(req)
+// Ejemplo:
+//   sea rutas = {}
+//   rutas["GET /"] = funcion(req) { web_ok(req, "Inicio") }
+//   rutas["GET /api/salud"] = funcion(req) { web_ok_json(req, {ok: verdadero}) }
+//   web_iniciar(3000, rutas)
+funcion web_iniciar(puerto: numero, rutas: mapa): nulo {
+    sea srv = web_escuchar(puerto)
+    mostrar("Servidor C-Forge en http://0.0.0.0:{puerto}")
+    mientras (verdadero) {
+        intentar {
+            sea req = web_solicitud(srv)
+            sea met = req["metodo"]
+            sea rut = req["ruta"]
+            sea clave = "{met} {rut}"
+            si (rutas[clave] != nulo) {
+                rutas[clave](req)
+            } sino {
+                web_no_encontrado(req)
+            }
+        } capturar (e) {
+            mostrar("Error en solicitud: {e}")
+        }
+    }
+}

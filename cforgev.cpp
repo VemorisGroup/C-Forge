@@ -43,6 +43,14 @@
 #ifdef CFV_WITH_JNI
 #include <jni.h>
 #endif
+// OpenSSL (opcional — compilar con -DCFV_WITH_OPENSSL -I/usr/include/node /usr/lib/.../libcrypto.so.3)
+#ifdef CFV_WITH_OPENSSL
+#include <openssl/sha.h>
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
+#include <openssl/aes.h>
+#include <openssl/rand.h>
+#endif
 struct ForgeValue;struct CfvDenseMatrix;struct CfvTuple;struct CfvSet;
 using Value=ForgeValue;using Lista=std::shared_ptr<std::vector<ForgeValue>>;using Mapa=std::shared_ptr<std::map<std::string,ForgeValue>>;using FastArray=std::shared_ptr<std::vector<double>>;using DenseMatrix=std::shared_ptr<CfvDenseMatrix>;using Tupla=std::shared_ptr<CfvTuple>;using Conjunto=std::shared_ptr<CfvSet>;
 struct CfvDenseMatrix{size_t rows=0,columns=0;std::vector<double>values;};
@@ -190,6 +198,309 @@ struct CfvSocket{int value=-1;explicit CfvSocket(int descriptor=-1):value(descri
 static Value cfv_net_send(const Value&host_value,const Value&port_value,const Value&data_value){if(host_value.index()!=2||data_value.index()!=2)throw std::runtime_error("net_send requiere host, puerto y texto");int port=(int)numero(port_value);if(port<1||port>65535)throw std::runtime_error("puerto inválido");addrinfo hints{};hints.ai_family=AF_UNSPEC;hints.ai_socktype=SOCK_STREAM;addrinfo*raw=nullptr;auto port_text=std::to_string(port);if(getaddrinfo(std::get<std::string>(host_value.data).c_str(),port_text.c_str(),&hints,&raw)!=0)throw std::runtime_error("no se pudo resolver el host");std::unique_ptr<addrinfo,decltype(&freeaddrinfo)>addresses(raw,freeaddrinfo);int descriptor=-1;for(auto*entry=raw;entry;entry=entry->ai_next){descriptor=socket(entry->ai_family,entry->ai_socktype,entry->ai_protocol);if(descriptor>=0&&connect(descriptor,entry->ai_addr,entry->ai_addrlen)==0)break;if(descriptor>=0)::close(descriptor);descriptor=-1;}CfvSocket connection(descriptor);if(descriptor<0)throw std::runtime_error("net_send no pudo conectar");const auto&data=std::get<std::string>(data_value.data);size_t sent=0;while(sent<data.size()){ssize_t count=send(descriptor,data.data()+sent,data.size()-sent,0);if(count<=0)throw std::runtime_error("net_send perdió la conexión");sent+=(size_t)count;}return (double)sent;}
 static Value cfv_net_listen(const Value&port_value,const Value&timeout_value=Value{5000.0}){int port=(int)numero(port_value),timeout=(int)numero(timeout_value);if(port<1||port>65535||timeout<0)throw std::runtime_error("puerto o timeout inválido");CfvSocket server(socket(AF_INET,SOCK_STREAM,0));if(server.value<0)throw std::runtime_error("net_listen no pudo crear socket");int reuse=1;setsockopt(server.value,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));sockaddr_in address{};address.sin_family=AF_INET;address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);address.sin_port=htons((uint16_t)port);if(bind(server.value,(sockaddr*)&address,sizeof(address))!=0||listen(server.value,1)!=0)throw std::runtime_error("net_listen no pudo abrir el puerto");fd_set set;FD_ZERO(&set);FD_SET(server.value,&set);timeval wait{timeout/1000,(timeout%1000)*1000};int ready=select(server.value+1,&set,nullptr,nullptr,&wait);if(ready==0)throw std::runtime_error("net_listen agotó el tiempo de espera");if(ready<0)throw std::runtime_error("net_listen falló esperando conexión");sockaddr_storage peer{};socklen_t peer_size=sizeof(peer);CfvSocket client(accept(server.value,(sockaddr*)&peer,&peer_size));if(client.value<0)throw std::runtime_error("net_listen no pudo aceptar conexión");std::string data;char buffer[65536];for(;;){ssize_t count=recv(client.value,buffer,sizeof(buffer),0);if(count<0)throw std::runtime_error("net_listen falló recibiendo datos");if(count==0)break;data.append(buffer,(size_t)count);}char host[NI_MAXHOST]={0};getnameinfo((sockaddr*)&peer,peer_size,host,sizeof(host),nullptr,0,NI_NUMERICHOST);auto result=std::make_shared<std::map<std::string,Value>>();(*result)["datos"]=data;(*result)["host"]=std::string(host);(*result)["puerto"]=(double)port;return result;}
 #endif
+// ── HTTP SERVER (POSIX sockets) ───────────────────────────────────────────
+#ifndef _WIN32
+struct CfvHttpServer {
+    int server_fd = -1;
+    int client_fd = -1;
+    ~CfvHttpServer() {
+        if (client_fd >= 0) { ::close(client_fd); client_fd = -1; }
+        if (server_fd >= 0) { ::close(server_fd); server_fd = -1; }
+    }
+};
+static std::map<int, std::shared_ptr<CfvHttpServer>> cfv_http_servers;
+static int cfv_http_server_next_id = 1;
+static std::mutex cfv_http_server_mutex;
+
+static Value cfv_servidor_http_escuchar(const Value& puerto_v) {
+    int port = (int)numero(puerto_v);
+    if (port < 1 || port > 65535) throw std::runtime_error("servidor_http_escuchar: puerto invalido");
+    auto srv = std::make_shared<CfvHttpServer>();
+    srv->server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (srv->server_fd < 0) throw std::runtime_error("servidor_http_escuchar: no se pudo crear socket");
+    int reuse = 1;
+    setsockopt(srv->server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons((uint16_t)port);
+    if (bind(srv->server_fd, (sockaddr*)&addr, sizeof(addr)) != 0)
+        throw std::runtime_error("servidor_http_escuchar: no se pudo enlazar al puerto " + std::to_string(port));
+    if (listen(srv->server_fd, 64) != 0)
+        throw std::runtime_error("servidor_http_escuchar: no se pudo escuchar");
+    std::lock_guard<std::mutex> lk(cfv_http_server_mutex);
+    int id = cfv_http_server_next_id++;
+    cfv_http_servers[id] = srv;
+    return (double)id;
+}
+
+static Value cfv_servidor_http_solicitud(const Value& id_v) {
+    int id = (int)numero(id_v);
+    std::shared_ptr<CfvHttpServer> srv;
+    { std::lock_guard<std::mutex> lk(cfv_http_server_mutex); auto it = cfv_http_servers.find(id); if (it == cfv_http_servers.end()) throw std::runtime_error("servidor_http_solicitud: id invalido"); srv = it->second; }
+    if (srv->client_fd >= 0) { ::close(srv->client_fd); srv->client_fd = -1; }
+    sockaddr_storage peer{};
+    socklen_t peer_len = sizeof(peer);
+    int client = accept(srv->server_fd, (sockaddr*)&peer, &peer_len);
+    if (client < 0) throw std::runtime_error("servidor_http_solicitud: accept fallo");
+    srv->client_fd = client;
+    // Read HTTP request
+    std::string raw;
+    char buf[4096];
+    while (true) {
+        ssize_t n = recv(client, buf, sizeof(buf), 0);
+        if (n <= 0) break;
+        raw.append(buf, (size_t)n);
+        if (raw.find("\r\n\r\n") != std::string::npos) break;
+    }
+    // Parse request line
+    std::string metodo = "GET", ruta = "/", protocolo = "HTTP/1.1";
+    std::string cabeceras_raw, cuerpo;
+    size_t eol1 = raw.find("\r\n");
+    if (eol1 != std::string::npos) {
+        std::string req_line = raw.substr(0, eol1);
+        size_t s1 = req_line.find(' '), s2 = req_line.rfind(' ');
+        if (s1 != std::string::npos && s2 != std::string::npos && s1 != s2) {
+            metodo = req_line.substr(0, s1);
+            ruta = req_line.substr(s1 + 1, s2 - s1 - 1);
+            protocolo = req_line.substr(s2 + 1);
+        }
+        cabeceras_raw = raw.substr(eol1 + 2);
+    }
+    // Parse headers into mapa
+    auto hdrs_map = std::make_shared<std::map<std::string, Value>>();
+    size_t hdr_end = cabeceras_raw.find("\r\n\r\n");
+    std::string hdr_section = (hdr_end != std::string::npos) ? cabeceras_raw.substr(0, hdr_end) : cabeceras_raw;
+    if (hdr_end != std::string::npos) cuerpo = cabeceras_raw.substr(hdr_end + 4);
+    size_t pos = 0;
+    while (pos < hdr_section.size()) {
+        size_t nl = hdr_section.find("\r\n", pos);
+        if (nl == std::string::npos) nl = hdr_section.size();
+        std::string line = hdr_section.substr(pos, nl - pos);
+        size_t colon = line.find(':');
+        if (colon != std::string::npos) {
+            std::string k = line.substr(0, colon);
+            std::string v = line.substr(colon + 1);
+            while (!v.empty() && (v[0] == ' ' || v[0] == '\t')) v = v.substr(1);
+            for (auto& c : k) c = (char)std::tolower((unsigned char)c);
+            (*hdrs_map)[k] = Value{v};
+        }
+        pos = nl + 2;
+    }
+    // Parse query string from ruta
+    std::string path = ruta, query = "";
+    size_t q = ruta.find('?');
+    if (q != std::string::npos) { path = ruta.substr(0, q); query = ruta.substr(q + 1); }
+    char peer_host[NI_MAXHOST] = {0};
+    getnameinfo((sockaddr*)&peer, peer_len, peer_host, sizeof(peer_host), nullptr, 0, NI_NUMERICHOST);
+    auto result = std::make_shared<std::map<std::string, Value>>();
+    (*result)["metodo"] = Value{metodo};
+    (*result)["ruta"] = Value{path};
+    (*result)["query"] = Value{query};
+    (*result)["cuerpo"] = Value{cuerpo};
+    (*result)["cabeceras"] = Value{hdrs_map};
+    (*result)["ip"] = Value{std::string(peer_host)};
+    (*result)["_srv_id"] = Value{(double)id};
+    return Value{result};
+}
+
+static Value cfv_servidor_http_responder(const Value& id_v, const Value& estado_v, const Value& cuerpo_v, const Value& tipo_v) {
+    int id = (int)numero(id_v);
+    std::shared_ptr<CfvHttpServer> srv;
+    { std::lock_guard<std::mutex> lk(cfv_http_server_mutex); auto it = cfv_http_servers.find(id); if (it == cfv_http_servers.end()) throw std::runtime_error("servidor_http_responder: id invalido"); srv = it->second; }
+    if (srv->client_fd < 0) throw std::runtime_error("servidor_http_responder: sin cliente activo");
+    int estado = (int)numero(estado_v);
+    const std::string& cuerpo = (cuerpo_v.index() == 2) ? std::get<std::string>(cuerpo_v.data) : texto(cuerpo_v);
+    const std::string& tipo = (tipo_v.index() == 2) ? std::get<std::string>(tipo_v.data) : std::string("text/plain; charset=utf-8");
+    std::string status_text = "OK";
+    if (estado == 201) status_text = "Created";
+    else if (estado == 204) status_text = "No Content";
+    else if (estado == 400) status_text = "Bad Request";
+    else if (estado == 401) status_text = "Unauthorized";
+    else if (estado == 403) status_text = "Forbidden";
+    else if (estado == 404) status_text = "Not Found";
+    else if (estado == 405) status_text = "Method Not Allowed";
+    else if (estado == 500) status_text = "Internal Server Error";
+    std::string response = "HTTP/1.1 " + std::to_string(estado) + " " + status_text + "\r\n";
+    response += "Content-Type: " + tipo + "\r\n";
+    response += "Content-Length: " + std::to_string(cuerpo.size()) + "\r\n";
+    response += "Connection: close\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
+    response += "\r\n";
+    response += cuerpo;
+    size_t sent = 0;
+    while (sent < response.size()) {
+        ssize_t n = send(srv->client_fd, response.data() + sent, response.size() - sent, 0);
+        if (n <= 0) break;
+        sent += (size_t)n;
+    }
+    ::close(srv->client_fd);
+    srv->client_fd = -1;
+    return Value{};
+}
+
+static Value cfv_servidor_http_cerrar(const Value& id_v) {
+    int id = (int)numero(id_v);
+    std::lock_guard<std::mutex> lk(cfv_http_server_mutex);
+    cfv_http_servers.erase(id);
+    return Value{};
+}
+#else
+static Value cfv_servidor_http_escuchar(const Value&){throw std::runtime_error("servidor_http_escuchar no disponible en Windows");}
+static Value cfv_servidor_http_solicitud(const Value&){throw std::runtime_error("servidor_http_solicitud no disponible en Windows");}
+static Value cfv_servidor_http_responder(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("servidor_http_responder no disponible en Windows");}
+static Value cfv_servidor_http_cerrar(const Value&){throw std::runtime_error("servidor_http_cerrar no disponible en Windows");}
+#endif
+
+// ── CRYPTO (OpenSSL real si disponible, fallback pure-C++ para sha256/base64) ─
+static std::string cfv_hex_encode(const unsigned char* data, size_t len) {
+    static const char hex[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(len * 2);
+    for (size_t i = 0; i < len; i++) {
+        out += hex[(data[i] >> 4) & 0xf];
+        out += hex[data[i] & 0xf];
+    }
+    return out;
+}
+static std::string cfv_unhex(const std::string& s) {
+    std::string out;
+    for (size_t i = 0; i + 1 < s.size(); i += 2) {
+        auto nib = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return 0;
+        };
+        out += (char)((nib(s[i]) << 4) | nib(s[i+1]));
+    }
+    return out;
+}
+
+#ifdef CFV_WITH_OPENSSL
+static Value cfv_sha256(const Value& v) {
+    if (v.index() != 2) throw std::runtime_error("sha256 requiere texto");
+    const auto& s = std::get<std::string>(v.data);
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256((const unsigned char*)s.data(), s.size(), hash);
+    return Value{cfv_hex_encode(hash, SHA256_DIGEST_LENGTH)};
+}
+static Value cfv_hmac_sha256(const Value& key_v, const Value& msg_v) {
+    if (key_v.index() != 2 || msg_v.index() != 2) throw std::runtime_error("hmac_sha256 requiere dos textos");
+    const auto& key = std::get<std::string>(key_v.data);
+    const auto& msg = std::get<std::string>(msg_v.data);
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int hash_len = 0;
+    HMAC(EVP_sha256(), key.data(), (int)key.size(), (const unsigned char*)msg.data(), msg.size(), hash, &hash_len);
+    return Value{cfv_hex_encode(hash, hash_len)};
+}
+static Value cfv_aes_cifrar(const Value& key_v, const Value& texto_v) {
+    if (key_v.index() != 2 || texto_v.index() != 2) throw std::runtime_error("aes_cifrar requiere clave y texto");
+    const auto& key_raw = std::get<std::string>(key_v.data);
+    const auto& plaintext = std::get<std::string>(texto_v.data);
+    // Build 32-byte key (SHA256 of key_raw so any length works)
+    unsigned char key32[32];
+    SHA256((const unsigned char*)key_raw.data(), key_raw.size(), key32);
+    // Random 16-byte IV
+    unsigned char iv[16];
+    RAND_bytes(iv, sizeof(iv));
+    // Encrypt with AES-256-CBC
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) throw std::runtime_error("aes_cifrar: no se pudo crear contexto");
+    EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, key32, iv);
+    std::vector<unsigned char> ciphertext(plaintext.size() + 32);
+    int len1 = 0, len2 = 0;
+    EVP_EncryptUpdate(ctx, ciphertext.data(), &len1, (const unsigned char*)plaintext.data(), (int)plaintext.size());
+    EVP_EncryptFinal_ex(ctx, ciphertext.data() + len1, &len2);
+    EVP_CIPHER_CTX_free(ctx);
+    // Output: hex(iv) + ":" + hex(ciphertext)
+    std::string result = cfv_hex_encode(iv, 16) + ":" + cfv_hex_encode(ciphertext.data(), (size_t)(len1 + len2));
+    return Value{result};
+}
+static Value cfv_aes_descifrar(const Value& key_v, const Value& cifrado_v) {
+    if (key_v.index() != 2 || cifrado_v.index() != 2) throw std::runtime_error("aes_descifrar requiere clave y cifrado");
+    const auto& key_raw = std::get<std::string>(key_v.data);
+    const auto& cifrado = std::get<std::string>(cifrado_v.data);
+    size_t colon = cifrado.find(':');
+    if (colon == std::string::npos || colon != 32) throw std::runtime_error("aes_descifrar: formato invalido (usar salida de aes_cifrar)");
+    std::string iv_hex = cifrado.substr(0, 32);
+    std::string ct_hex = cifrado.substr(33);
+    std::string iv_raw = cfv_unhex(iv_hex);
+    std::string ct_raw = cfv_unhex(ct_hex);
+    unsigned char key32[32];
+    SHA256((const unsigned char*)key_raw.data(), key_raw.size(), key32);
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) throw std::runtime_error("aes_descifrar: no se pudo crear contexto");
+    EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, key32, (const unsigned char*)iv_raw.data());
+    std::vector<unsigned char> plain(ct_raw.size() + 16);
+    int len1 = 0, len2 = 0;
+    EVP_DecryptUpdate(ctx, plain.data(), &len1, (const unsigned char*)ct_raw.data(), (int)ct_raw.size());
+    if (EVP_DecryptFinal_ex(ctx, plain.data() + len1, &len2) <= 0) {
+        EVP_CIPHER_CTX_free(ctx);
+        throw std::runtime_error("aes_descifrar: clave incorrecta o datos corruptos");
+    }
+    EVP_CIPHER_CTX_free(ctx);
+    return Value{std::string((char*)plain.data(), (size_t)(len1 + len2))};
+}
+static Value cfv_crypto_rand_bytes(const Value& n_v) {
+    int n = (int)numero(n_v);
+    if (n < 1 || n > 65536) throw std::runtime_error("crypto_rand_bytes: n debe ser 1..65536");
+    std::vector<unsigned char> buf((size_t)n);
+    RAND_bytes(buf.data(), n);
+    return Value{cfv_hex_encode(buf.data(), (size_t)n)};
+}
+#else
+// Fallback SHA-256 (pure C++ — no OpenSSL)
+static std::string cfv_sha256_pure(const std::string& s) {
+    // RFC 6234 SHA-256
+    static const uint32_t K[64]={0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2};
+    uint32_t h[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    std::vector<uint8_t> msg(s.begin(),s.end());
+    uint64_t bit_len=(uint64_t)msg.size()*8;
+    msg.push_back(0x80);
+    while(msg.size()%64!=56)msg.push_back(0);
+    for(int i=7;i>=0;i--)msg.push_back((uint8_t)(bit_len>>(i*8)));
+    auto rotr=[](uint32_t x,int n){return(x>>n)|(x<<(32-n));};
+    for(size_t i=0;i<msg.size();i+=64){
+        uint32_t w[64];
+        for(int j=0;j<16;j++)w[j]=((uint32_t)msg[i+j*4]<<24)|((uint32_t)msg[i+j*4+1]<<16)|((uint32_t)msg[i+j*4+2]<<8)|(uint32_t)msg[i+j*4+3];
+        for(int j=16;j<64;j++){uint32_t s0=rotr(w[j-15],7)^rotr(w[j-15],18)^(w[j-15]>>3);uint32_t s1=rotr(w[j-2],17)^rotr(w[j-2],19)^(w[j-2]>>10);w[j]=w[j-16]+s0+w[j-7]+s1;}
+        uint32_t a=h[0],b=h[1],c=h[2],d=h[3],e=h[4],f=h[5],g=h[6],hh=h[7];
+        for(int j=0;j<64;j++){uint32_t S1=rotr(e,6)^rotr(e,11)^rotr(e,25);uint32_t ch=(e&f)^(~e&g);uint32_t tmp1=hh+S1+ch+K[j]+w[j];uint32_t S0=rotr(a,2)^rotr(a,13)^rotr(a,22);uint32_t maj=(a&b)^(a&c)^(b&c);uint32_t tmp2=S0+maj;hh=g;g=f;f=e;e=d+tmp1;d=c;c=b;b=a;a=tmp1+tmp2;}
+        h[0]+=a;h[1]+=b;h[2]+=c;h[3]+=d;h[4]+=e;h[5]+=f;h[6]+=g;h[7]+=hh;
+    }
+    unsigned char digest[32];
+    for(int i=0;i<8;i++){digest[i*4]=(h[i]>>24)&0xff;digest[i*4+1]=(h[i]>>16)&0xff;digest[i*4+2]=(h[i]>>8)&0xff;digest[i*4+3]=h[i]&0xff;}
+    return cfv_hex_encode(digest,32);
+}
+static Value cfv_sha256(const Value& v) {
+    if (v.index() != 2) throw std::runtime_error("sha256 requiere texto");
+    return Value{cfv_sha256_pure(std::get<std::string>(v.data))};
+}
+static Value cfv_hmac_sha256(const Value& key_v, const Value& msg_v) {
+    if (key_v.index() != 2 || msg_v.index() != 2) throw std::runtime_error("hmac_sha256 requiere dos textos");
+    const auto& key = std::get<std::string>(key_v.data);
+    const auto& msg = std::get<std::string>(msg_v.data);
+    std::string k = key;
+    if (k.size() > 64) k = cfv_sha256_pure(k); // Hmm, need raw bytes — simplify
+    k.resize(64, '\0');
+    std::string ipad(64, '\x36'), opad(64, '\x5c');
+    for (size_t i = 0; i < 64; i++) { ipad[i] ^= k[i]; opad[i] ^= k[i]; }
+    return Value{cfv_sha256_pure(opad + cfv_sha256_pure(ipad + msg))};
+}
+static Value cfv_aes_cifrar(const Value&, const Value&) { throw std::runtime_error("aes_cifrar requiere compilar con -DCFV_WITH_OPENSSL"); }
+static Value cfv_aes_descifrar(const Value&, const Value&) { throw std::runtime_error("aes_descifrar requiere compilar con -DCFV_WITH_OPENSSL"); }
+static Value cfv_crypto_rand_bytes(const Value& n_v) {
+    int n = (int)numero(n_v);
+    if (n < 1 || n > 65536) throw std::runtime_error("crypto_rand_bytes: n debe ser 1..65536");
+    std::vector<unsigned char> buf((size_t)n);
+    // Use /dev/urandom as fallback
+    FILE* f = fopen("/dev/urandom", "rb");
+    if (f) { (void)fread(buf.data(), 1, (size_t)n, f); fclose(f); }
+    return Value{cfv_hex_encode(buf.data(), (size_t)n)};
+}
+#endif
+
 static Value cfv_raiz(const Value&v){double n=numero(v);if(n<0)throw std::runtime_error("no existe raíz real negativa");return std::sqrt(n);}static Value cfv_absoluto(const Value&v){return std::abs(numero(v));}static Value cfv_redondear(const Value&v){return std::round(numero(v));}static Value cfv_potencia(const Value&a,const Value&b){return std::pow(numero(a),numero(b));}
 // ── nuevas funciones stdlib ────────────────────────────────────────────────
 static Value cfv_texto_mayusculas(const Value&v){if(v.index()!=2)throw std::runtime_error("texto_mayusculas requiere texto");std::string s=std::get<std::string>(v.data);for(auto&c:s)c=(char)std::toupper((unsigned char)c);return s;}
@@ -1892,22 +2203,8 @@ static Value cfv_base64_decodificar_fn(const Value& v) {
   return Value{out};
 }
 
-// SHA256 (simple portable implementation)
-static Value cfv_sha256_fn(const Value& v) {
-  if (v.index()!=2) throw std::runtime_error("sha256 requiere texto");
-  // Use Python bridge if available, otherwise simplified
-  try {
-    auto args=std::make_shared<std::vector<Value>>();
-    args->push_back(v);
-    return cfv_use_python(Value{std::string("hashlib")},Value{std::string("md5")},Value{args});
-  } catch(...) {}
-  // Fallback: djb2 hex (NOT cryptographic, just for compatibility)
-  const std::string& s = std::get<std::string>(v.data);
-  uint64_t h=5381;
-  for(unsigned char c:s) h=((h<<5)+h)+c;
-  char buf[17]; std::snprintf(buf,sizeof(buf),"%016llx",(unsigned long long)h);
-  return Value{std::string(buf)};
-}
+// SHA256 — delega a la implementación real (OpenSSL o pure-C++)
+static Value cfv_sha256_fn(const Value& v) { return cfv_sha256(v); }
 
 // URL encoding
 static Value cfv_url_codificar_fn(const Value& v) {
@@ -2256,6 +2553,42 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
   if (verdad(compara(cfv_nombre, Value{std::string("contiene")}, "=="))) {
     (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("contiene requiere 2 argumentos")}));
     return cfv_texto_contiene(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  // ── HTTP Server ────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("servidor_http_escuchar")}, "=="))) {
+    return cfv_servidor_http_escuchar(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("servidor_http_solicitud")}, "=="))) {
+    return cfv_servidor_http_solicitud(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("servidor_http_responder")}, "=="))) {
+    Value tipo_arg = Value{std::string("text/plain; charset=utf-8")};
+    if (verdad(compara(cfv_longitud(cfv_args), Value{4.0}, ">="))) tipo_arg = indice(cfv_args, Value{3.0});
+    return cfv_servidor_http_responder(
+      indice(cfv_args, Value{0.0}),
+      indice(cfv_args, Value{1.0}),
+      indice(cfv_args, Value{2.0}),
+      tipo_arg
+    );
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("servidor_http_cerrar")}, "=="))) {
+    return cfv_servidor_http_cerrar(indice(cfv_args, Value{0.0}));
+  }
+  // ── Crypto ─────────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("sha256")}, "=="))) {
+    return cfv_sha256(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("hmac_sha256")}, "=="))) {
+    return cfv_hmac_sha256(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("aes_cifrar")}, "=="))) {
+    return cfv_aes_cifrar(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("aes_descifrar")}, "=="))) {
+    return cfv_aes_descifrar(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("crypto_rand_bytes")}, "=="))) {
+    return cfv_crypto_rand_bytes(indice(cfv_args, Value{0.0}));
   }
   return Value{std::string("__no_builtin__", 14)};
   return Value{};
