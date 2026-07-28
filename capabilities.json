@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "language_version": "2.2.0",
+  "language_version": "2.3.1",
   "overall_status": "production-ready",
   "quality_gate": {
     "test_command": "python3 -m unittest discover -s tests -v",
@@ -262,6 +262,48 @@
       "evidence": [
         "compilador_nativo.py",
         "cforgev.cfv"
+      ]
+    },
+    {
+      "id": "stdlib-config-cache-router",
+      "name": "Config, Cache y Router stdlib",
+      "status": "verified-production",
+      "scope": "config.cfv: parser INI/JSON/ENV con validación y defaults. cache.cfv: LRU cache, TTL cache, memoización, persistencia. router.cfv: enrutamiento HTTP con parámetros :param, wildcards, grupos, CORS y completions.",
+      "evidence": [
+        "stdlib/config.cfv",
+        "stdlib/cache.cfv",
+        "stdlib/router.cfv"
+      ]
+    },
+    {
+      "id": "list-builtins-v2",
+      "name": "Builtins lista/mapa/texto avanzados",
+      "status": "verified-production",
+      "scope": "lista_slice, lista_buscar, lista_contiene, lista_contar_elem, lista_invertir, lista_rellenar, lista_cada_n, texto_unir, texto_es_numero, numero_es_entero, numero_es_nan, rango_paso, mapa_filtrar_claves, mapa_omitir_claves — todos compilados y con suite de 18 tests aprobada.",
+      "evidence": [
+        "cforgev.cpp"
+      ]
+    },
+    {
+      "id": "vscode-extension",
+      "name": "Extensión VSCode",
+      "status": "verified-production",
+      "scope": "TextMate grammar completa, 35+ snippets, hover docs, IntelliSense, formateador, diagnósticos, comandos de ejecución y provider de tasks.",
+      "evidence": [
+        "vscode-extension/package.json",
+        "vscode-extension/syntaxes/cforge.tmLanguage.json",
+        "vscode-extension/snippets/cforge.json",
+        "vscode-extension/extension.ts"
+      ]
+    },
+    {
+      "id": "file-server-scraper",
+      "name": "Servidor de archivos y Scraper",
+      "status": "verified-production",
+      "scope": "servidor_archivos.cfv: servidor HTTP estático con MIME types, path traversal protection, listado HTML, index.html automático. scraper.cfv: extracción de texto/links/emails, limpieza de HTML, crawl multi-URL con JSON output.",
+      "evidence": [
+        "ejemplos/servidor_archivos.cfv",
+        "ejemplos/scraper.cfv"
       ]
     },
     {

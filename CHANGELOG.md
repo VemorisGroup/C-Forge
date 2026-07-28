@@ -1,5 +1,50 @@
 # Historial de C-Forge
 
+## 2.3.1 — 2026-07-28
+
+### Nuevas funciones nativas (builtins v2.3b)
+
+**Lista avanzada:**
+- `lista_slice(lista, desde, hasta)` — sublista por índices
+- `lista_buscar(lista, valor)` — índice de la primera ocurrencia (o -1)
+- `lista_contiene(lista, valor)` — booleano
+- `lista_contar_elem(lista, valor)` — contar ocurrencias de un valor
+- `lista_invertir(lista)` — nueva lista invertida
+- `lista_rellenar(n, valor)` — crear lista de N copias del valor
+- `lista_cada_n(lista, n)` — tomar cada N-ésimo elemento
+
+**Texto:**
+- `texto_es_numero(texto)` — verdadero si el texto es un número válido
+- `texto_unir(lista, sep)` — unir lista con separador (alias de join)
+
+**Número:**
+- `numero_es_entero(n)` — verdadero si n no tiene parte decimal
+- `numero_es_nan(n)` — verdadero si n es NaN
+
+**Rango:**
+- `rango_paso(desde, hasta, paso)` — rango con paso personalizado, soporta negativo
+
+**Mapa:**
+- `mapa_filtrar_claves(mapa, lista_claves)` — conservar solo las claves indicadas
+- `mapa_omitir_claves(mapa, lista_claves)` — excluir las claves indicadas
+
+### Nueva stdlib (31 módulos)
+
+- `stdlib/config.cfv` — parser INI/JSON, variables de entorno, validación
+- `stdlib/cache.cfv` — LRU cache, TTL cache, memoización, cache de disco
+- `stdlib/router.cfv` — router HTTP con parámetros, middleware, grupos, CORS
+
+### Nuevos ejemplos
+
+- `ejemplos/servidor_archivos.cfv` — servidor de archivos estáticos con listado HTML
+- `ejemplos/scraper.cfv` — web scraper: extracción de texto, links, emails, regex
+
+### Herramientas
+
+- `vscode-extension/` — extensión VSCode completa: resaltado, snippets, hover docs, completions, formateador, diagnósticos, botón de ejecución
+
+---
+
 ## 2.3.0 — 2026-07-28
 
 ### Nuevas funciones nativas (builtins)
