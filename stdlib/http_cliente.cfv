@@ -1,0 +1,134 @@
+// stdlib/http_cliente.cfv — Cliente HTTP para C-Forge
+// Funciones de alto nivel sobre http_get, http_post, http_put, http_delete, http_solicitud
+// Uso: importar "stdlib/http_cliente.cfv"
+
+// ── GET ────────────────────────────────────────────────────────────────────────
+
+funcion http_obtener(url: texto): texto {
+    retornar http_get(url)
+}
+
+funcion http_obtener_json(url: texto): mapa {
+    sea cuerpo = http_get(url)
+    retornar json_parsear(cuerpo)
+}
+
+// ── POST ───────────────────────────────────────────────────────────────────────
+
+funcion http_enviar(url: texto, datos: mapa): texto {
+    sea cuerpo = json_texto(datos)
+    retornar http_post(url, cuerpo, "application/json")
+}
+
+funcion http_enviar_json(url: texto, datos: mapa): mapa {
+    sea cuerpo = json_texto(datos)
+    sea respuesta = http_post(url, cuerpo, "application/json")
+    retornar json_parsear(respuesta)
+}
+
+funcion http_enviar_formulario(url: texto, campos: mapa): texto {
+    // Codificar como application/x-www-form-urlencoded
+    sea claves = mapa_claves(campos)
+    sea partes = []
+    para clave en claves {
+        partes = partes + ["{clave}={campos[clave]}"]
+    }
+    sea cuerpo = texto_unir_simple(partes, "&")
+    retornar http_post(url, cuerpo, "application/x-www-form-urlencoded")
+}
+
+// ── PUT ────────────────────────────────────────────────────────────────────────
+
+funcion http_actualizar(url: texto, datos: mapa): texto {
+    sea cuerpo = json_texto(datos)
+    retornar http_put(url, cuerpo)
+}
+
+funcion http_actualizar_json(url: texto, datos: mapa): mapa {
+    sea cuerpo = json_texto(datos)
+    sea respuesta = http_put(url, cuerpo)
+    retornar json_parsear(respuesta)
+}
+
+// ── DELETE ─────────────────────────────────────────────────────────────────────
+
+funcion http_eliminar(url: texto): texto {
+    retornar http_delete(url)
+}
+
+// ── Solicitud completa ─────────────────────────────────────────────────────────
+
+funcion http_api(metodo: texto, url: texto, datos: mapa, cabeceras: mapa): mapa {
+    sea cuerpo = json_texto(datos)
+    sea resp = http_solicitud(metodo, url, {
+        "cuerpo": cuerpo,
+        "tipo": "application/json",
+        "cabeceras": cabeceras
+    })
+    sea estado = resp["estado"]
+    sea cuerpo_resp = resp["cuerpo"]
+
+    intentar {
+        sea json_resp = json_parsear(cuerpo_resp)
+        retornar {
+            "estado": estado,
+            "ok": estado >= 200 y estado < 300,
+            "datos": json_resp,
+            "cuerpo": cuerpo_resp
+        }
+    } capturar (e) {
+        retornar {
+            "estado": estado,
+            "ok": estado >= 200 y estado < 300,
+            "datos": nulo,
+            "cuerpo": cuerpo_resp
+        }
+    }
+}
+
+// ── REST Client ────────────────────────────────────────────────────────────────
+
+// Crear un cliente REST con URL base y cabeceras comunes
+funcion rest_cliente(url_base: texto, cabeceras: mapa): mapa {
+    retornar {
+        "base": url_base,
+        "cabeceras": cabeceras
+    }
+}
+
+funcion rest_get(cliente: mapa, ruta: texto): mapa {
+    sea url = "{cliente["base"]}{ruta}"
+    sea resp = http_solicitud("GET", url, {"cabeceras": cliente["cabeceras"]})
+    retornar json_parsear(resp["cuerpo"])
+}
+
+funcion rest_post(cliente: mapa, ruta: texto, datos: mapa): mapa {
+    sea url = "{cliente["base"]}{ruta}"
+    sea resp = http_api("POST", url, datos, cliente["cabeceras"])
+    retornar resp
+}
+
+funcion rest_put(cliente: mapa, ruta: texto, datos: mapa): mapa {
+    sea url = "{cliente["base"]}{ruta}"
+    sea resp = http_api("PUT", url, datos, cliente["cabeceras"])
+    retornar resp
+}
+
+funcion rest_delete(cliente: mapa, ruta: texto): mapa {
+    sea url = "{cliente["base"]}{ruta}"
+    sea resp = http_solicitud("DELETE", url, {"cabeceras": cliente["cabeceras"]})
+    retornar {"estado": resp["estado"], "ok": resp["estado"] >= 200 y resp["estado"] < 300}
+}
+
+// ── Helper ─────────────────────────────────────────────────────────────────────
+
+funcion texto_unir_simple(lista_v: lista, sep: texto): texto {
+    sea r = ""
+    sea i = 0
+    para item en lista_v {
+        si (i > 0) { r = "{r}{sep}" }
+        r = "{r}{item}"
+        i = i + 1
+    }
+    retornar r
+}

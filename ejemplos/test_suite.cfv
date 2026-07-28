@@ -1,0 +1,291 @@
+// ejemplos/test_suite.cfv — Suite de pruebas del stdlib de C-Forge
+// Correr: ./cforgev ejemplos/test_suite.cfv
+
+importar "stdlib/pruebas.cfv"
+importar "stdlib/validar.cfv"
+
+// ── Suite: Matematicas ────────────────────────────────────────────────────────
+suite("Matematicas", [
+    prueba("suma basica", funcion(): nulo {
+        esperar_igual(2 + 2, 4)
+        esperar_igual(10 + 0.5, 10.5)
+    }),
+    prueba("resta y negativo", funcion(): nulo {
+        esperar_igual(10 - 15, -5)
+    }),
+    prueba("multiplicacion", funcion(): nulo {
+        esperar_igual(3 * 7, 21)
+    }),
+    prueba("division", funcion(): nulo {
+        esperar_igual(10 / 4, 2.5)
+    }),
+    prueba("potencia", funcion(): nulo {
+        esperar_igual(potencia(2, 10), 1024)
+    }),
+    prueba("raiz cuadrada", funcion(): nulo {
+        esperar_igual(raiz(9), 3)
+        esperar_igual(raiz(2), 1.4142135623730951)
+    }),
+    prueba("modulo", funcion(): nulo {
+        esperar_igual(10 % 3, 1)
+    }),
+    prueba("redondear", funcion(): nulo {
+        esperar_igual(redondear(3.7), 4)
+        esperar_igual(redondear(3.2), 3)
+    })
+])
+
+// ── Suite: Texto ──────────────────────────────────────────────────────────────
+suite("Texto", [
+    prueba("longitud", funcion(): nulo {
+        esperar_igual(longitud("hola"), 4)
+        esperar_igual(longitud(""), 0)
+    }),
+    prueba("mayusculas y minusculas", funcion(): nulo {
+        esperar_igual(texto_mayusculas("hola"), "HOLA")
+        esperar_igual(texto_minusculas("MUNDO"), "mundo")
+    }),
+    prueba("contiene", funcion(): nulo {
+        esperar_verdadero(texto_contiene("hola mundo", "mundo"))
+        esperar_falso(texto_contiene("hola", "mundo"))
+    }),
+    prueba("empieza y termina con", funcion(): nulo {
+        esperar_verdadero(texto_empieza_con("cforgev", "cforge"))
+        esperar_verdadero(texto_termina_con("archivo.cfv", ".cfv"))
+    }),
+    prueba("reemplazar", funcion(): nulo {
+        esperar_igual(texto_reemplazar("hola mundo", "mundo", "C-Forge"), "hola C-Forge")
+    }),
+    prueba("dividir", funcion(): nulo {
+        sea partes = texto_dividir("a,b,c", ",")
+        esperar_igual(longitud(partes), 3)
+        esperar_igual(partes[0], "a")
+        esperar_igual(partes[2], "c")
+    }),
+    prueba("subcadena", funcion(): nulo {
+        esperar_igual(subcadena("cforgev", 0, 6), "cforge")
+    }),
+    prueba("relleno", funcion(): nulo {
+        esperar_igual(texto_relleno("42", 5, "0"), "00042")
+        esperar_igual(texto_relleno_der("hi", 5, " "), "hi   ")
+    })
+])
+
+// ── Suite: Listas ─────────────────────────────────────────────────────────────
+suite("Listas", [
+    prueba("crear y longitud", funcion(): nulo {
+        sea l = [1, 2, 3, 4, 5]
+        esperar_igual(longitud(l), 5)
+    }),
+    prueba("acceso por indice", funcion(): nulo {
+        sea l = [10, 20, 30]
+        esperar_igual(l[0], 10)
+        esperar_igual(l[2], 30)
+    }),
+    prueba("agregar elemento", funcion(): nulo {
+        sea l = [1, 2]
+        agregar(l, 3)
+        esperar_igual(longitud(l), 3)
+        esperar_igual(l[2], 3)
+    }),
+    prueba("lista_unica", funcion(): nulo {
+        sea u = lista_unica([1, 2, 2, 3, 3, 3])
+        esperar_igual(longitud(u), 3)
+    }),
+    prueba("lista_aplanar", funcion(): nulo {
+        sea a = lista_aplanar([[1, 2], [3, 4], [5]])
+        esperar_igual(longitud(a), 5)
+        esperar_igual(a[0], 1)
+        esperar_igual(a[4], 5)
+    }),
+    prueba("lista_zip", funcion(): nulo {
+        sea z = lista_zip([1, 2, 3], ["a", "b", "c"])
+        esperar_igual(longitud(z), 3)
+        esperar_igual(z[0][0], 1)
+        esperar_igual(z[0][1], "a")
+    }),
+    prueba("ordenar lista", funcion(): nulo {
+        sea l = [3, 1, 4, 1, 5, 9, 2, 6]
+        sea s = ordenar(l)
+        esperar_igual(s[0], 1)
+        esperar_igual(s[7], 9)
+    })
+])
+
+// ── Suite: Mapas ──────────────────────────────────────────────────────────────
+suite("Mapas", [
+    prueba("crear y acceder", funcion(): nulo {
+        sea m = {"nombre": "Ana", "edad": 30}
+        esperar_igual(m["nombre"], "Ana")
+        esperar_igual(m["edad"], 30)
+    }),
+    prueba("tiene_clave", funcion(): nulo {
+        sea m = {"x": 1}
+        esperar_verdadero(tiene_clave(m, "x"))
+        esperar_falso(tiene_clave(m, "y"))
+    }),
+    prueba("mapa_claves y mapa_valores", funcion(): nulo {
+        sea m = {"a": 1, "b": 2}
+        sea claves = mapa_claves(m)
+        esperar_igual(longitud(claves), 2)
+    }),
+    prueba("mapa_fusionar", funcion(): nulo {
+        sea a = {"x": 1, "y": 2}
+        sea b = {"y": 99, "z": 3}
+        sea f = mapa_fusionar(a, b)
+        esperar_igual(f["x"], 1)
+        esperar_igual(f["y"], 99)   // b sobreescribe a
+        esperar_igual(f["z"], 3)
+    })
+])
+
+// ── Suite: JSON ───────────────────────────────────────────────────────────────
+suite("JSON", [
+    prueba("json_texto basico", funcion(): nulo {
+        sea j = json_texto({"a": 1, "b": "hola"})
+        esperar_verdadero(texto_contiene(j, "\"a\""))
+        esperar_verdadero(texto_contiene(j, "\"hola\""))
+    }),
+    prueba("json_texto lista", funcion(): nulo {
+        sea j = json_texto([1, 2, 3])
+        esperar_igual(j, "[1,2,3]")
+    }),
+    prueba("json_texto tipos", funcion(): nulo {
+        esperar_igual(json_texto(nulo), "null")
+        esperar_igual(json_texto(verdadero), "true")
+        esperar_igual(json_texto(falso), "false")
+        esperar_igual(json_texto(42), "42")
+    })
+])
+
+// ── Suite: Regex ──────────────────────────────────────────────────────────────
+suite("Regex", [
+    prueba("coincidir basico", funcion(): nulo {
+        esperar_verdadero(regex_coincidir("hola123", "[a-z]+[0-9]+"))
+        esperar_falso(regex_coincidir("abc", "[0-9]+"))
+    }),
+    prueba("buscar todos", funcion(): nulo {
+        sea matches = regex_buscar("a1 b2 c3", "[0-9]+")
+        esperar_igual(longitud(matches), 3)
+        esperar_igual(matches[0], "1")
+    }),
+    prueba("reemplazar", funcion(): nulo {
+        sea r = regex_reemplazar("Hola Mundo", "[A-Z]", "X")
+        esperar_igual(r, "Xola Xundo")
+    })
+])
+
+// ── Suite: Validacion ─────────────────────────────────────────────────────────
+suite("Validacion", [
+    prueba("es_email", funcion(): nulo {
+        esperar_verdadero(es_email("usuario@ejemplo.com"))
+        esperar_verdadero(es_email("a.b+c@test.org"))
+        esperar_falso(es_email("no-es-email"))
+        esperar_falso(es_email("@sin-usuario.com"))
+    }),
+    prueba("es_url", funcion(): nulo {
+        esperar_verdadero(es_url("http://ejemplo.com"))
+        esperar_verdadero(es_url("https://www.google.com/search?q=cforgev"))
+        esperar_falso(es_url("no-es-url"))
+    }),
+    prueba("en_rango", funcion(): nulo {
+        esperar_verdadero(en_rango(5, 0, 10))
+        esperar_falso(en_rango(15, 0, 10))
+    }),
+    prueba("validar_esquema ok", funcion(): nulo {
+        sea r = validar_esquema(
+            {"nombre": "Ana", "email": "ana@ej.com"},
+            {
+                "nombre": {"requerido": verdadero, "tipo": "texto", "min": 2},
+                "email":  {"requerido": verdadero, "tipo": "texto", "email": verdadero}
+            }
+        )
+        esperar_verdadero(r["valido"])
+    }),
+    prueba("validar_esquema error", funcion(): nulo {
+        sea r = validar_esquema(
+            {"nombre": "A"},
+            {"nombre": {"requerido": verdadero, "tipo": "texto", "min": 3}}
+        )
+        esperar_falso(r["valido"])
+        esperar_mayor(longitud(r["errores"]), 0)
+    })
+])
+
+// ── Suite: Fecha/Tiempo ────────────────────────────────────────────────────────
+suite("Fecha y Tiempo", [
+    prueba("fecha_ahora tiene campos", funcion(): nulo {
+        sea f = fecha_ahora()
+        esperar_verdadero(tiene_clave(f, "anio"))
+        esperar_verdadero(tiene_clave(f, "mes"))
+        esperar_verdadero(tiene_clave(f, "dia"))
+        esperar_verdadero(tiene_clave(f, "iso"))
+        esperar_mayor(f["anio"], 2020)
+    }),
+    prueba("tiempo_ms avanza", funcion(): nulo {
+        sea t1 = tiempo_ms()
+        pausa(5)
+        sea t2 = tiempo_ms()
+        esperar_mayor(t2, t1)
+    })
+])
+
+// ── Suite: Control de flujo ────────────────────────────────────────────────────
+suite("Control de flujo", [
+    prueba("si/sino", funcion(): nulo {
+        sea r = 0
+        si (verdadero) { r = 1 } sino { r = 2 }
+        esperar_igual(r, 1)
+    }),
+    prueba("mientras", funcion(): nulo {
+        sea i = 0
+        mientras (i < 5) { i = i + 1 }
+        esperar_igual(i, 5)
+    }),
+    prueba("para en lista", funcion(): nulo {
+        sea suma = 0
+        para n en [1, 2, 3, 4, 5] { suma = suma + n }
+        esperar_igual(suma, 15)
+    }),
+    prueba("para en rango", funcion(): nulo {
+        sea suma = 0
+        para i en rango(1, 6) { suma = suma + i }
+        esperar_igual(suma, 15)
+    }),
+    prueba("intentar/capturar", funcion(): nulo {
+        sea capturado = ""
+        intentar {
+            lanzar "error de prueba"
+        } capturar (e) {
+            capturado = e
+        }
+        esperar_igual(capturado, "error de prueba")
+    }),
+    prueba("segun/caso", funcion(): nulo {
+        sea r = ""
+        sea x = 2
+        segun x {
+            caso 1: r = "uno"
+            caso 2: r = "dos"
+            caso 3: r = "tres"
+        }
+        esperar_igual(r, "dos")
+    }),
+    prueba("closures capturan entorno", funcion(): nulo {
+        sea base = 10
+        sea fn = funcion(x: numero): numero { retornar x + base }
+        esperar_igual(fn(5), 15)
+        esperar_igual(fn(20), 30)
+    })
+])
+
+// ── Ejecutar todo ─────────────────────────────────────────────────────────────
+sea resultados = ejecutar_pruebas()
+sea ok = resultados["ok"]
+sea pasadas = resultados["pasadas"]
+sea total = resultados["total"]
+
+si (!ok) {
+    mostrar("FALLO: {pasadas}/{total} pruebas pasadas")
+    salir(1)
+}

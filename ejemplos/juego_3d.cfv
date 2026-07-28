@@ -1,0 +1,85 @@
+// ejemplos/juego_3d.cfv — Escena 3D rotando con OpenGL en C-Forge
+// Cubo 3D con shaders GLSL, camara, MVP matrix
+//
+// Compilar (Linux):
+//   g++ -std=c++20 -O2 cforgev.cpp -DCFV_WITH_SDL2 -DCFV_WITH_OPENGL
+//       -lSDL2 -lGL -lpthread -o cforgev
+// Compilar (macOS):
+//   g++ -std=c++20 -O2 cforgev.cpp -DCFV_WITH_SDL2 -DCFV_WITH_OPENGL
+//       -lSDL2 -framework OpenGL -lpthread -o cforgev
+// Correr:   ./cforgev ejemplos/juego_3d.cfv
+
+importar "stdlib/sdl.cfv"
+importar "stdlib/gl.cfv"
+
+// Inicializar ventana SDL2 con contexto OpenGL
+sea ventana = juego_iniciar("3D C-Forge - OpenGL", 800, 600)
+sea gl = gl_iniciar(ventana)
+
+// Shaders (posicion + color por vertice)
+sea prog = gl_programa_basico()
+
+// Crear malla del cubo
+sea cubo = gl_malla_cubo(0.8, 0.3, 0.1)
+
+// Crear triangulo de colores
+sea tri = gl_malla_triangulo()
+
+// Angulo de rotacion
+sea angulo = 0.0
+sea camara_y = -1.5
+
+// Matrices
+funcion construir_mvp(ang: numero): lista {
+    sea aspecto = 800.0 / 600.0
+    sea proj = mat4_perspectiva(60.0, aspecto, 0.1, 100.0)
+    sea vista = mat4_trasladar(mat4_identidad(), 0.0, camara_y, -4.0)
+    sea modelo = mat4_rotar_y(mat4_identidad(), ang)
+    // MVP = proj * vista * modelo (simplificado — concatenar)
+    retornar mat4_rotar_y(mat4_trasladar(proj, 0.0, -0.5, -3.0), ang)
+}
+
+sea corriendo = verdadero
+sea ultimo_tick = tiempo_ms()
+
+mientras (juego_corriendo(ventana) y corriendo) {
+    // Eventos
+    sea eventos = juego_eventos(ventana)
+    para ev en eventos {
+        sea tipo = ev["tipo"]
+        si (tipo == "quit") { corriendo = falso }
+        si (tipo == "keydown") {
+            sea tecla = ev["tecla"]
+            segun tecla {
+                caso "ESCAPE": corriendo = falso
+                caso "UP":     camara_y = camara_y - 0.1
+                caso "DOWN":   camara_y = camara_y + 0.1
+            }
+        }
+    }
+
+    // Actualizar angulo
+    sea ahora = tiempo_ms()
+    sea dt = (ahora - ultimo_tick) / 1000.0
+    angulo = angulo + dt * 1.2   // 1.2 rad/segundo
+    ultimo_tick = ahora
+
+    // Renderizar
+    gl_limpiar(0.05, 0.05, 0.1)
+
+    sea mvp = construir_mvp(angulo)
+
+    // Dibujar cubo rojo rotando
+    gl_dibujar_malla(prog, cubo, mvp)
+
+    // Dibujar triangulo de colores en el fondo
+    sea mvp2 = mat4_trasladar(mat4_identidad(), 1.5, 0.0, -2.5)
+    gl_dibujar_malla(prog, tri, mvp2)
+
+    gl_mostrar(ventana)
+    sdl_delay(16)   // ~60 FPS cap
+}
+
+gl_cerrar(gl)
+juego_terminar(ventana)
+mostrar("Escena 3D terminada. angulo final: {angulo}")

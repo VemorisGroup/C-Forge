@@ -1,0 +1,134 @@
+// stdlib/concurrencia.cfv — Canales y concurrencia para C-Forge
+// Uso: importar "stdlib/concurrencia.cfv"
+//
+// Ejemplo: productor-consumidor con canal
+//   sea ch = canal_nuevo()
+//   canal_enviar(ch, "mensaje 1")
+//   sea msg = canal_recibir(ch)
+
+// ── Canales ───────────────────────────────────────────────────────────────────
+
+// Crear canal de comunicacion entre partes del programa
+funcion canal_crear(): numero {
+    retornar canal_nuevo()
+}
+
+// Enviar valor al canal (no bloqueante)
+funcion canal_poner(ch: numero, valor: cualquiera): nulo {
+    canal_enviar(ch, valor)
+}
+
+// Recibir valor del canal (bloqueante hasta que haya uno)
+funcion canal_tomar(ch: numero): cualquiera {
+    retornar canal_recibir(ch)
+}
+
+// Intentar recibir sin bloquear (retorna nulo si canal vacio)
+funcion canal_intentar_recibir(ch: numero): cualquiera {
+    sea tam = canal_tam(ch)
+    si (tam > 0) {
+        retornar canal_recibir(ch)
+    }
+    retornar nulo
+}
+
+// Drenar todos los valores del canal
+funcion canal_drenar(ch: numero): lista {
+    sea valores = []
+    sea tam = canal_tam(ch)
+    para _i en rango(0, tam) {
+        valores = valores + [canal_recibir(ch)]
+    }
+    retornar valores
+}
+
+// ── Sincronizacion ────────────────────────────────────────────────────────────
+
+// Mutex simple usando canal con capacidad 1
+funcion mutex_crear(): numero {
+    sea ch = canal_nuevo()
+    canal_enviar(ch, verdadero)   // Canal "libre"
+    retornar ch
+}
+
+funcion mutex_bloquear(m: numero): nulo {
+    canal_recibir(m)   // Tomar el token = bloquear
+}
+
+funcion mutex_liberar(m: numero): nulo {
+    canal_enviar(m, verdadero)  // Devolver el token = liberar
+}
+
+funcion con_mutex(m: numero, fn: funcion): cualquiera {
+    mutex_bloquear(m)
+    intentar {
+        sea r = fn()
+        mutex_liberar(m)
+        retornar r
+    } capturar (e) {
+        mutex_liberar(m)
+        lanzar e
+    }
+}
+
+// ── Temporizadores ────────────────────────────────────────────────────────────
+
+funcion dormir(ms: numero): nulo {
+    hilo_dormir(ms)
+}
+
+funcion dormir_segundos(s: numero): nulo {
+    hilo_dormir(s * 1000)
+}
+
+// Ejecutar funcion despues de un delay (sincrono — bloquea)
+funcion despues_de(ms: numero, fn: funcion): cualquiera {
+    dormir(ms)
+    retornar fn()
+}
+
+// Medir tiempo de ejecucion
+funcion medir_tiempo(fn: funcion): mapa {
+    sea inicio = tiempo_ms()
+    sea resultado = fn()
+    sea fin = tiempo_ms()
+    retornar {
+        "resultado": resultado,
+        "duracion_ms": fin - inicio
+    }
+}
+
+// ── Reintentos ────────────────────────────────────────────────────────────────
+
+// Reintentar una funcion N veces con delay entre intentos
+funcion reintentar(fn: funcion, max_intentos: numero, delay_ms: numero): cualquiera {
+    sea intento = 0
+    mientras (intento < max_intentos) {
+        intentar {
+            retornar fn()
+        } capturar (error) {
+            intento = intento + 1
+            si (intento >= max_intentos) {
+                lanzar "Fallo despues de {max_intentos} intentos: {error}"
+            }
+            dormir(delay_ms)
+        }
+    }
+}
+
+// Timeout: ejecutar funcion pero fallar si tarda mas de N ms
+// (implementacion sincrona — sin hilos reales)
+funcion con_timeout(fn: funcion, timeout_ms: numero): cualquiera {
+    // Sin hilos reales, esto es una aproximacion
+    sea inicio = tiempo_ms()
+    sea resultado = fn()
+    sea duracion = tiempo_ms() - inicio
+    si (duracion > timeout_ms) {
+        log_advertencia("Operacion excedio timeout de {timeout_ms}ms (tardo {duracion}ms)")
+    }
+    retornar resultado
+}
+
+funcion log_advertencia(msg: texto): nulo {
+    mostrar("[WARN] {msg}")
+}

@@ -1,0 +1,150 @@
+// stdlib/errores.cfv — Manejo de errores para C-Forge
+// Inspirado en Rust Result<T,E>, Java Optional, C# nullable, Haskell Maybe
+//
+// Uso: importar "stdlib/errores.cfv"
+//
+// C-Forge tiene manejo de excepciones nativo con:
+//   intentar { ... } capturar (e) { ... }   — bloque try/catch
+//   lanzar "mensaje"                         — lanzar excepción
+//
+// Este módulo añade:
+//   1. Validadores con mensajes descriptivos
+//   2. Patrón Result (Ok/Error) — como Rust
+//   3. Patrón Opcion (Algunos/Ninguno) — como Java Optional / Haskell Maybe
+
+// ── Validadores ───────────────────────────────────────────────────────────
+
+// Número en rango — como Java Preconditions.checkArgument
+funcion validar_rango(n: numero, min_v: numero, max_v: numero, nombre: texto): nulo {
+    afirmar(
+        n >= min_v y n <= max_v,
+        nombre + " debe estar entre " + a_texto(min_v) + " y " + a_texto(max_v) +
+        " (recibido: " + a_texto(n) + ")"
+    )
+}
+
+// Lista no vacía
+funcion validar_no_vacia(lst: lista, nombre: texto): nulo {
+    afirmar(longitud(lst) > 0, nombre + " no debe estar vacía")
+}
+
+// Texto no vacío
+funcion validar_texto_no_vacio(s: texto, nombre: texto): nulo {
+    afirmar(longitud(s) > 0, nombre + " no debe estar vacío")
+}
+
+// Número positivo (> 0)
+funcion validar_positivo(n: numero, nombre: texto): nulo {
+    afirmar(n > 0, nombre + " debe ser positivo (recibido: " + a_texto(n) + ")")
+}
+
+// Número no negativo (>= 0)
+funcion validar_no_negativo(n: numero, nombre: texto): nulo {
+    afirmar(n >= 0, nombre + " debe ser >= 0 (recibido: " + a_texto(n) + ")")
+}
+
+// Índice válido para una lista
+funcion validar_indice(lst: lista, idx: numero, nombre: texto): nulo {
+    sea tam: numero = longitud(lst)
+    afirmar(
+        idx >= 0 y idx < tam,
+        nombre + ": índice " + a_texto(idx) + " fuera de rango [0, " + a_texto(tam - 1) + "]"
+    )
+}
+
+// ── Result<T, E> — Rust-style ─────────────────────────────────────────────
+
+// Crear resultado exitoso
+funcion ok(valor: cualquiera): cualquiera {
+    retornar {"ok": verdadero, "valor": valor, "error": ""}
+}
+
+// Crear resultado de error
+funcion err(mensaje: texto): cualquiera {
+    retornar {"ok": falso, "valor": nulo, "error": mensaje}
+}
+
+// ¿Es un resultado exitoso?
+funcion es_ok(resultado: cualquiera): booleano {
+    retornar resultado["ok"]
+}
+
+// ¿Es un resultado de error?
+funcion es_err(resultado: cualquiera): booleano {
+    retornar no resultado["ok"]
+}
+
+// Extraer valor o lanzar error — como Rust .unwrap()
+funcion desenvolver(resultado: cualquiera): cualquiera {
+    afirmar(resultado["ok"], "desenvolver falló: " + resultado["error"])
+    retornar resultado["valor"]
+}
+
+// Extraer valor o devolver por_defecto — como Rust .unwrap_or()
+funcion desenvolver_o(resultado: cualquiera, por_defecto: cualquiera): cualquiera {
+    si (resultado["ok"]) {
+        retornar resultado["valor"]
+    }
+    retornar por_defecto
+}
+
+// Obtener mensaje de error
+funcion mensaje_error(resultado: cualquiera): texto {
+    retornar resultado["error"]
+}
+
+// ── Opcion<T> — Java Optional / Haskell Maybe ─────────────────────────────
+
+// Algunos(valor) — Optional.of()
+funcion algunos(valor: cualquiera): cualquiera {
+    retornar {"presente": verdadero, "valor": valor}
+}
+
+// Ninguno() — Optional.empty()
+funcion ninguno(): cualquiera {
+    retornar {"presente": falso, "valor": nulo}
+}
+
+// ¿Tiene valor?
+funcion es_presente(opt: cualquiera): booleano {
+    retornar opt["presente"]
+}
+
+// Obtener valor o lanzar error
+funcion obtener(opt: cualquiera): cualquiera {
+    afirmar(opt["presente"], "obtener: la opción no tiene valor")
+    retornar opt["valor"]
+}
+
+// Obtener valor o por_defecto — Optional.orElse()
+funcion obtener_o(opt: cualquiera, por_defecto: cualquiera): cualquiera {
+    si (opt["presente"]) {
+        retornar opt["valor"]
+    }
+    retornar por_defecto
+}
+
+// ── Helpers de lanzar ─────────────────────────────────────────────────────
+
+// Lanzar si la condición es falsa (como afirmar, pero usa lanzar explícito)
+funcion lanzar_si_no(cond: booleano, mensaje: texto): nulo {
+    si (no cond) {
+        lanzar mensaje
+    }
+}
+
+// Lanzar error desde un resultado de error
+funcion lanzar_si_err(resultado: cualquiera): cualquiera {
+    si (no resultado["ok"]) {
+        lanzar resultado["error"]
+    }
+    retornar resultado["valor"]
+}
+
+// Construir Result capturando lanzar (requiere bloque try/catch en el caller)
+// Uso:
+//   intentar {
+//       sea res: cualquiera = ok(dividir(10, 0))
+//   } capturar (e) {
+//       sea res: cualquiera = err(e)
+//   }

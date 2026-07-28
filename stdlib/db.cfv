@@ -1,0 +1,137 @@
+// stdlib/db.cfv — Abstraccion de base de datos SQLite para C-Forge
+// Compilar interprete con: -DCFV_WITH_SQLITE -lsqlite3
+// Uso: importar "stdlib/db.cfv"
+//
+// Ejemplo:
+//   sea db = db_conectar("mi_app.db")
+//   db_migrar(db, "CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre TEXT, email TEXT UNIQUE)")
+//   db_insertar(db, "usuarios", {"nombre": "Ana", "email": "ana@ejemplo.com"})
+//   sea usuarios = db_todos(db, "usuarios")
+
+// ── Conexion ──────────────────────────────────────────────────────────────────
+
+funcion db_conectar(ruta: texto): numero {
+    retornar db_abrir(ruta)
+}
+
+funcion db_desconectar(db: numero): nulo {
+    db_cerrar(db)
+}
+
+// ── Migraciones ───────────────────────────────────────────────────────────────
+
+funcion db_migrar(db: numero, sql: texto): numero {
+    retornar db_ejecutar(db, sql)
+}
+
+funcion db_migrar_lista(db: numero, migraciones: lista): nulo {
+    para m en migraciones {
+        db_ejecutar(db, m)
+    }
+}
+
+// ── CRUD básico ───────────────────────────────────────────────────────────────
+
+// Insertar un mapa como fila en una tabla
+funcion db_insertar(db: numero, tabla: texto, datos: mapa): numero {
+    sea claves = mapa_claves(datos)
+    sea valores = mapa_valores(datos)
+    sea campos = texto_unir(claves, ", ")
+    sea placeholders = texto_repetir("?, ", longitud(claves))
+    // Quitar la ultima coma y espacio
+    sea ph = subcadena(placeholders, 0, longitud(placeholders) - 2)
+    sea sql = "INSERT INTO {tabla} ({campos}) VALUES ({ph})"
+    db_consulta_p(db, sql, valores)
+    retornar db_ultimo_id(db)
+}
+
+// Obtener todos los registros de una tabla
+funcion db_todos(db: numero, tabla: texto): lista {
+    retornar db_consulta(db, "SELECT * FROM {tabla}")
+}
+
+// Obtener registro por ID
+funcion db_por_id(db: numero, tabla: texto, id: numero): mapa {
+    sea resultados = db_consulta_p(db, "SELECT * FROM {tabla} WHERE id = ?", [id])
+    si (longitud(resultados) > 0) {
+        retornar resultados[0]
+    }
+    retornar {}
+}
+
+// Buscar con condicion WHERE
+funcion db_donde(db: numero, tabla: texto, campo: texto, valor: cualquiera): lista {
+    retornar db_consulta_p(db, "SELECT * FROM {tabla} WHERE {campo} = ?", [valor])
+}
+
+// Actualizar registro
+funcion db_actualizar(db: numero, tabla: texto, id: numero, datos: mapa): numero {
+    sea claves = mapa_claves(datos)
+    sea valores = mapa_valores(datos)
+    sea sets = ""
+    para clave en claves {
+        si (longitud(sets) > 0) {
+            sets = "{sets}, "
+        }
+        sets = "{sets}{clave} = ?"
+    }
+    sea params_con_id = agregar_al_final(valores, id)
+    retornar db_consulta_p(db, "UPDATE {tabla} SET {sets} WHERE id = ?", params_con_id)
+}
+
+// Eliminar por ID
+funcion db_eliminar(db: numero, tabla: texto, id: numero): numero {
+    retornar db_consulta_p(db, "DELETE FROM {tabla} WHERE id = ?", [id])
+}
+
+// Contar registros
+funcion db_contar(db: numero, tabla: texto): numero {
+    sea res = db_consulta(db, "SELECT COUNT(*) as total FROM {tabla}")
+    si (longitud(res) > 0) {
+        retornar res[0]["total"]
+    }
+    retornar 0
+}
+
+// Consulta con paginacion
+funcion db_paginar(db: numero, tabla: texto, pagina: numero, por_pagina: numero): lista {
+    sea offset = (pagina - 1) * por_pagina
+    retornar db_consulta_p(db, "SELECT * FROM {tabla} LIMIT ? OFFSET ?", [por_pagina, offset])
+}
+
+// ── Transacciones ─────────────────────────────────────────────────────────────
+
+funcion db_en_transaccion(db: numero, fn: funcion): cualquiera {
+    db_transaccion(db)
+    intentar {
+        sea resultado = fn()
+        db_confirmar(db)
+        retornar resultado
+    } capturar (error) {
+        db_revertir(db)
+        lanzar error
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+funcion agregar_al_final(lista_v: lista, elemento: cualquiera): lista {
+    sea nueva = []
+    para x en lista_v {
+        nueva = nueva + [x]
+    }
+    retornar nueva + [elemento]
+}
+
+funcion texto_unir(lista_v: lista, sep: texto): texto {
+    sea r = ""
+    sea i = 0
+    para item en lista_v {
+        si (i > 0) {
+            r = "{r}{sep}"
+        }
+        r = "{r}{item}"
+        i = i + 1
+    }
+    retornar r
+}

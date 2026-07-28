@@ -64,7 +64,7 @@ echo -e "  OK cforgev.cpp"
 
 # Descargar stdlib
 mkdir -p "$TMP_DIR/stdlib"
-for mod in aleatorio base64 colecciones fecha io json lista mapa matematica pkgmgr regex texto tipos; do
+for mod in aleatorio base64 colecciones concurrencia crypto db errores fecha gl http_cliente io json lista log mapa matematica pkgmgr pruebas regex sdl texto tipos validar web; do
     curl -fsSL "$RAW/stdlib/${mod}.cfv" -o "$TMP_DIR/stdlib/${mod}.cfv" 2>/dev/null && \
         echo -e "  OK stdlib/${mod}.cfv" || echo -e "  -- stdlib/${mod}.cfv (omitido)"
 done
@@ -110,21 +110,45 @@ if [ -z "$OPENSSL_FLAGS" ]; then
     echo -e "  ${YELLOW}OpenSSL no encontrado — compilando sin criptografia AES (sha256 puro-C++ disponible)${NC}"
 fi
 
+# Detectar SQLite3
+SQLITE_FLAGS=""
+if pkg-config --exists sqlite3 2>/dev/null; then
+    SQLITE_FLAGS="-DCFV_WITH_SQLITE $(pkg-config --libs sqlite3)"
+    echo -e "  SQLite3 encontrado (pkg-config)"
+elif [ -f "/usr/include/sqlite3.h" ] || [ -f "/usr/local/include/sqlite3.h" ]; then
+    SQLITE_FLAGS="-DCFV_WITH_SQLITE -lsqlite3"
+    echo -e "  SQLite3 encontrado"
+elif [ "$OS" = "Darwin" ] && [ -f "$(brew --prefix sqlite 2>/dev/null)/include/sqlite3.h" ]; then
+    SQLITE_PREFIX="$(brew --prefix sqlite)"
+    SQLITE_FLAGS="-DCFV_WITH_SQLITE -I$SQLITE_PREFIX/include -L$SQLITE_PREFIX/lib -lsqlite3"
+    echo -e "  SQLite3 encontrado (Homebrew)"
+fi
+if [ -z "$SQLITE_FLAGS" ]; then
+    echo -e "  ${YELLOW}SQLite3 no encontrado — compilando sin soporte de base de datos${NC}"
+    echo -e "  Para instalarlo: Ubuntu: sudo apt install libsqlite3-dev | macOS: brew install sqlite"
+fi
+
 PYTHON_FLAGS=$(python3-config --includes --ldflags 2>/dev/null || echo "")
 
-# Intentar con Python + OpenSSL, luego combinaciones, luego basico
+# Intentar con todas las combinaciones — primero completo, luego degradar
 if $CXX -std=c++20 -O2 \
     -o "$TMP_DIR/${BINARY_NAME}" \
     "$TMP_DIR/cforgev.cpp" \
-    $PYTHON_FLAGS $OPENSSL_FLAGS \
+    $OPENSSL_FLAGS $SQLITE_FLAGS -lpthread \
     2>/dev/null; then
-    echo -e "  OK compilado con Python + OpenSSL"
+    echo -e "  OK compilado con OpenSSL + SQLite"
 elif $CXX -std=c++20 -O2 \
     -o "$TMP_DIR/${BINARY_NAME}" \
     "$TMP_DIR/cforgev.cpp" \
-    $OPENSSL_FLAGS \
+    $OPENSSL_FLAGS -lpthread \
     2>/dev/null; then
-    echo -e "  OK compilado con OpenSSL"
+    echo -e "  OK compilado con OpenSSL (sin SQLite)"
+elif $CXX -std=c++20 -O2 \
+    -o "$TMP_DIR/${BINARY_NAME}" \
+    "$TMP_DIR/cforgev.cpp" \
+    $SQLITE_FLAGS -lpthread \
+    2>/dev/null; then
+    echo -e "  OK compilado con SQLite (sin OpenSSL)"
 elif $CXX -std=c++20 -O2 \
     -o "$TMP_DIR/${BINARY_NAME}" \
     "$TMP_DIR/cforgev.cpp" \
@@ -168,7 +192,7 @@ echo -e "  OK stdlib -> ${STDLIB_DIR}"
 echo ""
 echo -e "  ${GREEN}C-Forge instalado correctamente!${NC}"
 echo ""
-echo -e "  Version: $(${INSTALL_DIR}/${BINARY_NAME} --version 2>/dev/null || echo 'v2.0.0')"
+echo -e "  Version: $(${INSTALL_DIR}/${BINARY_NAME} --version 2>/dev/null || echo 'v2.2.0')"
 echo ""
 echo -e "  Comandos disponibles:"
 echo -e "    cforgev archivo.cfv    -- ejecutar un programa"

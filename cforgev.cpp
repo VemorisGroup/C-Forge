@@ -64,6 +64,26 @@
 #include <SDL2/SDL_image.h>
 #endif
 #endif
+// OpenGL 3D (sin deps extra — viene con macOS/Linux/Windows)
+// macOS: compilar con -framework OpenGL
+// Linux:  compilar con -lGL
+// Android: compilar con -lGLESv3
+// Requires SDL2 for window+context (CFV_WITH_SDL2 must also be set)
+#ifdef CFV_WITH_OPENGL
+#ifdef __APPLE__
+#define GL_SILENCE_DEPRECATION
+#include <OpenGL/gl3.h>
+#elif defined(__ANDROID__)
+#include <GLES3/gl3.h>
+#else
+#define GL_GLEXT_PROTOTYPES
+#include <GL/gl.h>
+#include <GL/glext.h>
+#endif
+#ifdef CFV_WITH_SDL2
+#include <SDL2/SDL_opengl.h>
+#endif
+#endif
 struct ForgeValue;struct CfvDenseMatrix;struct CfvTuple;struct CfvSet;
 using Value=ForgeValue;using Lista=std::shared_ptr<std::vector<ForgeValue>>;using Mapa=std::shared_ptr<std::map<std::string,ForgeValue>>;using FastArray=std::shared_ptr<std::vector<double>>;using DenseMatrix=std::shared_ptr<CfvDenseMatrix>;using Tupla=std::shared_ptr<CfvTuple>;using Conjunto=std::shared_ptr<CfvSet>;
 struct CfvDenseMatrix{size_t rows=0,columns=0;std::vector<double>values;};
@@ -806,6 +826,258 @@ static Value cfv_sdl_cargar_sonido(const Value&){throw std::runtime_error("SDL2 
 static Value cfv_sdl_reproducir_sonido(const Value&){throw std::runtime_error("SDL2 no disponible");}
 static Value cfv_sdl_cargar_musica_fn(const Value&){throw std::runtime_error("SDL2 no disponible");}
 #endif
+#endif
+
+// ── OpenGL 3D BINDINGS ────────────────────────────────────────────────────
+#ifdef CFV_WITH_OPENGL
+struct CfvGLContext {
+    SDL_GLContext ctx = nullptr;
+    int win_id = -1;
+};
+static std::map<int, CfvGLContext> cfv_gl_contexts;
+static int cfv_gl_next_ctx = 1;
+
+// gl3d_iniciar(sdl_win_id) → gl_ctx_id  (crear contexto OpenGL para una ventana SDL)
+static Value cfv_gl3d_iniciar(const Value& id_v) {
+#ifdef CFV_WITH_SDL2
+    int win_id = (int)numero(id_v);
+    auto it = cfv_sdl_windows.find(win_id);
+    if (it == cfv_sdl_windows.end()) throw std::runtime_error("gl3d_iniciar: ventana SDL invalida");
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+    SDL_GLContext glctx = SDL_GL_CreateContext(it->second->win);
+    if (!glctx) throw std::runtime_error(std::string("gl3d_iniciar: ") + SDL_GetError());
+    SDL_GL_SetSwapInterval(1); // vsync
+    int ctx_id = cfv_gl_next_ctx++;
+    cfv_gl_contexts[ctx_id] = { glctx, win_id };
+    return (double)ctx_id;
+#else
+    throw std::runtime_error("gl3d_iniciar: requiere SDL2 (-DCFV_WITH_SDL2)");
+#endif
+}
+
+// gl3d_limpiar(r, g, b, a) → nulo
+static Value cfv_gl3d_limpiar(const Value& r_v, const Value& g_v, const Value& b_v, const Value& a_v) {
+    glClearColor((GLfloat)(numero(r_v)/255.0),(GLfloat)(numero(g_v)/255.0),
+                 (GLfloat)(numero(b_v)/255.0),(GLfloat)(numero(a_v)/255.0));
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    return Value{};
+}
+
+// gl3d_viewport(x, y, ancho, alto) → nulo
+static Value cfv_gl3d_viewport(const Value& x_v, const Value& y_v, const Value& w_v, const Value& h_v) {
+    glViewport((GLint)numero(x_v),(GLint)numero(y_v),(GLsizei)numero(w_v),(GLsizei)numero(h_v));
+    return Value{};
+}
+
+// gl3d_profundidad(activar) → nulo
+static Value cfv_gl3d_profundidad(const Value& v) {
+    if (verdad(v)) { glEnable(GL_DEPTH_TEST); glDepthFunc(GL_LESS); }
+    else glDisable(GL_DEPTH_TEST);
+    return Value{};
+}
+
+// gl3d_shader(tipo, codigo_glsl) → shader_id  (tipo: "vertex" o "fragment")
+static Value cfv_gl3d_shader(const Value& tipo_v, const Value& src_v) {
+    if (tipo_v.index()!=2||src_v.index()!=2) throw std::runtime_error("gl3d_shader: requiere tipo y codigo");
+    const std::string& tipo = std::get<std::string>(tipo_v.data);
+    const std::string& src  = std::get<std::string>(src_v.data);
+    GLenum gl_tipo = (tipo=="vertex"||tipo=="vertice") ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER;
+    GLuint shader = glCreateShader(gl_tipo);
+    const char* src_c = src.c_str();
+    glShaderSource(shader, 1, &src_c, nullptr);
+    glCompileShader(shader);
+    GLint ok; glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        char log[1024]; glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
+        glDeleteShader(shader);
+        throw std::runtime_error(std::string("gl3d_shader error: ") + log);
+    }
+    return (double)shader;
+}
+
+// gl3d_programa(vert_id, frag_id) → prog_id
+static Value cfv_gl3d_programa(const Value& v_v, const Value& f_v) {
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, (GLuint)numero(v_v));
+    glAttachShader(prog, (GLuint)numero(f_v));
+    glLinkProgram(prog);
+    GLint ok; glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[1024]; glGetProgramInfoLog(prog, sizeof(log), nullptr, log);
+        glDeleteProgram(prog);
+        throw std::runtime_error(std::string("gl3d_programa error: ") + log);
+    }
+    glDeleteShader((GLuint)numero(v_v));
+    glDeleteShader((GLuint)numero(f_v));
+    return (double)prog;
+}
+
+// gl3d_usar_programa(prog_id) → nulo
+static Value cfv_gl3d_usar_programa(const Value& v) {
+    glUseProgram((GLuint)numero(v));
+    return Value{};
+}
+
+// gl3d_vbo(lista_numeros) → vbo_id  (crea VBO + VAO con los vertices dados)
+static Value cfv_gl3d_vbo(const Value& datos_v) {
+    auto* lista = std::get_if<Lista>(&datos_v.data);
+    auto* arr   = std::get_if<FastArray>(&datos_v.data);
+    std::vector<GLfloat> verts;
+    if (lista) { for (auto& v : **lista) verts.push_back((GLfloat)numero(v)); }
+    else if (arr) { for (double d : **arr) verts.push_back((GLfloat)d); }
+    else throw std::runtime_error("gl3d_vbo: requiere una lista de numeros");
+    GLuint vao, vbo;
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(verts.size()*sizeof(GLfloat)), verts.data(), GL_STATIC_DRAW);
+    // Encodes vao+vbo as a combined ID (upper 32 bits = vao, lower 32 = vbo)
+    uint64_t combined = ((uint64_t)vao << 32) | (uint64_t)vbo;
+    return (double)(int64_t)combined;
+}
+
+// gl3d_atributo(vbo_id, index, size, stride, offset) → nulo
+// Configura un vertex attribute pointer
+static Value cfv_gl3d_atributo(const Value& vbo_v, const Value& idx_v, const Value& size_v, const Value& stride_v, const Value& off_v) {
+    uint64_t combined = (uint64_t)(int64_t)numero(vbo_v);
+    GLuint vao = (GLuint)(combined >> 32);
+    GLuint vbo = (GLuint)(combined & 0xFFFFFFFF);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    GLuint idx = (GLuint)numero(idx_v);
+    GLint  sz  = (GLint)numero(size_v);
+    GLsizei stride = (GLsizei)(numero(stride_v)*sizeof(GLfloat));
+    GLsizei off    = (GLsizei)(numero(off_v)*sizeof(GLfloat));
+    glVertexAttribPointer(idx, sz, GL_FLOAT, GL_FALSE, stride, (void*)(intptr_t)off);
+    glEnableVertexAttribArray(idx);
+    return Value{};
+}
+
+// gl3d_dibujar(vbo_id, num_vertices, modo="triangulos") → nulo
+static Value cfv_gl3d_dibujar(const Value& vbo_v, const Value& n_v, const Value& modo_v) {
+    uint64_t combined = (uint64_t)(int64_t)numero(vbo_v);
+    GLuint vao = (GLuint)(combined >> 32);
+    glBindVertexArray(vao);
+    GLenum modo = GL_TRIANGLES;
+    if (modo_v.index()==2) {
+        const auto& m = std::get<std::string>(modo_v.data);
+        if (m=="lineas")     modo = GL_LINES;
+        else if (m=="puntos") modo = GL_POINTS;
+        else if (m=="tiras") modo = GL_TRIANGLE_STRIP;
+        else if (m=="abanico") modo = GL_TRIANGLE_FAN;
+    }
+    glDrawArrays(modo, 0, (GLsizei)numero(n_v));
+    return Value{};
+}
+
+// gl3d_uniforme_f(prog, nombre, valor) → nulo
+static Value cfv_gl3d_uniforme_f(const Value& prog_v, const Value& nom_v, const Value& val_v) {
+    if (nom_v.index()!=2) throw std::runtime_error("gl3d_uniforme_f: requiere nombre");
+    GLint loc = glGetUniformLocation((GLuint)numero(prog_v), std::get<std::string>(nom_v.data).c_str());
+    glUniform1f(loc, (GLfloat)numero(val_v));
+    return Value{};
+}
+
+// gl3d_uniforme_vec3(prog, nombre, x, y, z) → nulo
+static Value cfv_gl3d_uniforme_vec3(const Value& prog_v, const Value& nom_v, const Value& x, const Value& y, const Value& z) {
+    if (nom_v.index()!=2) throw std::runtime_error("gl3d_uniforme_vec3: requiere nombre");
+    GLint loc = glGetUniformLocation((GLuint)numero(prog_v), std::get<std::string>(nom_v.data).c_str());
+    glUniform3f(loc, (GLfloat)numero(x), (GLfloat)numero(y), (GLfloat)numero(z));
+    return Value{};
+}
+
+// gl3d_uniforme_mat4(prog, nombre, lista_16) → nulo
+static Value cfv_gl3d_uniforme_mat4(const Value& prog_v, const Value& nom_v, const Value& mat_v) {
+    if (nom_v.index()!=2) throw std::runtime_error("gl3d_uniforme_mat4: requiere nombre");
+    auto* lista = std::get_if<Lista>(&mat_v.data);
+    if (!lista || (*lista)->size() < 16) throw std::runtime_error("gl3d_uniforme_mat4: requiere lista de 16 numeros");
+    GLfloat m[16];
+    for (int i=0;i<16;i++) m[i] = (GLfloat)numero((**lista)[i]);
+    GLint loc = glGetUniformLocation((GLuint)numero(prog_v), std::get<std::string>(nom_v.data).c_str());
+    glUniformMatrix4fv(loc, 1, GL_FALSE, m);
+    return Value{};
+}
+
+// gl3d_intercambiar(sdl_win_id) → nulo  (swap buffers)
+static Value cfv_gl3d_intercambiar(const Value& id_v) {
+#ifdef CFV_WITH_SDL2
+    int win_id = (int)numero(id_v);
+    auto it = cfv_sdl_windows.find(win_id);
+    if (it != cfv_sdl_windows.end()) SDL_GL_SwapWindow(it->second->win);
+#endif
+    return Value{};
+}
+
+// gl3d_textura(ancho, alto, datos_rgba) → tex_id
+static Value cfv_gl3d_textura(const Value& w_v, const Value& h_v, const Value& datos_v) {
+    int w=(int)numero(w_v), h=(int)numero(h_v);
+    auto* lista = std::get_if<Lista>(&datos_v.data);
+    std::vector<uint8_t> px;
+    if (lista) { for (auto& v : **lista) px.push_back((uint8_t)numero(v)); }
+    GLuint tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.empty()?nullptr:px.data());
+    return (double)tex;
+}
+
+// gl3d_usar_textura(tex_id, unidad=0) → nulo
+static Value cfv_gl3d_usar_textura(const Value& tex_v, const Value& unit_v) {
+    int unit = unit_v.index()==0 ? 0 : (int)numero(unit_v);
+    glActiveTexture(GL_TEXTURE0 + unit);
+    glBindTexture(GL_TEXTURE_2D, (GLuint)numero(tex_v));
+    return Value{};
+}
+
+// gl3d_eliminar_vbo(vbo_id) → nulo
+static Value cfv_gl3d_eliminar_vbo(const Value& vbo_v) {
+    uint64_t combined = (uint64_t)(int64_t)numero(vbo_v);
+    GLuint vao = (GLuint)(combined >> 32);
+    GLuint vbo = (GLuint)(combined & 0xFFFFFFFF);
+    glDeleteVertexArrays(1, &vao);
+    glDeleteBuffers(1, &vbo);
+    return Value{};
+}
+
+// gl3d_cerrar(ctx_id) → nulo
+static Value cfv_gl3d_cerrar(const Value& v) {
+#ifdef CFV_WITH_SDL2
+    auto it = cfv_gl_contexts.find((int)numero(v));
+    if (it != cfv_gl_contexts.end()) {
+        SDL_GL_DeleteContext(it->second.ctx);
+        cfv_gl_contexts.erase(it);
+    }
+#endif
+    return Value{};
+}
+
+#else
+// Stubs sin OpenGL
+static Value cfv_gl3d_iniciar(const Value&){throw std::runtime_error("gl3d_iniciar: compilar con -DCFV_WITH_OPENGL");}
+static Value cfv_gl3d_limpiar(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_viewport(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_profundidad(const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_shader(const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_programa(const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_usar_programa(const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_vbo(const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_atributo(const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_dibujar(const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_uniforme_f(const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_uniforme_vec3(const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_uniforme_mat4(const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_intercambiar(const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_textura(const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_usar_textura(const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_eliminar_vbo(const Value&){throw std::runtime_error("OpenGL no disponible");}
+static Value cfv_gl3d_cerrar(const Value&){throw std::runtime_error("OpenGL no disponible");}
 #endif
 
 static Value cfv_raiz(const Value&v){double n=numero(v);if(n<0)throw std::runtime_error("no existe raíz real negativa");return std::sqrt(n);}static Value cfv_absoluto(const Value&v){return std::abs(numero(v));}static Value cfv_redondear(const Value&v){return std::round(numero(v));}static Value cfv_potencia(const Value&a,const Value&b){return std::pow(numero(a),numero(b));}
@@ -2575,6 +2847,447 @@ static Value cfv_json_bonito_fn(const Value& v, int indent=0) {
   return Value{cfv_canonical_json(v)};
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// BLOQUE DE EXTENSIONES C-FORGE v2.2
+// JSON nativo · HTTP client · Regex · SQLite · Concurrencia · Sistema · Fecha
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── JSON nativo (sin deps) ───────────────────────────────────────────────────
+#include <regex>
+
+static std::string cfv_json_escape_str(const std::string& s){
+  std::string r; r.reserve(s.size()+4);
+  for(unsigned char c:s){switch(c){case '"':r+="\\\"";break;case'\\':r+="\\\\";break;
+    case'\n':r+="\\n";break;case'\r':r+="\\r";break;case'\t':r+="\\t";break;
+    default: if(c<0x20){char b[8];snprintf(b,sizeof(b),"\\u%04x",c);r+=b;}else r+=c;}}
+  return r;
+}
+static std::string cfv_valor_a_json(const Value& v);
+static std::string cfv_valor_a_json(const Value& v){
+  switch(v.data.index()){
+    case 0: return "null";
+    case 1:{double d=std::get<double>(v.data);
+      if(d==(long long)d&&std::abs(d)<1e15)return std::to_string((long long)d);
+      char b[64];snprintf(b,sizeof(b),"%.10g",d);return b;}
+    case 2: return "\""+cfv_json_escape_str(std::get<std::string>(v.data))+"\"";
+    case 3: return std::get<bool>(v.data)?"true":"false";
+    case 4:{auto& l=*std::get<Lista>(v.data);std::string r="[";
+      for(size_t i=0;i<l.size();i++){if(i)r+=",";r+=cfv_valor_a_json(l[i]);}return r+"]";}
+    case 5:{auto& m=*std::get<Mapa>(v.data);std::string r="{";bool f=true;
+      for(auto&[k,val]:m){if(!f)r+=",";r+="\""+cfv_json_escape_str(k)+"\":"+cfv_valor_a_json(val);f=false;}return r+"}";}
+    default: return "null";
+  }
+}
+struct CfvJsonParser{const std::string&s;size_t pos=0;
+  void ws(){while(pos<s.size()&&(s[pos]==' '||s[pos]=='\t'||s[pos]=='\n'||s[pos]=='\r'))pos++;}
+  Value parse(){ws();if(pos>=s.size())return Value{};char c=s[pos];
+    if(c=='"')return pstr();if(c=='{')return pobj();if(c=='[')return parr();
+    if(c=='t'){pos+=4;return Value{true};}if(c=='f'){pos+=5;return Value{false};}
+    if(c=='n'){pos+=4;return Value{};}
+    if(c=='-'||(c>='0'&&c<='9'))return pnum();return Value{};}
+  Value pstr(){pos++;std::string r;
+    while(pos<s.size()&&s[pos]!='"'){
+      if(s[pos]=='\\'&&pos+1<s.size()){pos++;switch(s[pos]){
+        case'"':r+='"';break;case'\\':r+='\\';break;case'n':r+='\n';break;
+        case'r':r+='\r';break;case't':r+='\t';break;default:r+=s[pos];}}
+      else r+=s[pos];pos++;}if(pos<s.size())pos++;return Value{r};}
+  Value pnum(){size_t st=pos;if(s[pos]=='-')pos++;
+    while(pos<s.size()&&s[pos]>='0'&&s[pos]<='9')pos++;
+    if(pos<s.size()&&s[pos]=='.'){pos++;while(pos<s.size()&&s[pos]>='0'&&s[pos]<='9')pos++;}
+    if(pos<s.size()&&(s[pos]=='e'||s[pos]=='E')){pos++;
+      if(pos<s.size()&&(s[pos]=='+'||s[pos]=='-'))pos++;
+      while(pos<s.size()&&s[pos]>='0'&&s[pos]<='9')pos++;}
+    try{return Value{std::stod(s.substr(st,pos-st))};}catch(...){return Value{0.0};}}
+  Value parr(){pos++;auto l=std::make_shared<std::vector<ForgeValue>>();ws();
+    if(pos<s.size()&&s[pos]==']'){pos++;return Value{l};}
+    while(pos<s.size()){ws();l->push_back(parse());ws();
+      if(pos<s.size()&&s[pos]==',')pos++;
+      else if(pos<s.size()&&s[pos]==']'){pos++;break;}else break;}return Value{l};}
+  Value pobj(){pos++;auto m=std::make_shared<std::map<std::string,ForgeValue>>();ws();
+    if(pos<s.size()&&s[pos]=='}'){pos++;return Value{m};}
+    while(pos<s.size()){ws();if(pos>=s.size()||s[pos]!='"')break;
+      auto kv=pstr();std::string k=std::get<std::string>(kv.data);ws();
+      if(pos<s.size()&&s[pos]==':')pos++;ws();(*m)[k]=parse();ws();
+      if(pos<s.size()&&s[pos]==',')pos++;
+      else if(pos<s.size()&&s[pos]=='}'){pos++;break;}else break;}return Value{m};}
+};
+static Value cfv_json_parsear_fn(const Value& v){
+  if(v.data.index()!=2)throw std::runtime_error("json_parsear: se esperaba texto");
+  CfvJsonParser p{std::get<std::string>(v.data)};return p.parse();}
+static Value cfv_json_texto_fn(const Value& v){return Value{cfv_valor_a_json(v)};}
+static Value cfv_regex_grupos_fn(const Value& t,const Value& p){
+  if(t.data.index()!=2||p.data.index()!=2)throw std::runtime_error("regex_grupos: texto, patron");
+  std::regex re(std::get<std::string>(p.data),std::regex::ECMAScript);
+  std::smatch m;const std::string& texto=std::get<std::string>(t.data);
+  if(!std::regex_search(texto,m,re))return Value{std::make_shared<std::vector<ForgeValue>>()};
+  auto r=std::make_shared<std::vector<ForgeValue>>();
+  for(size_t i=0;i<m.size();i++)r->push_back(Value{m[i].str()});
+  return Value{r};}
+
+// ── SQLite ────────────────────────────────────────────────────────────────────
+#ifdef CFV_WITH_SQLITE
+#include <sqlite3.h>
+static std::map<int,sqlite3*> cfv_db_conns;
+static int cfv_db_next_id=1;
+static Value cfv_db_abrir_fn(const Value& rv){
+  if(rv.data.index()!=2)throw std::runtime_error("db_abrir: se esperaba ruta");
+  sqlite3* db=nullptr;
+  int rc=sqlite3_open(std::get<std::string>(rv.data).c_str(),&db);
+  if(rc!=SQLITE_OK)throw std::runtime_error(std::string("db_abrir: ")+sqlite3_errmsg(db));
+  int id=cfv_db_next_id++;cfv_db_conns[id]=db;return Value{(double)id};}
+static Value cfv_db_cerrar_fn(const Value& iv){
+  int id=(int)std::get<double>(iv.data);
+  auto it=cfv_db_conns.find(id);
+  if(it!=cfv_db_conns.end()){sqlite3_close(it->second);cfv_db_conns.erase(it);}
+  return Value{};}
+static Value cfv_db_ejecutar_fn(const Value& iv,const Value& sv){
+  int id=(int)std::get<double>(iv.data);
+  auto it=cfv_db_conns.find(id);
+  if(it==cfv_db_conns.end())throw std::runtime_error("db_ejecutar: conexion no encontrada");
+  if(sv.data.index()!=2)throw std::runtime_error("db_ejecutar: se esperaba SQL texto");
+  char* err=nullptr;
+  int rc=sqlite3_exec(it->second,std::get<std::string>(sv.data).c_str(),nullptr,nullptr,&err);
+  if(rc!=SQLITE_OK){std::string e=err?err:"error SQL";sqlite3_free(err);throw std::runtime_error("db_ejecutar: "+e);}
+  return Value{(double)sqlite3_changes(it->second)};}
+static std::vector<ForgeValue> cfv_db_step_rows(sqlite3* db,sqlite3_stmt* stmt){
+  std::vector<ForgeValue> filas;int ncols=sqlite3_column_count(stmt);
+  while(sqlite3_step(stmt)==SQLITE_ROW){
+    auto fila=std::make_shared<std::map<std::string,ForgeValue>>();
+    for(int c=0;c<ncols;c++){
+      std::string col=sqlite3_column_name(stmt,c);ForgeValue val;
+      switch(sqlite3_column_type(stmt,c)){
+        case SQLITE_INTEGER:val=Value{(double)sqlite3_column_int64(stmt,c)};break;
+        case SQLITE_FLOAT:val=Value{sqlite3_column_double(stmt,c)};break;
+        case SQLITE_TEXT:{const char* tx=(const char*)sqlite3_column_text(stmt,c);val=Value{tx?std::string(tx):std::string()};break;}
+        case SQLITE_NULL:val=Value{};break;
+        default:{const char* tx=(const char*)sqlite3_column_text(stmt,c);val=Value{tx?std::string(tx):std::string()};break;}
+      }(*fila)[col]=val;}filas.push_back(Value{fila});}
+  return filas;}
+static Value cfv_db_consulta_fn(const Value& iv,const Value& sv){
+  int id=(int)std::get<double>(iv.data);
+  auto it=cfv_db_conns.find(id);
+  if(it==cfv_db_conns.end())throw std::runtime_error("db_consulta: conexion no encontrada");
+  if(sv.data.index()!=2)throw std::runtime_error("db_consulta: se esperaba SQL texto");
+  sqlite3_stmt* stmt=nullptr;
+  int rc=sqlite3_prepare_v2(it->second,std::get<std::string>(sv.data).c_str(),-1,&stmt,nullptr);
+  if(rc!=SQLITE_OK)throw std::runtime_error(std::string("db_consulta: ")+sqlite3_errmsg(it->second));
+  auto filas=std::make_shared<std::vector<ForgeValue>>(cfv_db_step_rows(it->second,stmt));
+  sqlite3_finalize(stmt);return Value{filas};}
+static Value cfv_db_consulta_p_fn(const Value& iv,const Value& sv,const Value& pv){
+  int id=(int)std::get<double>(iv.data);
+  auto it=cfv_db_conns.find(id);
+  if(it==cfv_db_conns.end())throw std::runtime_error("db_consulta_p: conexion no encontrada");
+  if(sv.data.index()!=2)throw std::runtime_error("db_consulta_p: se esperaba SQL texto");
+  sqlite3_stmt* stmt=nullptr;
+  sqlite3_prepare_v2(it->second,std::get<std::string>(sv.data).c_str(),-1,&stmt,nullptr);
+  if(auto* lp=std::get_if<Lista>(&pv.data)){
+    for(size_t i=0;i<(*lp)->size();i++){const auto& p=(**lp)[i];int idx=(int)i+1;
+      if(p.data.index()==0)sqlite3_bind_null(stmt,idx);
+      else if(auto* d=std::get_if<double>(&p.data))sqlite3_bind_double(stmt,idx,*d);
+      else if(auto* s=std::get_if<std::string>(&p.data))sqlite3_bind_text(stmt,idx,s->c_str(),-1,SQLITE_TRANSIENT);
+      else if(auto* b=std::get_if<bool>(&p.data))sqlite3_bind_int(stmt,idx,*b?1:0);}}
+  auto filas=std::make_shared<std::vector<ForgeValue>>(cfv_db_step_rows(it->second,stmt));
+  sqlite3_finalize(stmt);return Value{filas};}
+static Value cfv_db_ultimo_id_fn(const Value& iv){
+  int id=(int)std::get<double>(iv.data);
+  auto it=cfv_db_conns.find(id);
+  if(it==cfv_db_conns.end())return Value{0.0};
+  return Value{(double)sqlite3_last_insert_rowid(it->second)};}
+static Value cfv_db_transaccion_fn(const Value& iv){
+  int id=(int)std::get<double>(iv.data);
+  auto it=cfv_db_conns.find(id);
+  if(it==cfv_db_conns.end())throw std::runtime_error("db_transaccion: conexion no encontrada");
+  sqlite3_exec(it->second,"BEGIN TRANSACTION",nullptr,nullptr,nullptr);return Value{};}
+static Value cfv_db_confirmar_fn(const Value& iv){
+  int id=(int)std::get<double>(iv.data);
+  auto it=cfv_db_conns.find(id);
+  if(it==cfv_db_conns.end())throw std::runtime_error("db_confirmar: conexion no encontrada");
+  sqlite3_exec(it->second,"COMMIT",nullptr,nullptr,nullptr);return Value{};}
+static Value cfv_db_revertir_fn(const Value& iv){
+  int id=(int)std::get<double>(iv.data);
+  auto it=cfv_db_conns.find(id);
+  if(it==cfv_db_conns.end())throw std::runtime_error("db_revertir: conexion no encontrada");
+  sqlite3_exec(it->second,"ROLLBACK",nullptr,nullptr,nullptr);return Value{};}
+#endif // CFV_WITH_SQLITE
+
+// ── HTTP Client mejorado ──────────────────────────────────────────────────────
+#ifndef _WIN32
+struct CfvHttpResp{int status=0;std::string headers,body;};
+static CfvHttpResp cfv_http_do(const std::string& method,const std::string& url,
+  const std::string& body="",const std::string& ct="",
+  const std::map<std::string,std::string>& hdrs={}){
+  bool ssl=(url.size()>8&&url.substr(0,8)=="https://");
+  std::string rest=ssl?url.substr(8):(url.size()>7&&url.substr(0,7)=="http://"?url.substr(7):url);
+  auto sl=rest.find('/');
+  std::string hp=(sl!=std::string::npos)?rest.substr(0,sl):rest;
+  std::string path=(sl!=std::string::npos)?rest.substr(sl):"/";
+  auto co=hp.find(':');
+  std::string host=(co!=std::string::npos)?hp.substr(0,co):hp;
+  int port=ssl?443:80;
+  if(co!=std::string::npos)try{port=std::stoi(hp.substr(co+1));}catch(...){}
+  struct addrinfo hints{},*res=nullptr;
+  hints.ai_family=AF_INET;hints.ai_socktype=SOCK_STREAM;
+  std::string ps=std::to_string(port);
+  if(getaddrinfo(host.c_str(),ps.c_str(),&hints,&res)!=0||!res)
+    throw std::runtime_error("http: no se pudo resolver "+host);
+  int sock=socket(res->ai_family,res->ai_socktype,res->ai_protocol);
+  if(sock<0){freeaddrinfo(res);throw std::runtime_error("http: socket error");}
+  struct timeval tv{15,0};
+  setsockopt(sock,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
+  setsockopt(sock,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
+  if(connect(sock,res->ai_addr,res->ai_addrlen)!=0){
+    freeaddrinfo(res);close(sock);throw std::runtime_error("http: no se pudo conectar a "+host);}
+  freeaddrinfo(res);
+  std::string req=method+" "+path+" HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\nUser-Agent: C-Forge/2.2\r\n";
+  if(!ct.empty())req+="Content-Type: "+ct+"\r\n";
+  if(!body.empty())req+="Content-Length: "+std::to_string(body.size())+"\r\n";
+  for(auto&[k,v]:hdrs)req+=k+": "+v+"\r\n";
+  req+="\r\n"+body;
+  send(sock,req.c_str(),req.size(),0);
+  std::string raw;char buf[4096];int n;
+  while((n=recv(sock,buf,sizeof(buf)-1,0))>0){buf[n]=0;raw+=buf;}
+  close(sock);
+  CfvHttpResp r;
+  auto hend=raw.find("\r\n\r\n");
+  size_t skip=(hend!=std::string::npos)?4:0;
+  if(hend==std::string::npos){hend=raw.find("\n\n");skip=(hend!=std::string::npos)?2:0;}
+  if(hend!=std::string::npos){r.headers=raw.substr(0,hend);r.body=raw.substr(hend+skip);}
+  else r.body=raw;
+  if(r.headers.size()>9){auto sp=r.headers.find(' ');
+    if(sp!=std::string::npos)try{r.status=std::stoi(r.headers.substr(sp+1,3));}catch(...){}}
+  return r;}
+#endif
+
+static Value cfv_http_post_fn(const Value& uv,const Value& bv,const Value& tv){
+#ifndef _WIN32
+  std::string url=uv.data.index()==2?std::get<std::string>(uv.data):"";
+  std::string body=bv.data.index()==2?std::get<std::string>(bv.data):"";
+  std::string ct=tv.data.index()==2?std::get<std::string>(tv.data):"application/json";
+  return Value{cfv_http_do("POST",url,body,ct).body};
+#else
+  throw std::runtime_error("http_post: no soportado en Windows aun");
+#endif
+}
+static Value cfv_http_put_fn(const Value& uv,const Value& bv){
+#ifndef _WIN32
+  std::string url=uv.data.index()==2?std::get<std::string>(uv.data):"";
+  std::string body=bv.data.index()==2?std::get<std::string>(bv.data):"";
+  return Value{cfv_http_do("PUT",url,body,"application/json").body};
+#else
+  throw std::runtime_error("http_put: no soportado en Windows aun");
+#endif
+}
+static Value cfv_http_delete_fn(const Value& uv){
+#ifndef _WIN32
+  std::string url=uv.data.index()==2?std::get<std::string>(uv.data):"";
+  return Value{cfv_http_do("DELETE",url).body};
+#else
+  throw std::runtime_error("http_delete: no soportado en Windows aun");
+#endif
+}
+static Value cfv_http_solicitud_fn(const Value& mv,const Value& uv,const Value& ov){
+#ifndef _WIN32
+  std::string method=mv.data.index()==2?std::get<std::string>(mv.data):"GET";
+  std::string url=uv.data.index()==2?std::get<std::string>(uv.data):"";
+  std::string body,ct;std::map<std::string,std::string> hdrs;
+  if(auto* mp=std::get_if<Mapa>(&ov.data)){
+    if((*mp)->count("cuerpo")&&(**mp)["cuerpo"].data.index()==2)body=std::get<std::string>((**mp)["cuerpo"].data);
+    if((*mp)->count("tipo")&&(**mp)["tipo"].data.index()==2)ct=std::get<std::string>((**mp)["tipo"].data);
+    if((*mp)->count("cabeceras"))if(auto* hm=std::get_if<Mapa>(&(**mp)["cabeceras"].data))
+      for(auto&[k,v]:**hm)if(v.data.index()==2)hdrs[k]=std::get<std::string>(v.data);}
+  auto r=cfv_http_do(method,url,body,ct,hdrs);
+  auto resp=std::make_shared<std::map<std::string,ForgeValue>>();
+  (*resp)["estado"]=Value{(double)r.status};
+  (*resp)["cuerpo"]=Value{r.body};
+  (*resp)["cabeceras"]=Value{r.headers};
+  return Value{resp};
+#else
+  throw std::runtime_error("http_solicitud: no soportado en Windows aun");
+#endif
+}
+
+// ── Canales y concurrencia ────────────────────────────────────────────────────
+struct CfvCanal{std::deque<ForgeValue>q;std::mutex mu;std::condition_variable cv;bool closed=false;};
+static std::map<int,std::shared_ptr<CfvCanal>> cfv_canales;
+static int cfv_canal_next_id=1;
+static Value cfv_canal_nuevo_fn(const Value&){
+  auto ch=std::make_shared<CfvCanal>();int id=cfv_canal_next_id++;cfv_canales[id]=ch;return Value{(double)id};}
+static Value cfv_canal_enviar_fn(const Value& iv,const Value& val){
+  int id=(int)std::get<double>(iv.data);
+  auto it=cfv_canales.find(id);if(it==cfv_canales.end())throw std::runtime_error("canal_enviar: no encontrado");
+  {std::lock_guard<std::mutex> lk(it->second->mu);it->second->q.push_back(val);}
+  it->second->cv.notify_one();return Value{};}
+static Value cfv_canal_recibir_fn(const Value& iv){
+  int id=(int)std::get<double>(iv.data);
+  auto it=cfv_canales.find(id);if(it==cfv_canales.end())throw std::runtime_error("canal_recibir: no encontrado");
+  std::unique_lock<std::mutex> lk(it->second->mu);
+  it->second->cv.wait(lk,[&]{return!it->second->q.empty()||it->second->closed;});
+  if(it->second->q.empty())return Value{};
+  Value v=it->second->q.front();it->second->q.pop_front();return v;}
+static Value cfv_canal_cerrar_fn(const Value& iv){
+  int id=(int)std::get<double>(iv.data);
+  auto it=cfv_canales.find(id);
+  if(it!=cfv_canales.end()){{std::lock_guard<std::mutex> lk(it->second->mu);it->second->closed=true;}
+    it->second->cv.notify_all();}return Value{};}
+static Value cfv_canal_tam_fn(const Value& iv){
+  int id=(int)std::get<double>(iv.data);
+  auto it=cfv_canales.find(id);if(it==cfv_canales.end())return Value{0.0};
+  std::lock_guard<std::mutex> lk(it->second->mu);return Value{(double)it->second->q.size()};}
+static Value cfv_hilo_dormir_fn(const Value& ms){
+  double d=ms.data.index()==1?std::get<double>(ms.data):0;
+  std::this_thread::sleep_for(std::chrono::milliseconds((int)d));return Value{};}
+
+// ── Sistema / Proceso / Env ───────────────────────────────────────────────────
+static Value cfv_env_obtener_fn(const Value& nv){
+  if(nv.data.index()!=2)return Value{};
+  const char* v=std::getenv(std::get<std::string>(nv.data).c_str());
+  return v?Value{std::string(v)}:Value{};}
+static Value cfv_env_establecer_fn(const Value& nv,const Value& vv){
+  if(nv.data.index()!=2)return Value{};
+  std::string n=std::get<std::string>(nv.data),v=vv.data.index()==2?std::get<std::string>(vv.data):"";
+#ifdef _WIN32
+  SetEnvironmentVariableA(n.c_str(),v.c_str());
+#else
+  setenv(n.c_str(),v.c_str(),1);
+#endif
+  return Value{};}
+static Value cfv_proceso_ejecutar_fn(const Value& cv){
+  if(cv.data.index()!=2)throw std::runtime_error("proceso_ejecutar: se esperaba texto");
+  std::string cmd=std::get<std::string>(cv.data);
+  FILE* pipe=popen(cmd.c_str(),"r");
+  if(!pipe)throw std::runtime_error("proceso_ejecutar: no se pudo ejecutar");
+  std::string r;char buf[256];while(fgets(buf,sizeof(buf),pipe))r+=buf;
+  int rc=pclose(pipe);
+  auto resp=std::make_shared<std::map<std::string,ForgeValue>>();
+  (*resp)["salida"]=Value{r};(*resp)["codigo"]=Value{(double)(rc>>8)};return Value{resp};}
+static Value cfv_salir_fn(const Value& cv){
+  std::exit(cv.data.index()==1?(int)std::get<double>(cv.data):0);return Value{};}
+static Value cfv_pausa_fn(const Value& ms){
+  double d=ms.data.index()==1?std::get<double>(ms.data):0;
+  std::this_thread::sleep_for(std::chrono::milliseconds((int)d));return Value{};}
+static Value cfv_limpiar_pantalla_fn(const Value&){
+#ifdef _WIN32
+  system("cls");
+#else
+  std::cout<<"\033[2J\033[H"<<std::flush;
+#endif
+  return Value{};}
+
+// ── Fecha y Tiempo ────────────────────────────────────────────────────────────
+static Value cfv_fecha_ahora_fn(const Value&){
+  auto now=std::chrono::system_clock::now();
+  auto t=std::chrono::system_clock::to_time_t(now);
+  struct tm ti;
+#ifdef _WIN32
+  localtime_s(&ti,&t);
+#else
+  localtime_r(&t,&ti);
+#endif
+  auto mp=std::make_shared<std::map<std::string,ForgeValue>>();
+  (*mp)["anio"]=Value{(double)(ti.tm_year+1900)};
+  (*mp)["mes"]=Value{(double)(ti.tm_mon+1)};
+  (*mp)["dia"]=Value{(double)ti.tm_mday};
+  (*mp)["hora"]=Value{(double)ti.tm_hour};
+  (*mp)["minuto"]=Value{(double)ti.tm_min};
+  (*mp)["segundo"]=Value{(double)ti.tm_sec};
+  (*mp)["dia_semana"]=Value{(double)ti.tm_wday};
+  (*mp)["timestamp"]=Value{(double)t};
+  char iso[32];strftime(iso,sizeof(iso),"%Y-%m-%dT%H:%M:%S",&ti);
+  (*mp)["iso"]=Value{std::string(iso)};
+  char fecha[16];strftime(fecha,sizeof(fecha),"%Y-%m-%d",&ti);
+  (*mp)["fecha"]=Value{std::string(fecha)};
+  char hora[12];strftime(hora,sizeof(hora),"%H:%M:%S",&ti);
+  (*mp)["hora_texto"]=Value{std::string(hora)};
+  return Value{mp};}
+static Value cfv_fecha_formatear_fn(const Value& fv,const Value& fmt_v){
+  double ts=0;
+  if(auto* mp=std::get_if<Mapa>(&fv.data)){if((*mp)->count("timestamp"))ts=std::get<double>((**mp)["timestamp"].data);}
+  else if(fv.data.index()==1)ts=std::get<double>(fv.data);
+  time_t t=(time_t)ts;struct tm ti;
+#ifdef _WIN32
+  localtime_s(&ti,&t);
+#else
+  localtime_r(&t,&ti);
+#endif
+  std::string fmt=fmt_v.data.index()==2?std::get<std::string>(fmt_v.data):"%Y-%m-%d %H:%M:%S";
+  char buf[256];strftime(buf,sizeof(buf),fmt.c_str(),&ti);return Value{std::string(buf)};}
+static Value cfv_tiempo_ms_fn(const Value&){
+  auto now=std::chrono::system_clock::now().time_since_epoch();
+  return Value{(double)std::chrono::duration_cast<std::chrono::milliseconds>(now).count()};}
+static Value cfv_tiempo_segundos_fn(const Value&){
+  return Value{(double)std::chrono::duration_cast<std::chrono::seconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count()};}
+
+// ── Colecciones extra ─────────────────────────────────────────────────────────
+static Value cfv_lista_unica_fn(const Value& lv){
+  if(lv.data.index()!=4)return lv;
+  auto& src=*std::get<Lista>(lv.data);
+  auto r=std::make_shared<std::vector<ForgeValue>>();
+  for(auto& e:src){bool found=false;
+    for(auto& x:*r)if(verdad(compara(x,e,"==")))found=true;
+    if(!found)r->push_back(e);}return Value{r};}
+static Value cfv_lista_aplanar_fn(const Value& lv){
+  if(lv.data.index()!=4)return lv;
+  auto r=std::make_shared<std::vector<ForgeValue>>();
+  for(auto& e:*std::get<Lista>(lv.data)){
+    if(e.data.index()==4){for(auto& x:*std::get<Lista>(e.data))r->push_back(x);}
+    else r->push_back(e);}return Value{r};}
+static Value cfv_lista_zip_fn(const Value& av,const Value& bv){
+  if(av.data.index()!=4||bv.data.index()!=4)throw std::runtime_error("lista_zip: se esperaban dos listas");
+  auto& a=*std::get<Lista>(av.data);auto& b=*std::get<Lista>(bv.data);
+  auto r=std::make_shared<std::vector<ForgeValue>>();
+  size_t n=std::min(a.size(),b.size());
+  for(size_t i=0;i<n;i++){auto p=std::make_shared<std::vector<ForgeValue>>();p->push_back(a[i]);p->push_back(b[i]);r->push_back(Value{p});}
+  return Value{r};}
+static Value cfv_mapa_claves_fn(const Value& mv){
+  if(mv.data.index()!=5)throw std::runtime_error("mapa_claves: se esperaba mapa");
+  auto r=std::make_shared<std::vector<ForgeValue>>();
+  for(auto&[k,v]:*std::get<Mapa>(mv.data))r->push_back(Value{k});return Value{r};}
+static Value cfv_mapa_valores_fn(const Value& mv){
+  if(mv.data.index()!=5)throw std::runtime_error("mapa_valores: se esperaba mapa");
+  auto r=std::make_shared<std::vector<ForgeValue>>();
+  for(auto&[k,v]:*std::get<Mapa>(mv.data))r->push_back(v);return Value{r};}
+static Value cfv_mapa_entradas_fn(const Value& mv){
+  if(mv.data.index()!=5)throw std::runtime_error("mapa_entradas: se esperaba mapa");
+  auto r=std::make_shared<std::vector<ForgeValue>>();
+  for(auto&[k,v]:*std::get<Mapa>(mv.data)){
+    auto p=std::make_shared<std::vector<ForgeValue>>();p->push_back(Value{k});p->push_back(v);r->push_back(Value{p});}
+  return Value{r};}
+static Value cfv_mapa_fusionar_fn(const Value& av,const Value& bv){
+  if(av.data.index()!=5||bv.data.index()!=5)throw std::runtime_error("mapa_fusionar: se esperaban dos mapas");
+  auto r=std::make_shared<std::map<std::string,ForgeValue>>(*std::get<Mapa>(av.data));
+  for(auto&[k,v]:*std::get<Mapa>(bv.data))(*r)[k]=v;return Value{r};}
+
+// ── Texto extra ───────────────────────────────────────────────────────────────
+static Value cfv_texto_relleno_fn(const Value& tv,const Value& nv,const Value& cv){
+  std::string t=tv.data.index()==2?std::get<std::string>(tv.data):"";
+  int n=nv.data.index()==1?(int)std::get<double>(nv.data):0;
+  std::string c=cv.data.index()==2?std::get<std::string>(cv.data):" ";
+  if(c.empty())c=" ";
+  while((int)t.size()<n)t=c.substr(0,1)+t;return Value{t};}
+static Value cfv_texto_relleno_der_fn(const Value& tv,const Value& nv,const Value& cv){
+  std::string t=tv.data.index()==2?std::get<std::string>(tv.data):"";
+  int n=nv.data.index()==1?(int)std::get<double>(nv.data):0;
+  std::string c=cv.data.index()==2?std::get<std::string>(cv.data):" ";
+  if(c.empty())c=" ";
+  while((int)t.size()<n)t+=c.substr(0,1);return Value{t};}
+static Value cfv_texto_formato_fn(const Value& tv,const Value& args){
+  // texto_formato("Hola {0}, tienes {1} anos", ["Maria", 25])
+  if(tv.data.index()!=2)throw std::runtime_error("texto_formato: se esperaba texto");
+  std::string tpl=std::get<std::string>(tv.data);std::string r;
+  if(auto* lp=std::get_if<Lista>(&args.data)){
+    for(size_t i=0;i<tpl.size();i++){
+      if(tpl[i]=='{'&&i+1<tpl.size()){
+        size_t j=tpl.find('}',i+1);
+        if(j!=std::string::npos){
+          try{int idx=std::stoi(tpl.substr(i+1,j-i-1));
+            if(idx>=0&&idx<(int)(*lp)->size())r+=cfv_valor_a_json((**lp)[idx]);
+            else r+=tpl.substr(i,j-i+1);}
+          catch(...){r+=tpl.substr(i,j-i+1);}
+          i=j;continue;}}r+=tpl[i];}
+    return Value{r};}
+  return Value{tpl};}
+
 Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cfv_fns) {
   cfv_jit_hit("eval_builtin");
   size_t cfv_nombre_tipo = cfv_nombre.index();
@@ -2861,6 +3574,64 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
     (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("contiene requiere 2 argumentos")}));
     return cfv_texto_contiene(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
   }
+  // ── OpenGL 3D ────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_iniciar")}, "=="))) {
+    return cfv_gl3d_iniciar(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_limpiar")}, "=="))) {
+    Value a = verdad(compara(cfv_longitud(cfv_args),Value{4.0},">=")) ? indice(cfv_args,Value{3.0}) : Value{255.0};
+    return cfv_gl3d_limpiar(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),a);
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_viewport")}, "=="))) {
+    return cfv_gl3d_viewport(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_profundidad")}, "=="))) {
+    return cfv_gl3d_profundidad(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_shader")}, "=="))) {
+    return cfv_gl3d_shader(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_programa")}, "=="))) {
+    return cfv_gl3d_programa(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_usar_programa")}, "=="))) {
+    return cfv_gl3d_usar_programa(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_vbo")}, "=="))) {
+    return cfv_gl3d_vbo(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_atributo")}, "=="))) {
+    return cfv_gl3d_atributo(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}),indice(cfv_args,Value{4.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_dibujar")}, "=="))) {
+    Value modo = verdad(compara(cfv_longitud(cfv_args),Value{3.0},">=")) ? indice(cfv_args,Value{2.0}) : Value{std::string("triangulos")};
+    return cfv_gl3d_dibujar(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),modo);
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_uniforme_f")}, "=="))) {
+    return cfv_gl3d_uniforme_f(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_uniforme_vec3")}, "=="))) {
+    return cfv_gl3d_uniforme_vec3(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}),indice(cfv_args,Value{4.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_uniforme_mat4")}, "=="))) {
+    return cfv_gl3d_uniforme_mat4(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_intercambiar")}, "=="))) {
+    return cfv_gl3d_intercambiar(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_textura")}, "=="))) {
+    return cfv_gl3d_textura(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_usar_textura")}, "=="))) {
+    Value unit = verdad(compara(cfv_longitud(cfv_args),Value{2.0},">=")) ? indice(cfv_args,Value{1.0}) : Value{0.0};
+    return cfv_gl3d_usar_textura(indice(cfv_args,Value{0.0}),unit);
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_eliminar_vbo")}, "=="))) {
+    return cfv_gl3d_eliminar_vbo(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("gl3d_cerrar")}, "=="))) {
+    return cfv_gl3d_cerrar(indice(cfv_args,Value{0.0}));
+  }
   // ── SDL2 Graficos ─────────────────────────────────────────────────────────
   if (verdad(compara(cfv_nombre, Value{std::string("sdl_iniciar")}, "=="))) {
     return cfv_sdl_iniciar(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}));
@@ -2960,6 +3731,170 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
   }
   if (verdad(compara(cfv_nombre, Value{std::string("crypto_rand_bytes")}, "=="))) {
     return cfv_crypto_rand_bytes(indice(cfv_args, Value{0.0}));
+  }
+  // ── JSON nativo ────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("json_parsear")}, "=="))) {
+    return cfv_json_parsear_fn(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("json_texto")}, "=="))) {
+    return cfv_json_texto_fn(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("json_bonito")}, "=="))) {
+    return cfv_json_bonito_fn(indice(cfv_args, Value{0.0}));
+  }
+  // ── Regex ──────────────────────────────────────────────────────────────────
+  // regex_coincidir(texto, patron), regex_buscar(texto, patron), etc.
+  // cfv_regex_*_fn toma (patron, texto) — intercambiar args
+  if (verdad(compara(cfv_nombre, Value{std::string("regex_coincidir")}, "=="))) {
+    return cfv_regex_coincidir_fn(indice(cfv_args,Value{1.0}),indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("regex_buscar")}, "=="))) {
+    // regex_buscar(texto, patron) -> lista de todos los matches
+    return cfv_regex_buscar_todos_fn(indice(cfv_args,Value{1.0}),indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("regex_buscar_primero")}, "=="))) {
+    // regex_buscar_primero(texto, patron) -> primer match o nulo
+    return cfv_regex_buscar_fn(indice(cfv_args,Value{1.0}),indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("regex_reemplazar")}, "=="))) {
+    // regex_reemplazar(texto, patron, reemplazo)
+    return cfv_regex_reemplazar_fn(indice(cfv_args,Value{1.0}),indice(cfv_args,Value{0.0}),indice(cfv_args,Value{2.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("regex_grupos")}, "=="))) {
+    // regex_grupos(texto, patron)
+    return cfv_regex_grupos_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  // ── SQLite ─────────────────────────────────────────────────────────────────
+#ifdef CFV_WITH_SQLITE
+  if (verdad(compara(cfv_nombre, Value{std::string("db_abrir")}, "=="))) {
+    return cfv_db_abrir_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("db_cerrar")}, "=="))) {
+    return cfv_db_cerrar_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("db_ejecutar")}, "=="))) {
+    return cfv_db_ejecutar_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("db_consulta")}, "=="))) {
+    return cfv_db_consulta_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("db_consulta_p")}, "=="))) {
+    return cfv_db_consulta_p_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("db_ultimo_id")}, "=="))) {
+    return cfv_db_ultimo_id_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("db_transaccion")}, "=="))) {
+    return cfv_db_transaccion_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("db_confirmar")}, "=="))) {
+    return cfv_db_confirmar_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("db_revertir")}, "=="))) {
+    return cfv_db_revertir_fn(indice(cfv_args,Value{0.0}));
+  }
+#endif
+  // ── HTTP Client ────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("http_post")}, "=="))) {
+    Value tipo = verdad(compara(cfv_longitud(cfv_args),Value{3.0},">=")) ? indice(cfv_args,Value{2.0}) : Value{std::string("application/json")};
+    return cfv_http_post_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),tipo);
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("http_put")}, "=="))) {
+    return cfv_http_put_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("http_delete")}, "=="))) {
+    return cfv_http_delete_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("http_solicitud")}, "=="))) {
+    Value opc = verdad(compara(cfv_longitud(cfv_args),Value{3.0},">=")) ? indice(cfv_args,Value{2.0}) : Value{std::make_shared<std::map<std::string,ForgeValue>>()};
+    return cfv_http_solicitud_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),opc);
+  }
+  // ── Canales ────────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("canal_nuevo")}, "=="))) {
+    return cfv_canal_nuevo_fn(Value{});
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("canal_enviar")}, "=="))) {
+    return cfv_canal_enviar_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("canal_recibir")}, "=="))) {
+    return cfv_canal_recibir_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("canal_cerrar")}, "=="))) {
+    return cfv_canal_cerrar_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("canal_tam")}, "=="))) {
+    return cfv_canal_tam_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("hilo_dormir")}, "=="))) {
+    return cfv_hilo_dormir_fn(indice(cfv_args,Value{0.0}));
+  }
+  // ── Sistema ────────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("env_obtener")}, "=="))) {
+    return cfv_env_obtener_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("env_establecer")}, "=="))) {
+    return cfv_env_establecer_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("proceso_ejecutar")}, "=="))) {
+    return cfv_proceso_ejecutar_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("salir")}, "=="))) {
+    Value cod = verdad(compara(cfv_longitud(cfv_args),Value{1.0},">=")) ? indice(cfv_args,Value{0.0}) : Value{0.0};
+    return cfv_salir_fn(cod);
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("pausa")}, "=="))) {
+    return cfv_pausa_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("limpiar_pantalla")}, "=="))) {
+    return cfv_limpiar_pantalla_fn(Value{});
+  }
+  // ── Fecha/Tiempo ───────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("fecha_ahora")}, "=="))) {
+    return cfv_fecha_ahora_fn(Value{});
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("fecha_formatear")}, "=="))) {
+    Value fmt = verdad(compara(cfv_longitud(cfv_args),Value{2.0},">=")) ? indice(cfv_args,Value{1.0}) : Value{std::string("%Y-%m-%d %H:%M:%S")};
+    return cfv_fecha_formatear_fn(indice(cfv_args,Value{0.0}),fmt);
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("tiempo_ms")}, "=="))) {
+    return cfv_tiempo_ms_fn(Value{});
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("tiempo_segundos")}, "=="))) {
+    return cfv_tiempo_segundos_fn(Value{});
+  }
+  // ── Colecciones ────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_unica")}, "=="))) {
+    return cfv_lista_unica_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_aplanar")}, "=="))) {
+    return cfv_lista_aplanar_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_zip")}, "=="))) {
+    return cfv_lista_zip_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("mapa_claves")}, "=="))) {
+    return cfv_mapa_claves_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("mapa_valores")}, "=="))) {
+    return cfv_mapa_valores_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("mapa_entradas")}, "=="))) {
+    return cfv_mapa_entradas_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("mapa_fusionar")}, "=="))) {
+    return cfv_mapa_fusionar_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  // ── Texto extra ────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_relleno")}, "=="))) {
+    Value c = verdad(compara(cfv_longitud(cfv_args),Value{3.0},">=")) ? indice(cfv_args,Value{2.0}) : Value{std::string("0")};
+    return cfv_texto_relleno_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),c);
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_relleno_der")}, "=="))) {
+    Value c = verdad(compara(cfv_longitud(cfv_args),Value{3.0},">=")) ? indice(cfv_args,Value{2.0}) : Value{std::string(" ")};
+    return cfv_texto_relleno_der_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),c);
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_formato")}, "=="))) {
+    return cfv_texto_formato_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
   }
   return Value{std::string("__no_builtin__", 14)};
   return Value{};

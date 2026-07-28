@@ -1,0 +1,165 @@
+// stdlib/pruebas.cfv — Framework de pruebas unitarias para C-Forge
+// Uso: importar "stdlib/pruebas.cfv"
+//
+// Ejemplo:
+//   importar "stdlib/pruebas.cfv"
+//   suite("Matematicas", {
+//       prueba("suma", funcion() { esperar_igual(2 + 2, 4) }),
+//       prueba("resta", funcion() { esperar_igual(10 - 3, 7) })
+//   })
+//   ejecutar_pruebas()
+
+sea _cfv_pruebas_total = 0
+sea _cfv_pruebas_pasadas = 0
+sea _cfv_pruebas_falladas = 0
+sea _cfv_pruebas_lista = []
+sea _cfv_suite_actual = "Global"
+
+// ── Registro de pruebas ───────────────────────────────────────────────────────
+
+funcion prueba(nombre: texto, fn: funcion): mapa {
+    retornar {"nombre": nombre, "fn": fn, "suite": _cfv_suite_actual}
+}
+
+funcion suite(nombre: texto, pruebas: lista): nulo {
+    sea suite_anterior = _cfv_suite_actual
+    _cfv_suite_actual = nombre
+    para p en pruebas {
+        _cfv_pruebas_lista = _cfv_pruebas_lista + [{"nombre": p["nombre"], "fn": p["fn"], "suite": nombre}]
+    }
+    _cfv_suite_actual = suite_anterior
+}
+
+// ── Afirmaciones ──────────────────────────────────────────────────────────────
+
+funcion esperar_igual(actual: cualquiera, esperado: cualquiera): nulo {
+    si (actual != esperado) {
+        lanzar "Esperaba {esperado} pero obtuvo {actual}"
+    }
+}
+
+funcion esperar_verdadero(valor: cualquiera): nulo {
+    si (!valor) {
+        lanzar "Esperaba verdadero pero obtuvo {valor}"
+    }
+}
+
+funcion esperar_falso(valor: cualquiera): nulo {
+    si (valor) {
+        lanzar "Esperaba falso pero obtuvo {valor}"
+    }
+}
+
+funcion esperar_nulo(valor: cualquiera): nulo {
+    si (valor != nulo) {
+        lanzar "Esperaba nulo pero obtuvo {valor}"
+    }
+}
+
+funcion esperar_no_nulo(valor: cualquiera): nulo {
+    si (valor == nulo) {
+        lanzar "Esperaba un valor no nulo"
+    }
+}
+
+funcion esperar_mayor(actual: numero, que: numero): nulo {
+    si (actual <= que) {
+        lanzar "Esperaba {actual} > {que}"
+    }
+}
+
+funcion esperar_menor(actual: numero, que: numero): nulo {
+    si (actual >= que) {
+        lanzar "Esperaba {actual} < {que}"
+    }
+}
+
+funcion esperar_contiene(lista_v: lista, elemento: cualquiera): nulo {
+    sea encontrado = falso
+    para x en lista_v {
+        si (x == elemento) {
+            encontrado = verdadero
+        }
+    }
+    si (!encontrado) {
+        lanzar "La lista no contiene {elemento}"
+    }
+}
+
+funcion esperar_lanza(fn: funcion): nulo {
+    sea lanzo = falso
+    intentar {
+        fn()
+    } capturar (e) {
+        lanzo = verdadero
+    }
+    si (!lanzo) {
+        lanzar "Esperaba que la funcion lanzara un error"
+    }
+}
+
+funcion esperar_longitud(coleccion: cualquiera, n: numero): nulo {
+    sea lon = longitud(coleccion)
+    si (lon != n) {
+        lanzar "Esperaba longitud {n} pero obtuvo {lon}"
+    }
+}
+
+// ── Ejecucion ─────────────────────────────────────────────────────────────────
+
+funcion ejecutar_pruebas(): mapa {
+    mostrar("")
+    mostrar("╔══════════════════════════════════════╗")
+    mostrar("║     C-FORGE TEST RUNNER              ║")
+    mostrar("╚══════════════════════════════════════╝")
+    mostrar("")
+
+    sea total = longitud(_cfv_pruebas_lista)
+    sea pasadas = 0
+    sea falladas = 0
+    sea suite_anterior = ""
+
+    para p en _cfv_pruebas_lista {
+        sea suite_nombre = p["suite"]
+        sea nombre = p["nombre"]
+        sea fn = p["fn"]
+
+        si (suite_nombre != suite_anterior) {
+            mostrar("  📦 {suite_nombre}")
+            suite_anterior = suite_nombre
+        }
+
+        intentar {
+            fn()
+            pasadas = pasadas + 1
+            mostrar("    ✓ {nombre}")
+        } capturar (error) {
+            falladas = falladas + 1
+            mostrar("    ✗ {nombre}")
+            mostrar("      → {error}")
+        }
+    }
+
+    mostrar("")
+    mostrar("────────────────────────────────────────")
+    sea emoji = si_expr(falladas == 0, "✅", "❌")
+    mostrar("{emoji} {pasadas}/{total} pruebas pasadas, {falladas} falladas")
+    mostrar("")
+
+    retornar {"total": total, "pasadas": pasadas, "falladas": falladas, "ok": falladas == 0}
+}
+
+funcion si_expr(condicion: booleano, si_true: cualquiera, si_false: cualquiera): cualquiera {
+    si (condicion) {
+        retornar si_true
+    }
+    retornar si_false
+}
+
+// Prueba unitaria rapida (sin registrar)
+funcion afirmar_igual(actual: cualquiera, esperado: cualquiera, mensaje: texto): nulo {
+    si (actual != esperado) {
+        lanzar "FALLO [{mensaje}]: esperaba {esperado}, obtuvo {actual}"
+    }
+    mostrar("  ✓ {mensaje}")
+}
