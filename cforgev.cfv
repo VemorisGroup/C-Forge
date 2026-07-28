@@ -364,7 +364,7 @@ funcion parse_sentencia(p: cualquiera): cualquiera {
         retornar nodo("Lanzar", nulo, [msg_expr])
     }
 
-    // intentar { ... } capturar (var) { ... }
+    // intentar { ... } capturar (var) { ... } finalmente { ... }
     si (ver(p, "intentar")) {
         avanzar(p)
         sea cuerpo_try: lista = parse_bloque(p)
@@ -374,7 +374,96 @@ funcion parse_sentencia(p: cualquiera): cualquiera {
         sea var_nombre: texto = var_tok["lexema"]
         requerir(p, ")", "Se esperaba ')'")
         sea cuerpo_cap: lista = parse_bloque(p)
-        retornar nodo("Intentar", var_nombre, [nodo("Bloque", nulo, cuerpo_try), nodo("Bloque", nulo, cuerpo_cap)])
+        sea cuerpo_fin: lista = []
+        si (ver(p, "finalmente")) {
+            avanzar(p)
+            cuerpo_fin = parse_bloque(p)
+        }
+        retornar nodo("Intentar", var_nombre, [nodo("Bloque", nulo, cuerpo_try), nodo("Bloque", nulo, cuerpo_cap), nodo("Bloque", nulo, cuerpo_fin)])
+    }
+
+    // segun (expr) { caso val { block } ... otro { block } }
+    si (ver(p, "segun")) {
+        avanzar(p)
+        requerir(p, "(", "Se esperaba '(' tras 'segun'")
+        sea expr_seg: cualquiera = parse_expresion(p)
+        requerir(p, ")", "Se esperaba ')'")
+        requerir(p, "{", "Se esperaba '{'")
+        sea casos: lista = [expr_seg]
+        mientras (no ver(p, "}") y no al_final(p)) {
+            si (ver(p, "caso")) {
+                avanzar(p)
+                sea val_caso: cualquiera = parse_expresion(p)
+                sea blq_caso: lista = parse_bloque(p)
+                agregar(casos, nodo("Caso", val_caso, blq_caso))
+            } sino si (ver(p, "otro")) {
+                avanzar(p)
+                sea blq_otro: lista = parse_bloque(p)
+                agregar(casos, nodo("Caso", nulo, blq_otro))
+            } sino {
+                avanzar(p)
+            }
+        }
+        requerir(p, "}", "Se esperaba '}' para cerrar segun")
+        retornar nodo("Segun", nulo, casos)
+    }
+
+    // enum Nombre { V1, V2, ... }
+    si (ver(p, "enum")) {
+        avanzar(p)
+        sea enum_tok: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba nombre de enum")
+        sea enum_nombre: texto = enum_tok["lexema"]
+        requerir(p, "{", "Se esperaba '{'")
+        sea variantes: lista = []
+        mientras (no ver(p, "}") y no al_final(p)) {
+            sea v_tok: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba variante")
+            agregar(variantes, nodo("EnumVal", v_tok["lexema"], []))
+            tomar(p, ",")
+        }
+        requerir(p, "}", "Se esperaba '}'")
+        tomar(p, ";")
+        retornar nodo("Enum", enum_nombre, variantes)
+    }
+
+    // clase Nombre { campos y metodos }
+    si (ver(p, "clase")) {
+        avanzar(p)
+        sea clase_tok: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba nombre de clase")
+        sea clase_nombre: texto = clase_tok["lexema"]
+        requerir(p, "{", "Se esperaba '{'")
+        sea miembros: lista = []
+        mientras (no ver(p, "}") y no al_final(p)) {
+            si (ver(p, "sea") o ver(p, "var") o ver(p, "const")) {
+                avanzar(p)
+                sea ftok: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba nombre de campo")
+                sea fnombre: texto = ftok["lexema"]
+                si (tomar(p, ":")) { avanzar(p) }
+                sea fdef: cualquiera = nodo("Nulo", nulo, [])
+                si (tomar(p, "=")) { fdef = parse_expresion(p) }
+                tomar(p, ";")
+                agregar(miembros, nodo("CampoDef", fnombre, [fdef]))
+            } sino si (ver(p, "funcion")) {
+                avanzar(p)
+                sea mn_tok: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba nombre de metodo")
+                sea mn: texto = mn_tok["lexema"]
+                requerir(p, "(", "Se esperaba '('")
+                sea mparams: lista = []
+                mientras (no ver(p, ")") y no al_final(p)) {
+                    sea ptok: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba parametro")
+                    agregar(mparams, ptok["lexema"])
+                    si (tomar(p, ":")) { avanzar(p) }
+                    si (no ver(p, ")")) { requerir(p, ",", "Se esperaba ','") }
+                }
+                requerir(p, ")", "Se esperaba ')'")
+                si (tomar(p, ":")) { avanzar(p) }
+                sea mcuerpo: lista = parse_bloque(p)
+                agregar(miembros, nodo("Funcion", mn, [nodo("Params", nulo, mparams), nodo("Bloque", nulo, mcuerpo)]))
+            } sino {
+                avanzar(p)
+            }
+        }
+        requerir(p, "}", "Se esperaba '}'")
+        retornar nodo("Clase", clase_nombre, miembros)
     }
 
     // importar "ruta/archivo.cfv"
@@ -406,8 +495,18 @@ funcion parse_expresion(p: cualquiera): cualquiera {
     retornar parse_asignacion(p)
 }
 
-funcion parse_asignacion(p: cualquiera): cualquiera {
+funcion parse_nulo_coalescente(p: cualquiera): cualquiera {
     sea izq: cualquiera = parse_logico_o(p)
+    mientras (ver(p, "??")) {
+        avanzar(p)
+        sea der: cualquiera = parse_logico_o(p)
+        izq = nodo("Binario", "??", [izq, der])
+    }
+    retornar izq
+}
+
+funcion parse_asignacion(p: cualquiera): cualquiera {
+    sea izq: cualquiera = parse_nulo_coalescente(p)
     si (tok_actual(p)["lexema"] == "=") {
         avanzar(p)
         sea der: cualquiera = parse_expresion(p)
@@ -546,6 +645,24 @@ funcion parse_postfijo(p: cualquiera): cualquiera {
             sea idx: cualquiera = parse_expresion(p)
             requerir(p, "]", "Se esperaba ']'")
             base = nodo("Indice", nulo, [base, idx])
+        } sino si (ver(p, "?.")) {
+            avanzar(p)
+            sea campo_tok2: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba campo tras '?.'")
+            sea campo2: texto = campo_tok2["lexema"]
+            si (ver(p, "(")) {
+                avanzar(p)
+                sea args2: lista = parse_argumentos(p)
+                requerir(p, ")", "Se esperaba ')'")
+                sea hijos_s: lista = [base]
+                sea si2: numero = 0
+                mientras (si2 < longitud(args2)) {
+                    agregar(hijos_s, args2[si2])
+                    si2 = si2 + 1
+                }
+                base = nodo("MetodoLlamadaSegura", campo2, hijos_s)
+            } sino {
+                base = nodo("CampoSeguro", campo2, [base])
+            }
         } sino si (ver(p, ".")) {
             avanzar(p)
             sea campo_tok: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba campo")
@@ -634,6 +751,23 @@ funcion parse_primaria(p: cualquiera): cualquiera {
         sea ex: cualquiera = parse_expresion(p)
         requerir(p, ")", "Se esperaba ')'")
         retornar ex
+    }
+
+    // Lambda: funcion(params) { body }
+    si (ver(p, "funcion")) {
+        avanzar(p)
+        requerir(p, "(", "Se esperaba '(' en lambda")
+        sea lparams: lista = []
+        mientras (no ver(p, ")") y no al_final(p)) {
+            sea ptok: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba parametro")
+            agregar(lparams, ptok["lexema"])
+            si (tomar(p, ":")) { avanzar(p) }
+            si (no ver(p, ")")) { requerir(p, ",", "Se esperaba ','") }
+        }
+        requerir(p, ")", "Se esperaba ')'")
+        si (tomar(p, ":")) { avanzar(p) }
+        sea lcuerpo: lista = parse_bloque(p)
+        retornar nodo("Lambda", nulo, [nodo("Params", nulo, lparams), nodo("Bloque", nulo, lcuerpo)])
     }
 
     // Identificadores / llamadas
@@ -1008,9 +1142,58 @@ funcion eval_expr(nodo_e: cualquiera, env: lista, fns: cualquiera): cualquiera {
             si (izq_v) { retornar verdadero }
             retornar eval_expr(nodo_e["hijos"][1], env, fns)
         }
+        // Null coalescing ??
+        si (nodo_e["valor"] == "??") {
+            sea izq_v: cualquiera = eval_expr(nodo_e["hijos"][0], env, fns)
+            si (izq_v == nulo) { retornar eval_expr(nodo_e["hijos"][1], env, fns) }
+            retornar izq_v
+        }
         sea izq: cualquiera = eval_expr(nodo_e["hijos"][0], env, fns)
         sea der: cualquiera = eval_expr(nodo_e["hijos"][1], env, fns)
         retornar eval_binario(nodo_e["valor"], izq, der)
+    }
+
+    si (t == "Lambda") {
+        sea lp: cualquiera = nodo_e["hijos"][0]
+        sea lb: cualquiera = nodo_e["hijos"][1]
+        retornar {"__lambda": verdadero, "params": lp["hijos"], "cuerpo": lb["hijos"], "env": env}
+    }
+
+    si (t == "CampoSeguro") {
+        sea base_s: cualquiera = eval_expr(nodo_e["hijos"][0], env, fns)
+        si (base_s == nulo) { retornar nulo }
+        retornar base_s[nodo_e["valor"]]
+    }
+
+    si (t == "MetodoLlamadaSegura") {
+        sea base_ms: cualquiera = eval_expr(nodo_e["hijos"][0], env, fns)
+        si (base_ms == nulo) { retornar nulo }
+        sea args_ms: lista = []
+        sea msi: numero = 1
+        mientras (msi < longitud(nodo_e["hijos"])) {
+            agregar(args_ms, eval_expr(nodo_e["hijos"][msi], env, fns))
+            msi = msi + 1
+        }
+        // Reuse MetodoLlamada logic
+        si (nodo_e["valor"] == "longitud") { retornar longitud(base_ms) }
+        si (tiene_clave(base_ms, "__clase")) {
+            sea cn_ms: texto = base_ms["__clase"]
+            sea cdef_ms: cualquiera = fns["__clase_" + cn_ms]
+            si (tiene_clave(cdef_ms["metodos"], nodo_e["valor"])) {
+                sea mdef: cualquiera = cdef_ms["metodos"][nodo_e["valor"]]
+                sea menv: lista = env_nuevo_scope(env)
+                env_declarar(menv, "esto", base_ms)
+                sea mpi: numero = 0
+                mientras (mpi < longitud(mdef["params"])) {
+                    env_declarar(menv, mdef["params"][mpi], args_ms[mpi])
+                    mpi = mpi + 1
+                }
+                sea msenal: lista = exec_bloque(mdef["cuerpo"], menv, fns)
+                si (msenal[0] == "retornar") { retornar msenal[1] }
+                retornar nulo
+            }
+        }
+        retornar nulo
     }
 
     si (t == "Indice") {
@@ -1062,6 +1245,43 @@ funcion eval_expr(nodo_e: cualquiera, env: lista, fns: cualquiera): cualquiera {
             retornar res_b
         }
 
+        // ¿Es un closure/lambda en el entorno?
+        sea maybe_lambda: cualquiera = nulo
+        intentar {
+            maybe_lambda = env_buscar(env, nombre_fn)
+        } capturar (lambda_err) {
+            maybe_lambda = nulo
+        }
+        si (maybe_lambda != nulo y tiene_clave(maybe_lambda, "__lambda")) {
+            sea lparams_v: lista = maybe_lambda["params"]
+            sea lcuerpo_v: lista = maybe_lambda["cuerpo"]
+            sea lcaptured: lista = maybe_lambda["env"]
+            sea lenv: lista = env_nuevo_scope(lcaptured)
+            sea lpi: numero = 0
+            mientras (lpi < longitud(lparams_v)) {
+                env_declarar(lenv, lparams_v[lpi], args_eval[lpi])
+                lpi = lpi + 1
+            }
+            sea lsenal: lista = exec_bloque(lcuerpo_v, lenv, fns)
+            si (lsenal[0] == "retornar") { retornar lsenal[1] }
+            retornar nulo
+        }
+
+        // ¿Es un constructor de clase?
+        sea clase_key: texto = "__clase_" + nombre_fn
+        si (tiene_clave(fns, clase_key)) {
+            sea cdef: cualquiera = fns[clase_key]
+            sea inst: cualquiera = {}
+            inst["__clase"] = nombre_fn
+            sea cfi: numero = 0
+            mientras (cfi < longitud(cdef["campos"])) {
+                sea campo_def: cualquiera = cdef["campos"][cfi]
+                inst[campo_def["nombre"]] = eval_expr(campo_def["defecto"], env, fns)
+                cfi = cfi + 1
+            }
+            retornar inst
+        }
+
         // Función definida por el usuario
         afirmar(tiene_clave(fns, nombre_fn), "función desconocida '" + nombre_fn + "'")
         sea fn_def: cualquiera = fns[nombre_fn]
@@ -1101,6 +1321,24 @@ funcion eval_expr(nodo_e: cualquiera, env: lista, fns: cualquiera): cualquiera {
         }
         si (metodo == "tiene_clave") {
             retornar tiene_clave(base, args_m[0])
+        }
+        // Dispatch de método de clase
+        si (tiene_clave(base, "__clase")) {
+            sea cn_m: texto = base["__clase"]
+            sea cdef_m: cualquiera = fns["__clase_" + cn_m]
+            si (tiene_clave(cdef_m["metodos"], metodo)) {
+                sea fn_m: cualquiera = cdef_m["metodos"][metodo]
+                sea menv_m: lista = env_nuevo_scope(env)
+                env_declarar(menv_m, "esto", base)
+                sea mpi_m: numero = 0
+                mientras (mpi_m < longitud(fn_m["params"])) {
+                    env_declarar(menv_m, fn_m["params"][mpi_m], args_m[mpi_m])
+                    mpi_m = mpi_m + 1
+                }
+                sea msenal_m: lista = exec_bloque(fn_m["cuerpo"], menv_m, fns)
+                si (msenal_m[0] == "retornar") { retornar msenal_m[1] }
+                retornar nulo
+            }
         }
         afirmar(falso, "método desconocido '" + metodo + "'")
         retornar nulo
@@ -1259,17 +1497,73 @@ funcion exec_stmt(stmt: cualquiera, env: lista, fns: cualquiera): lista {
     }
 
     si (t == "Intentar") {
-        // En modo compilado (cforgev.cpp), se usa C++ try/catch real.
-        // En modo bootstrap (cforgev.cfv interpretado), ejecutamos el bloque try
-        // sin captura real de excepciones (limitación conocida del modo bootstrap).
-        sea var_err: texto = stmt["valor"]
+        // En modo compilado (cforgev.cpp), se usa C++ try/catch real con finalmente.
+        // En modo bootstrap, ejecutamos el bloque try sin captura real.
         sea blq_try: cualquiera = stmt["hijos"][0]
-        sea blq_cap: cualquiera = stmt["hijos"][1]
+        sea blq_fin: cualquiera = stmt["hijos"][2]
         sea scope_int: lista = env_nuevo_scope(env)
         sea res_int: lista = exec_bloque(blq_try["hijos"], scope_int, fns)
+        // Ejecutar finalmente si existe
+        si (longitud(blq_fin["hijos"]) > 0) {
+            sea scope_fin: lista = env_nuevo_scope(env)
+            exec_bloque(blq_fin["hijos"], scope_fin, fns)
+        }
         si (res_int[0] != "normal") {
             retornar res_int
         }
+        retornar ["normal", nulo]
+    }
+
+    si (t == "Segun") {
+        sea expr_val: cualquiera = eval_expr(stmt["hijos"][0], env, fns)
+        sea num_casos: numero = longitud(stmt["hijos"])
+        sea ii_seg: numero = 1
+        mientras (ii_seg < num_casos) {
+            sea caso_nodo: cualquiera = stmt["hijos"][ii_seg]
+            sea es_otro: booleano = caso_nodo["valor"] == nulo
+            si (es_otro o expr_val == eval_expr(caso_nodo["valor"], env, fns)) {
+                sea scope_seg: lista = env_nuevo_scope(env)
+                sea res_seg: lista = exec_bloque(caso_nodo["hijos"], scope_seg, fns)
+                si (res_seg[0] != "normal") { retornar res_seg }
+                retornar ["normal", nulo]
+            }
+            ii_seg = ii_seg + 1
+        }
+        retornar ["normal", nulo]
+    }
+
+    si (t == "Enum") {
+        sea en_nombre: texto = stmt["valor"]
+        sea en_mapa: cualquiera = {}
+        en_mapa["__enum"] = en_nombre
+        sea ei: numero = 0
+        mientras (ei < longitud(stmt["hijos"])) {
+            sea vname: texto = stmt["hijos"][ei]["valor"]
+            en_mapa[vname] = vname
+            ei = ei + 1
+        }
+        env_declarar(env, en_nombre, en_mapa)
+        retornar ["normal", nulo]
+    }
+
+    si (t == "Clase") {
+        sea cn: texto = stmt["valor"]
+        sea campos_def: lista = []
+        sea metodos_def: cualquiera = {}
+        sea ci: numero = 0
+        mientras (ci < longitud(stmt["hijos"])) {
+            sea m: cualquiera = stmt["hijos"][ci]
+            si (m["tipo"] == "CampoDef") {
+                agregar(campos_def, {"nombre": m["valor"], "defecto": m["hijos"][0]})
+            } sino si (m["tipo"] == "Funcion") {
+                sea fn_p: cualquiera = m["hijos"][0]
+                sea fn_b: cualquiera = m["hijos"][1]
+                metodos_def[m["valor"]] = {"params": fn_p["hijos"], "cuerpo": fn_b["hijos"]}
+            }
+            ci = ci + 1
+        }
+        sea clase_def: cualquiera = {"campos": campos_def, "metodos": metodos_def}
+        fns["__clase_" + cn] = clase_def
         retornar ["normal", nulo]
     }
 
