@@ -1,0 +1,116 @@
+#!/bin/bash
+# cfpkg — Package manager de C-Forge
+# Uso: cfpkg install usuario/repo[@version]
+#      cfpkg remove nombre
+#      cfpkg list
+#      cfpkg info nombre
+#      cfpkg init nombre version descripcion
+
+CFORGEV_BIN="$(dirname "$0")/cforgev_new"
+
+# Si no hay binario local, buscar en PATH
+if [ ! -f "$CFORGEV_BIN" ]; then
+    CFORGEV_BIN=$(which cforgev 2>/dev/null || which cforgev_new 2>/dev/null)
+fi
+
+if [ -z "$CFORGEV_BIN" ] || [ ! -f "$CFORGEV_BIN" ]; then
+    echo "Error: no se encontro cforgev_new. Compilalo primero:"
+    echo "  g++ -std=c++20 -O2 -o cforgev_new cforgev.cpp"
+    exit 1
+fi
+
+STDLIB_DIR="$(dirname "$0")/stdlib"
+CMD="$1"
+shift
+
+case "$CMD" in
+    install)
+        SPEC="$1"
+        if [ -z "$SPEC" ]; then
+            echo "Uso: cfpkg install usuario/repositorio[@version]"
+            exit 1
+        fi
+        "$CFORGEV_BIN" <(cat <<CFV
+importar "${STDLIB_DIR}/pkgmgr.cfv"
+importar "${STDLIB_DIR}/json.cfv"
+cfpkg_instalar("${SPEC}")
+CFV
+) ;;
+
+    remove|uninstall)
+        NOMBRE="$1"
+        if [ -z "$NOMBRE" ]; then
+            echo "Uso: cfpkg remove nombre"
+            exit 1
+        fi
+        "$CFORGEV_BIN" <(cat <<CFV
+importar "${STDLIB_DIR}/pkgmgr.cfv"
+importar "${STDLIB_DIR}/json.cfv"
+cfpkg_desinstalar("${NOMBRE}")
+CFV
+) ;;
+
+    list|ls)
+        "$CFORGEV_BIN" <(cat <<CFV
+importar "${STDLIB_DIR}/pkgmgr.cfv"
+importar "${STDLIB_DIR}/json.cfv"
+sea pkgs = cfpkg_listar()
+si (longitud(pkgs) == 0) {
+    mostrar("No hay paquetes instalados.")
+    mostrar("Instala uno con: cfpkg install usuario/repo")
+} sino {
+    mostrar("Paquetes instalados:")
+    para p en pkgs {
+        mostrar("  {p["nombre"]} v{p["version"]}  {p["descripcion"]}")
+    }
+}
+CFV
+) ;;
+
+    info)
+        NOMBRE="$1"
+        if [ -z "$NOMBRE" ]; then
+            echo "Uso: cfpkg info nombre"
+            exit 1
+        fi
+        "$CFORGEV_BIN" <(cat <<CFV
+importar "${STDLIB_DIR}/pkgmgr.cfv"
+importar "${STDLIB_DIR}/json.cfv"
+cfpkg_info("${NOMBRE}")
+CFV
+) ;;
+
+    init)
+        NOMBRE="${1:-mi-paquete}"
+        VERSION="${2:-0.1.0}"
+        DESC="${3:-Un paquete de C-Forge}"
+        "$CFORGEV_BIN" <(cat <<CFV
+importar "${STDLIB_DIR}/pkgmgr.cfv"
+importar "${STDLIB_DIR}/json.cfv"
+cfpkg_init("${NOMBRE}", "${VERSION}", "${DESC}")
+CFV
+) ;;
+
+    *)
+        echo "C-Forge Package Manager"
+        echo ""
+        echo "Uso:"
+        echo "  cfpkg install usuario/repo         Instalar paquete desde GitHub"
+        echo "  cfpkg install usuario/repo@v1.0    Instalar version especifica"
+        echo "  cfpkg remove nombre                Desinstalar paquete"
+        echo "  cfpkg list                         Listar paquetes instalados"
+        echo "  cfpkg info nombre                  Ver info de un paquete"
+        echo "  cfpkg init nombre version desc     Inicializar nuevo paquete"
+        echo ""
+        echo "Ejemplo de cforge.json (para publicar tu paquete):"
+        echo '  {'
+        echo '    "nombre": "mi-lib",'
+        echo '    "version": "1.0.0",'
+        echo '    "descripcion": "Mi libreria",'
+        echo '    "autor": "tuUsuario",'
+        echo '    "licencia": "MIT",'
+        echo '    "archivos": ["src/mi-lib.cfv"],'
+        echo '    "dependencias": {}'
+        echo '  }'
+        ;;
+esac

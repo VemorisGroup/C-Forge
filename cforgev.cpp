@@ -161,6 +161,24 @@ static Value cfv_file_read(const Value&ruta){return cfv_arena_stage(cfv_leer_arc
 static Value cfv_file_write(const Value&ruta,const Value&contenido){return cfv_escribir_archivo(ruta,contenido);}
 static Value cfv_file_append(const Value&ruta,const Value&contenido){if(contenido.index()!=2)throw std::runtime_error("el contenido debe ser texto");auto p=std::filesystem::path(ruta_archivo(ruta));if(p.has_parent_path())std::filesystem::create_directories(p.parent_path());std::ofstream f(p,std::ios::binary|std::ios::app);if(!f)throw std::runtime_error("no se pudo anexar al archivo");f<<std::get<std::string>(contenido.data);return Value{};}
 static Value cfv_existe_archivo(const Value&ruta){return std::filesystem::exists(ruta_archivo(ruta));}
+static Value cfv_listar_directorio(const Value&ruta){auto path=std::filesystem::path(ruta_archivo(ruta));auto result=std::make_shared<std::vector<Value>>();if(!std::filesystem::exists(path))return result;for(const auto&e:std::filesystem::directory_iterator(path))result->push_back(Value{e.path().filename().string()});return result;}
+static Value cfv_crear_directorio(const Value&ruta){std::filesystem::create_directories(ruta_archivo(ruta));return Value{};}
+static Value cfv_eliminar_archivo(const Value&ruta){std::filesystem::remove_all(ruta_archivo(ruta));return Value{};}
+// HTTP GET via curl (no dependency on libcurl — uses system curl)
+static Value cfv_http_get(const Value&url_v){
+  if(url_v.index()!=2)throw std::runtime_error("http_get requiere una URL de texto");
+  const std::string&url=std::get<std::string>(url_v.data);
+  if(url.substr(0,4)!="http")throw std::runtime_error("http_get solo acepta URLs http/https");
+  // Escape single quotes in URL for shell safety
+  std::string safe_url;for(char c:url){if(c=='\'')safe_url+="'\\''";else safe_url+=c;}
+  std::string cmd="curl -s -L --max-time 30 --max-filesize 16777216 '"+safe_url+"' 2>&1";
+  FILE*pipe=popen(cmd.c_str(),"r");
+  if(!pipe)throw std::runtime_error("http_get: no se pudo ejecutar curl");
+  std::string output;char buf[4096];
+  while(std::fgets(buf,sizeof(buf),pipe))output+=buf;
+  pclose(pipe);
+  return Value{output};
+}
 static Value cfv_array_fast(const Value&input){auto list=std::get_if<Lista>(&input.data);if(!list)throw std::runtime_error("array_fast requiere una lista numérica");auto output=std::make_shared<std::vector<double>>();output->reserve((*list)->size());for(const auto&value:**list)output->push_back(numero(value));return output;}
 static Value cfv_matrix(const Value&rows_value,const Value&columns_value,const Value&fill_value=Value{0.0}){double rows_number=numero(rows_value),columns_number=numero(columns_value),fill=numero(fill_value);if(rows_number<0||columns_number<0||std::floor(rows_number)!=rows_number||std::floor(columns_number)!=columns_number||rows_number*columns_number>10000000.0)throw std::runtime_error("dimensiones de matrix inválidas");auto matrix=std::make_shared<CfvDenseMatrix>();matrix->rows=(size_t)rows_number;matrix->columns=(size_t)columns_number;matrix->values.assign(matrix->rows*matrix->columns,fill);return matrix;}
 #ifdef _WIN32
@@ -2009,6 +2027,18 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
   if (verdad(compara(cfv_nombre, Value{std::string("existe_archivo", 14)}, "=="))) {
     (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("existe_archivo requiere un argumento", 36)}));
     return cfv_existe_archivo(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("listar_directorio")}, "=="))) {
+    return cfv_listar_directorio(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("crear_directorio")}, "=="))) {
+    return cfv_crear_directorio(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("eliminar_archivo")}, "=="))) {
+    return cfv_eliminar_archivo(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("http_get")}, "=="))) {
+    return cfv_http_get(indice(cfv_args, Value{0.0}));
   }
   if (verdad(compara(cfv_nombre, Value{std::string("afirmar", 7)}, "=="))) {
     if (verdad(compara(cfv_longitud(cfv_args), Value{2.0}, "=="))) {
