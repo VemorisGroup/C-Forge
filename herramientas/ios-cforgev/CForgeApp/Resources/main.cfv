@@ -1,0 +1,24 @@
+// main.cfv — Script principal de la app iOS C-Forge
+// Agregar al bundle de Xcode (Resources group)
+
+sea contador = 0
+sea nombre_app = "Mi App C-Forge iOS"
+
+mostrar("Bienvenido a {nombre_app}!")
+
+// Llamada desde ContentView.swift -> vm.callAction()
+funcion on_boton_presionado(): texto {
+    contador += 1
+    retornar "Presionado {contador} veces"
+}
+
+// Finanzas
+funcion calcular_prestamo(monto: numero, tasa_anual: numero, meses: numero): numero {
+    sea tasa_mes = tasa_anual / 100.0 / 12.0
+    sea cuota = monto * tasa_mes / (1.0 - potencia(1.0 + tasa_mes, -meses))
+    retornar cuota
+}
+
+// Ejemplo de uso
+sea cuota = calcular_prestamo(100000, 12.5, 60)
+mostrar("Cuota mensual: {cuota}")
