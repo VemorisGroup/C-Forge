@@ -1,0 +1,38 @@
+// stdlib/regex.cfv -- Expresiones regulares nativas
+// Uso: importar "stdlib/regex.cfv"
+
+// El patron coincide con el texto completo?
+funcion regex_coincidir(patron: texto, txt: texto): booleano {
+    retornar cfv_regex_coincidir(patron, txt)
+}
+
+// Primer match (nulo si no hay)
+funcion regex_buscar(patron: texto, txt: texto): cualquiera {
+    retornar cfv_regex_buscar(patron, txt)
+}
+
+// Todos los matches
+funcion regex_buscar_todos(patron: texto, txt: texto): lista {
+    retornar cfv_regex_buscar_todos(patron, txt)
+}
+
+// Reemplazar matches con un texto
+funcion regex_reemplazar(patron: texto, txt: texto, reemplazo: texto): texto {
+    retornar cfv_regex_reemplazar(patron, txt, reemplazo)
+}
+
+// Dividir texto por patron
+funcion regex_dividir(patron: texto, txt: texto): lista {
+    retornar cfv_regex_dividir(patron, txt)
+}
+
+// Helpers comunes
+funcion es_email(txt: texto): booleano {
+    retornar regex_coincidir("^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$", txt)
+}
+funcion es_numero_txt(txt: texto): booleano {
+    retornar regex_coincidir("^-?[0-9]+(\\.[0-9]+)?$", txt)
+}
+funcion es_url(txt: texto): booleano {
+    retornar regex_coincidir("^https?://", txt)
+}

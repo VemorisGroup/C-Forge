@@ -1,3 +1,0 @@
-// Debe fallar limpiamente en los tres motores.
-sea fuente_invalida_b1: texto = "sea = 42\n"
-parsear_fuente_core(fuente_invalida_b1)

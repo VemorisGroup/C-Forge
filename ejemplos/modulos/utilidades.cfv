@@ -1,3 +1,0 @@
-funcion presentar(nombre) {
-    retornar "Hola " + nombre + " desde un módulo C-Forge";
-}

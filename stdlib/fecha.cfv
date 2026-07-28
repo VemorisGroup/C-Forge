@@ -1,0 +1,58 @@
+// stdlib/fecha.cfv -- Fecha y hora
+// Uso: importar "stdlib/fecha.cfv"
+
+// Timestamp actual en milisegundos (epoch Unix)
+funcion fecha_ahora_ms(): numero {
+    retornar cfv_fecha_ahora_ms()
+}
+
+// Fecha actual como mapa {anio, mes, dia, hora, minuto, segundo, dia_semana}
+funcion fecha_ahora(): cualquiera {
+    retornar cfv_fecha_ahora()
+}
+
+// Helper interno: rellenar con ceros a la izquierda
+funcion _rellenar_izq(s: texto, ancho: numero): texto {
+    mientras (longitud(s) < ancho) {
+        s = "0" + s
+    }
+    retornar s
+}
+
+// Formatear fecha. Patrones: YYYY, MM, DD, HH, mm, SS
+funcion fecha_formato(fecha: cualquiera, patron: texto): texto {
+    sea resultado: texto = patron
+    resultado = texto_reemplazar(resultado, "YYYY", _rellenar_izq(a_texto(fecha["anio"]), 4))
+    resultado = texto_reemplazar(resultado, "MM",   _rellenar_izq(a_texto(fecha["mes"]), 2))
+    resultado = texto_reemplazar(resultado, "DD",   _rellenar_izq(a_texto(fecha["dia"]), 2))
+    resultado = texto_reemplazar(resultado, "HH",   _rellenar_izq(a_texto(fecha["hora"]), 2))
+    resultado = texto_reemplazar(resultado, "mm",   _rellenar_izq(a_texto(fecha["minuto"]), 2))
+    resultado = texto_reemplazar(resultado, "SS",   _rellenar_izq(a_texto(fecha["segundo"]), 2))
+    retornar resultado
+}
+
+// Diferencias
+funcion fecha_diff_ms(t1: numero, t2: numero): numero { retornar t2 - t1 }
+funcion fecha_diff_s(t1: numero, t2: numero): numero { retornar (t2 - t1) / 1000 }
+funcion fecha_diff_dias(t1: numero, t2: numero): numero {
+    retornar a_numero(piso((t2 - t1) / 86400000))
+}
+
+// Nombres en espanol (ASCII)
+sea DIAS_SEMANA: lista = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]
+sea MESES: lista = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+                    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+
+funcion fecha_nombre_mes(mes: numero): texto {
+    afirmar(mes >= 1 y mes <= 12, "mes invalido")
+    retornar MESES[mes - 1]
+}
+funcion fecha_nombre_dia(dia_semana: numero): texto {
+    afirmar(dia_semana >= 0 y dia_semana <= 6, "dia invalido (0=lunes)")
+    retornar DIAS_SEMANA[dia_semana]
+}
+
+// Es anno bisiesto?
+funcion es_bisiesto(anio: numero): booleano {
+    retornar (anio % 4 == 0 y anio % 100 != 0) o (anio % 400 == 0)
+}

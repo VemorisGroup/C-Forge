@@ -1,0 +1,185 @@
+// stdlib/colecciones.cfv -- Cola, Pila, Conjunto, Heap
+// Uso: importar "stdlib/colecciones.cfv"
+
+// Cola (FIFO)
+funcion cola_nueva(): cualquiera {
+    retornar {"__tipo": "Cola", "datos": []}
+}
+funcion cola_encolar(q: cualquiera, valor: cualquiera): nulo {
+    q["datos"].agregar(valor)
+}
+funcion cola_desencolar(q: cualquiera): cualquiera {
+    afirmar(longitud(q["datos"]) > 0, "cola vacia")
+    sea datos: cualquiera = q["datos"]
+    sea val: cualquiera = datos[0]
+    sea nueva: lista = []
+    sea i: numero = 1
+    mientras (i < longitud(datos)) {
+        nueva.agregar(datos[i])
+        i += 1
+    }
+    q["datos"] = nueva
+    retornar val
+}
+funcion cola_frente(q: cualquiera): cualquiera {
+    afirmar(longitud(q["datos"]) > 0, "cola vacia")
+    retornar q["datos"][0]
+}
+funcion cola_vacia(q: cualquiera): booleano {
+    retornar longitud(q["datos"]) == 0
+}
+funcion cola_tam(q: cualquiera): numero {
+    retornar longitud(q["datos"])
+}
+
+// Pila (LIFO)
+funcion pila_nueva(): cualquiera {
+    retornar {"__tipo": "Pila", "datos": []}
+}
+funcion pila_push(p: cualquiera, valor: cualquiera): nulo {
+    p["datos"].agregar(valor)
+}
+funcion pila_pop(p: cualquiera): cualquiera {
+    afirmar(longitud(p["datos"]) > 0, "pila vacia")
+    sea datos: cualquiera = p["datos"]
+    sea n: numero = longitud(datos)
+    sea val: cualquiera = datos[n - 1]
+    sea nueva: lista = []
+    sea i: numero = 0
+    mientras (i < n - 1) {
+        nueva.agregar(datos[i])
+        i += 1
+    }
+    p["datos"] = nueva
+    retornar val
+}
+funcion pila_tope(p: cualquiera): cualquiera {
+    afirmar(longitud(p["datos"]) > 0, "pila vacia")
+    sea datos: cualquiera = p["datos"]
+    retornar datos[longitud(datos) - 1]
+}
+funcion pila_vacia(p: cualquiera): booleano {
+    retornar longitud(p["datos"]) == 0
+}
+funcion pila_tam(p: cualquiera): numero {
+    retornar longitud(p["datos"])
+}
+
+// Conjunto
+funcion conjunto_nuevo(): cualquiera {
+    retornar {"__tipo": "Conjunto", "datos": []}
+}
+funcion conjunto_agregar(s: cualquiera, valor: cualquiera): nulo {
+    si (no conjunto_contiene(s, valor)) {
+        s["datos"].agregar(valor)
+    }
+}
+funcion conjunto_contiene(s: cualquiera, valor: cualquiera): booleano {
+    para item en s["datos"] {
+        si (item == valor) { retornar verdadero }
+    }
+    retornar falso
+}
+funcion conjunto_quitar(s: cualquiera, valor: cualquiera): nulo {
+    sea nueva: lista = []
+    para item en s["datos"] {
+        si (item != valor) { nueva.agregar(item) }
+    }
+    s["datos"] = nueva
+}
+funcion conjunto_tam(s: cualquiera): numero {
+    retornar longitud(s["datos"])
+}
+funcion conjunto_union(a: cualquiera, b: cualquiera): cualquiera {
+    sea r: cualquiera = conjunto_nuevo()
+    para item en a["datos"] { conjunto_agregar(r, item) }
+    para item en b["datos"] { conjunto_agregar(r, item) }
+    retornar r
+}
+funcion conjunto_interseccion(a: cualquiera, b: cualquiera): cualquiera {
+    sea r: cualquiera = conjunto_nuevo()
+    para item en a["datos"] {
+        si (conjunto_contiene(b, item)) { conjunto_agregar(r, item) }
+    }
+    retornar r
+}
+funcion conjunto_diferencia(a: cualquiera, b: cualquiera): cualquiera {
+    sea r: cualquiera = conjunto_nuevo()
+    para item en a["datos"] {
+        si (no conjunto_contiene(b, item)) { conjunto_agregar(r, item) }
+    }
+    retornar r
+}
+funcion conjunto_a_lista(s: cualquiera): lista {
+    retornar s["datos"]
+}
+
+// Heap (min-heap)
+funcion heap_nuevo(): cualquiera {
+    retornar {"__tipo": "Heap", "datos": []}
+}
+funcion _heap_padre(i: numero): numero { retornar a_numero(piso((i - 1) / 2)) }
+funcion _heap_hij_izq(i: numero): numero { retornar 2 * i + 1 }
+funcion _heap_hij_der(i: numero): numero { retornar 2 * i + 2 }
+
+funcion heap_insertar(h: cualquiera, valor: cualquiera): nulo {
+    h["datos"].agregar(valor)
+    sea datos: cualquiera = h["datos"]
+    sea i: numero = longitud(datos) - 1
+    mientras (i > 0) {
+        sea pp: numero = _heap_padre(i)
+        si (datos[i] < datos[pp]) {
+            sea tmp: cualquiera = datos[i]
+            datos[i] = datos[pp]
+            datos[pp] = tmp
+            i = pp
+        } sino {
+            romper
+        }
+    }
+}
+
+funcion heap_extraer_min(h: cualquiera): cualquiera {
+    sea datos: cualquiera = h["datos"]
+    afirmar(longitud(datos) > 0, "heap vacio")
+    sea min: cualquiera = datos[0]
+    sea n: numero = longitud(datos)
+    datos[0] = datos[n - 1]
+    sea nueva: lista = []
+    sea i: numero = 0
+    mientras (i < n - 1) {
+        nueva.agregar(datos[i])
+        i += 1
+    }
+    h["datos"] = nueva
+    datos = h["datos"]
+    sea idx: numero = 0
+    sea cont: booleano = verdadero
+    mientras (cont) {
+        sea izq: numero = _heap_hij_izq(idx)
+        sea der: numero = _heap_hij_der(idx)
+        sea menor: numero = idx
+        si (izq < longitud(datos) y datos[izq] < datos[menor]) { menor = izq }
+        si (der < longitud(datos) y datos[der] < datos[menor]) { menor = der }
+        si (menor != idx) {
+            sea tmp: cualquiera = datos[idx]
+            datos[idx] = datos[menor]
+            datos[menor] = tmp
+            idx = menor
+        } sino {
+            cont = falso
+        }
+    }
+    retornar min
+}
+
+funcion heap_min(h: cualquiera): cualquiera {
+    afirmar(longitud(h["datos"]) > 0, "heap vacio")
+    retornar h["datos"][0]
+}
+funcion heap_tam(h: cualquiera): numero {
+    retornar longitud(h["datos"])
+}
+funcion heap_vacio(h: cualquiera): booleano {
+    retornar longitud(h["datos"]) == 0
+}

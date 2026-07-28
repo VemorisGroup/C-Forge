@@ -1,0 +1,84 @@
+// Test 1: Compound assignments
+sea x = 10;
+x += 5;
+mostrar(x);   // 15
+x -= 3;
+mostrar(x);   // 12
+x *= 2;
+mostrar(x);   // 24
+x /= 4;
+mostrar(x);   // 6
+x %= 4;
+mostrar(x);   // 2
+
+// Test 2: Ternary operator
+sea a = 5;
+sea resultado = a > 3 ? "grande" : "pequeño";
+mostrar(resultado);  // grande
+
+// Test 3: en operator (membership)
+sea lista = [1, 2, 3, 4, 5];
+mostrar(3 en lista);   // verdadero
+mostrar(9 en lista);   // falso
+
+// Test 4: Spread in list literals
+sea nums = [1, 2, 3];
+sea mas = [...nums, 4, 5];
+mostrar(mas);  // [1, 2, 3, 4, 5]
+
+// Test 5: Destructuring list
+sea [p, q, r] = [10, 20, 30];
+mostrar(p);  // 10
+mostrar(q);  // 20
+
+// Test 6: Destructuring map
+sea mapa = {"x": 100, "y": 200};
+sea {x, y} = mapa;
+mostrar(x);  // 100
+mostrar(y);  // 200
+
+// Test 7: Default parameters
+funcion saludar(nombre, saludo = "Hola") {
+  mostrar("{saludo}, {nombre}!");
+}
+saludar("Mundo");       // Hola, Mundo!
+saludar("C-Forge", "Hey");  // Hey, C-Forge!
+
+// Test 8: Variadic parameters
+funcion sumar(...nums) {
+  sea total = 0;
+  para n en nums {
+    total += n;
+  }
+  retornar total;
+}
+mostrar(sumar(1, 2, 3, 4, 5));  // 15
+
+// Test 9: Class inheritance with extiende
+clase Animal {
+  sea nombre = "animal";
+  funcion hablar() {
+    retornar "...";
+  }
+  funcion getNombre() {
+    retornar esto.nombre;
+  }
+}
+
+clase Perro extiende Animal {
+  sea nombre = "perro";
+  funcion hablar() {
+    retornar "Guau!";
+  }
+}
+
+sea p2 = Animal();
+sea d = Perro();
+mostrar(p2.hablar());     // ...
+mostrar(d.hablar());      // Guau!
+mostrar(d.getNombre());   // perro (inherited method, pero accede a esto.nombre del Perro)
+
+// Test 10: es operator (instanceof)
+mostrar(d es Perro);    // verdadero
+mostrar(d es Animal);   // verdadero (via inheritance chain)
+mostrar(p2 es Perro);   // falso

@@ -1,0 +1,43 @@
+// stdlib/base64.cfv -- Codificacion Base64 y hashing
+// Uso: importar "stdlib/base64.cfv"
+
+// Base64
+funcion base64_codificar(txt: texto): texto {
+    retornar cfv_base64_codificar(txt)
+}
+funcion base64_decodificar(txt: texto): texto {
+    retornar cfv_base64_decodificar(txt)
+}
+
+// Hashing
+funcion sha256(txt: texto): texto {
+    retornar cfv_sha256(txt)
+}
+funcion md5(txt: texto): texto {
+    retornar cfv_md5(txt)
+}
+
+// Hash simple djb2 (no criptografico)
+funcion hash_simple(txt: texto): numero {
+    sea h: numero = 5381
+    sea i: numero = 0
+    mientras (i < longitud(txt)) {
+        sea c: numero = cfv_codigo_char(txt[i])
+        h = (h * 33 + c) % 4294967296
+        i += 1
+    }
+    retornar h
+}
+
+// URL encoding
+funcion url_codificar(txt: texto): texto {
+    retornar cfv_url_codificar(txt)
+}
+funcion url_decodificar(txt: texto): texto {
+    retornar cfv_url_decodificar(txt)
+}
+
+// Codigo ASCII de un caracter
+funcion codigo_char(c: texto): numero {
+    retornar cfv_codigo_char(c)
+}

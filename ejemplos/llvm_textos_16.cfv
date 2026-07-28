@@ -1,8 +1,0 @@
-funcion saludar(nombre: texto): texto {
-    retornar "Hola " + nombre
-}
-
-sea creador: texto = "Javier"
-sea mensaje: texto = saludar(creador)
-mostrar(mensaje)
-mostrar(mensaje == "Hola Javier")

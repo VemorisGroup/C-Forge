@@ -1,0 +1,59 @@
+// stdlib/aleatorio.cfv -- Numeros aleatorios
+// Uso: importar "stdlib/aleatorio.cfv"
+
+// Real aleatorio [min, max)
+funcion aleatorio_uniforme(min: numero, max: numero): numero {
+    retornar cfv_aleatorio_uniforme(min, max)
+}
+
+// Real aleatorio [0.0, 1.0)
+funcion aleatorio(): numero {
+    retornar cfv_aleatorio_uniforme(0.0, 1.0)
+}
+
+// Entero aleatorio en [min, max] (ambos inclusive)
+funcion aleatorio_entero(min: numero, max: numero): numero {
+    afirmar(max >= min, "max debe ser >= min")
+    retornar min + a_numero(piso(cfv_aleatorio_uniforme(0.0, 1.0) * (max - min + 1)))
+}
+
+// Elemento aleatorio de una lista
+funcion aleatorio_de(lista_val: lista): cualquiera {
+    afirmar(longitud(lista_val) > 0, "lista vacia")
+    sea idx: numero = aleatorio_entero(0, longitud(lista_val) - 1)
+    retornar lista_val[idx]
+}
+
+// Mezclar una lista (Fisher-Yates in-place)
+funcion mezclar(lst: lista): lista {
+    sea n: numero = longitud(lst)
+    sea i: numero = n - 1
+    mientras (i > 0) {
+        sea j: numero = aleatorio_entero(0, i)
+        sea tmp: cualquiera = lst[i]
+        lst[i] = lst[j]
+        lst[j] = tmp
+        i -= 1
+    }
+    retornar lst
+}
+
+// Muestreo sin reemplazo -- k elementos aleatorios de lista
+funcion muestra(lst: lista, k: numero): lista {
+    afirmar(k >= 0 y k <= longitud(lst), "k fuera de rango")
+    sea copia: lista = []
+    para item en lst { copia.agregar(item) }
+    mezclar(copia)
+    sea resultado: lista = []
+    sea i: numero = 0
+    mientras (i < k) {
+        resultado.agregar(copia[i])
+        i += 1
+    }
+    retornar resultado
+}
+
+// Booleano aleatorio con probabilidad p de verdadero
+funcion aleatorio_bool(p: numero): booleano {
+    retornar cfv_aleatorio_uniforme(0.0, 1.0) < p
+}

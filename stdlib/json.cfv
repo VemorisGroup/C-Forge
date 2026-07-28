@@ -1,0 +1,41 @@
+// stdlib/json.cfv -- JSON parse + serializar
+// Uso: importar "stdlib/json.cfv"
+
+// Serializar valor a JSON
+funcion json_serializar(val: cualquiera): texto {
+    retornar cfv_json_serializar(val)
+}
+
+// Parsear JSON a valor C-Forge
+funcion json_parsear(txt: texto): cualquiera {
+    retornar cfv_json_parsear(txt)
+}
+
+// JSON bonito (indentado)
+funcion json_bonito(val: cualquiera): texto {
+    retornar cfv_json_bonito(val)
+}
+
+// Verificar si un texto es JSON valido
+funcion json_valido(txt: texto): booleano {
+    intentar {
+        json_parsear(txt)
+        retornar verdadero
+    } capturar (e) {
+        retornar falso
+    }
+}
+
+// Acceso seguro a clave anidada: json_get(obj, ["clave1", "sub"])
+funcion json_get(obj: cualquiera, ruta: lista): cualquiera {
+    sea actual: cualquiera = obj
+    para clave en ruta {
+        si (actual == nulo) { retornar nulo }
+        intentar {
+            actual = actual[clave]
+        } capturar (e) {
+            retornar nulo
+        }
+    }
+    retornar actual
+}

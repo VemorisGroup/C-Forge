@@ -1,3 +1,0 @@
-numero = 20;
-resultado = numero * 5 + 2;
-mostrar(resultado);
