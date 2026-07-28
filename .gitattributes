@@ -16,6 +16,10 @@ outputs/cforge-master binary linguist-vendored=true
 # GitHub Linguist — C-Forge es el lenguaje del repo
 *.cfv linguist-language=C-Forge linguist-detectable=true
 
+# Ejemplos con código embebido de otros lenguajes — no contar
+ejemplos/calculadora_app.cfv linguist-vendored=true
+ejemplos/interop_colecciones_16.cfv linguist-vendored=true
+
 # Todo lo demás no cuenta en las estadísticas
 *.cpp linguist-generated=true
 *.h   linguist-generated=true
