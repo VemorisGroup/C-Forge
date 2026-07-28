@@ -1,0 +1,253 @@
+// stdlib/cache.cfv — Cache LRU en memoria para C-Forge
+// Implementa: LRU cache, cache con TTL (expiracion), cache de disco
+
+// ── Cache LRU (Least Recently Used) ──────────────────────────────────────────
+// Un cache LRU descarta el elemento menos usado recientemente cuando alcanza
+// su capacidad maxima.
+//
+// Uso:
+//   sea c = cache_crear(100)          // capacidad 100 elementos
+//   cache_poner(c, "clave", valor)
+//   sea v = cache_obtener(c, "clave") // retorna nulo si no existe
+//   cache_limpiar(c)
+
+funcion cache_crear(capacidad: numero): mapa {
+    retornar {
+        "capacidad": capacidad,
+        "datos": {},       // clave → {valor, atime, accesos}
+        "tam": 0,
+        "hits": 0,
+        "misses": 0,
+        "evictions": 0
+    }
+}
+
+funcion cache_poner(cache: mapa, clave: texto, valor: cualquiera): nulo {
+    sea ahora = tiempo_ms()
+
+    // Si ya existe, actualizar
+    si (tiene_clave(cache["datos"], clave)) {
+        cache["datos"][clave]["valor"] = valor
+        cache["datos"][clave]["atime"] = ahora
+        cache["datos"][clave]["accesos"] = cache["datos"][clave]["accesos"] + 1
+        retornar nulo
+    }
+
+    // Si llegamos al limite, desalojar el menos usado
+    si (cache["tam"] >= cache["capacidad"]) {
+        cache_evictar(cache)
+    }
+
+    cache["datos"][clave] = {
+        "valor": valor,
+        "atime": ahora,
+        "accesos": 1
+    }
+    cache["tam"] = cache["tam"] + 1
+}
+
+funcion cache_obtener(cache: mapa, clave: texto): cualquiera {
+    si (!tiene_clave(cache["datos"], clave)) {
+        cache["misses"] = cache["misses"] + 1
+        retornar nulo
+    }
+    sea ahora = tiempo_ms()
+    cache["datos"][clave]["atime"] = ahora
+    cache["datos"][clave]["accesos"] = cache["datos"][clave]["accesos"] + 1
+    cache["hits"] = cache["hits"] + 1
+    retornar cache["datos"][clave]["valor"]
+}
+
+funcion cache_tiene(cache: mapa, clave: texto): booleano {
+    retornar tiene_clave(cache["datos"], clave)
+}
+
+funcion cache_eliminar(cache: mapa, clave: texto): booleano {
+    si (!tiene_clave(cache["datos"], clave)) {
+        retornar falso
+    }
+    sea nuevos_datos = {}
+    para kv en mapa_entradas(cache["datos"]) {
+        si (kv[0] != clave) {
+            nuevos_datos[kv[0]] = kv[1]
+        }
+    }
+    cache["datos"] = nuevos_datos
+    cache["tam"] = cache["tam"] - 1
+    retornar verdadero
+}
+
+funcion cache_limpiar(cache: mapa): nulo {
+    cache["datos"] = {}
+    cache["tam"] = 0
+}
+
+funcion cache_evictar(cache: mapa): nulo {
+    // Encontrar la clave con atime mas bajo (menos recientemente usada)
+    sea min_atime = -1
+    sea clave_vic = ""
+    para kv en mapa_entradas(cache["datos"]) {
+        sea at = kv[1]["atime"]
+        si (min_atime < 0 o at < min_atime) {
+            min_atime = at
+            clave_vic = kv[0]
+        }
+    }
+    si (clave_vic != "") {
+        cache_eliminar(cache, clave_vic)
+        cache["evictions"] = cache["evictions"] + 1
+    }
+}
+
+funcion cache_stats(cache: mapa): mapa {
+    sea total = cache["hits"] + cache["misses"]
+    sea ratio = si (total > 0) { (cache["hits"] / total) * 100 } sino { 0 }
+    retornar {
+        "tam": cache["tam"],
+        "capacidad": cache["capacidad"],
+        "hits": cache["hits"],
+        "misses": cache["misses"],
+        "ratio_hits": numero_formato(ratio, 1) + "%",
+        "evictions": cache["evictions"]
+    }
+}
+
+funcion cache_claves(cache: mapa): lista {
+    retornar mapa_claves(cache["datos"])
+}
+
+// ── Cache con TTL (tiempo de vida) ────────────────────────────────────────────
+// Igual que LRU pero cada entrada tiene un tiempo de expiracion
+
+funcion cache_ttl_crear(capacidad: numero, ttl_ms: numero): mapa {
+    sea c = cache_crear(capacidad)
+    c["ttl_ms"] = ttl_ms
+    retornar c
+}
+
+funcion cache_ttl_poner(cache: mapa, clave: texto, valor: cualquiera): nulo {
+    sea ahora = tiempo_ms()
+    sea ttl = cache["ttl_ms"]
+    si (!tiene_clave(cache["datos"], clave) y cache["tam"] >= cache["capacidad"]) {
+        // Primero intentar desalojar expirados
+        cache_ttl_limpiar_expirados(cache)
+        si (cache["tam"] >= cache["capacidad"]) {
+            cache_evictar(cache)
+        }
+    }
+    cache["datos"][clave] = {
+        "valor": valor,
+        "atime": ahora,
+        "expira": ahora + ttl,
+        "accesos": 1
+    }
+    si (!tiene_clave(cache["datos"], clave)) {
+        cache["tam"] = cache["tam"] + 1
+    }
+}
+
+funcion cache_ttl_obtener(cache: mapa, clave: texto): cualquiera {
+    si (!tiene_clave(cache["datos"], clave)) {
+        cache["misses"] = cache["misses"] + 1
+        retornar nulo
+    }
+    sea ahora = tiempo_ms()
+    sea entrada = cache["datos"][clave]
+    // Verificar expiracion
+    si (entrada["expira"] < ahora) {
+        cache_eliminar(cache, clave)
+        cache["misses"] = cache["misses"] + 1
+        retornar nulo
+    }
+    cache["datos"][clave]["atime"] = ahora
+    cache["datos"][clave]["accesos"] = entrada["accesos"] + 1
+    cache["hits"] = cache["hits"] + 1
+    retornar entrada["valor"]
+}
+
+funcion cache_ttl_limpiar_expirados(cache: mapa): numero {
+    sea ahora = tiempo_ms()
+    sea eliminados = 0
+    sea expiradas = []
+    para kv en mapa_entradas(cache["datos"]) {
+        si (kv[1]["expira"] < ahora) {
+            agregar(expiradas, kv[0])
+        }
+    }
+    para clave en expiradas {
+        cache_eliminar(cache, clave)
+        eliminados = eliminados + 1
+    }
+    retornar eliminados
+}
+
+// ── Memoizacion (cache de resultados de funciones) ────────────────────────────
+// Nota: En C-Forge las funciones no son ciudadanos de primera clase para
+// esto, se usa el patron de clave serializada como key del cache.
+
+funcion memo_clave(nombre_fn: texto, args: lista): texto {
+    sea partes = [nombre_fn]
+    para a en args {
+        agregar(partes, a + "")
+    }
+    retornar texto_unir(partes, "|")
+}
+
+// Ejemplo de uso de memoizacion:
+//
+//   sea _memo = cache_crear(500)
+//
+//   funcion fibonacci_memo(n: numero): numero {
+//       sea k = memo_clave("fib", [n])
+//       sea cached = cache_obtener(_memo, k)
+//       si (cached != nulo) { retornar cached }
+//       sea res = si (n <= 1) { n } sino {
+//           fibonacci_memo(n - 1) + fibonacci_memo(n - 2)
+//       }
+//       cache_poner(_memo, k, res)
+//       retornar res
+//   }
+
+// ── Cache de disco ────────────────────────────────────────────────────────────
+// Persiste el cache en un archivo JSON
+
+funcion cache_disco_guardar(cache: mapa, ruta: texto): nulo {
+    sea exportable = {
+        "tam": cache["tam"],
+        "datos": cache["datos"]
+    }
+    escribir_archivo(ruta, json_bonito(exportable))
+}
+
+funcion cache_disco_cargar(ruta: texto, capacidad: numero): mapa {
+    si (!existe_archivo(ruta)) {
+        retornar cache_crear(capacidad)
+    }
+    intentar {
+        sea guardado = json_parsear(leer_archivo(ruta))
+        sea c = cache_crear(capacidad)
+        c["datos"] = guardado["datos"]
+        c["tam"] = guardado["tam"]
+        retornar c
+    } capturar (e) {
+        retornar cache_crear(capacidad)
+    }
+}
+
+// ── Funciones de utilidad extra ───────────────────────────────────────────────
+
+funcion cache_obtener_o_poner(cache: mapa, clave: texto, valor_defecto: cualquiera): cualquiera {
+    sea val = cache_obtener(cache, clave)
+    si (val == nulo) {
+        cache_poner(cache, clave, valor_defecto)
+        retornar valor_defecto
+    }
+    retornar val
+}
+
+funcion cache_info(cache: mapa): texto {
+    sea s = cache_stats(cache)
+    retornar "Cache[" + s["tam"] + "/" + s["capacidad"] + "] " +
+        "hits=" + s["hits"] + " misses=" + s["misses"] +
+        " ratio=" + s["ratio_hits"] + " evictions=" + s["evictions"]
+}

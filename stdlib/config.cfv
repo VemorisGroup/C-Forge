@@ -1,0 +1,174 @@
+// stdlib/config.cfv — Parser de archivos de configuracion en C-Forge
+// Soporta formato INI, variables de entorno y config en JSON
+
+// ── INI Parser ────────────────────────────────────────────────────────────────
+// Formato:
+//   [seccion]
+//   clave = valor
+//   # comentario
+//   ; comentario
+
+funcion config_parsear_ini(texto_ini: texto): mapa {
+    sea resultado = {}
+    sea seccion_actual = "global"
+    sea lineas = texto_dividir(texto_ini, "\n")
+
+    para linea en lineas {
+        sea l = texto_recortar(linea)
+
+        // Comentarios y vacías
+        si (l == "" o texto_empieza_con(l, "#") o texto_empieza_con(l, ";")) {
+            continuar
+        }
+
+        // Seccion [nombre]
+        si (texto_empieza_con(l, "[") y texto_termina_con(l, "]")) {
+            seccion_actual = subcadena(l, 1, longitud(l) - 1)
+            si (!tiene_clave(resultado, seccion_actual)) {
+                resultado[seccion_actual] = {}
+            }
+            continuar
+        }
+
+        // Par clave=valor
+        si (texto_contiene(l, "=")) {
+            sea idx = texto_indice(l, "=")
+            sea clave = texto_recortar(subcadena(l, 0, idx))
+            sea valor = texto_recortar(subcadena(l, idx + 1, longitud(l)))
+
+            // Eliminar comillas opcionales
+            si (longitud(valor) >= 2 y
+                ((texto_empieza_con(valor, "\"") y texto_termina_con(valor, "\"")) o
+                 (texto_empieza_con(valor, "'") y texto_termina_con(valor, "'")))) {
+                valor = subcadena(valor, 1, longitud(valor) - 1)
+            }
+
+            // Convertir tipos
+            sea valor_tipado = config_parsear_valor(valor)
+
+            si (!tiene_clave(resultado, seccion_actual)) {
+                resultado[seccion_actual] = {}
+            }
+            resultado[seccion_actual][clave] = valor_tipado
+        }
+    }
+
+    retornar resultado
+}
+
+funcion config_parsear_valor(v: texto): cualquiera {
+    si (v == "verdadero" o v == "true" o v == "si" o v == "yes" o v == "1") {
+        retornar verdadero
+    }
+    si (v == "falso" o v == "false" o v == "no" o v == "0") {
+        retornar falso
+    }
+    si (v == "nulo" o v == "null" o v == "") {
+        retornar nulo
+    }
+    si (texto_es_numero(v)) {
+        retornar texto_a_numero(v)
+    }
+    retornar v
+}
+
+// Leer config desde archivo INI
+funcion config_desde_ini(ruta: texto): mapa {
+    si (!existe_archivo(ruta)) {
+        retornar {}
+    }
+    retornar config_parsear_ini(leer_archivo(ruta))
+}
+
+// Leer config desde JSON
+funcion config_desde_json(ruta: texto): mapa {
+    si (!existe_archivo(ruta)) {
+        retornar {}
+    }
+    retornar json_parsear(leer_archivo(ruta))
+}
+
+// ── Config con valores por defecto ────────────────────────────────────────────
+
+funcion config_con_defaults(config: mapa, defaults: mapa): mapa {
+    sea resultado = mapa_fusionar(defaults, config)
+    retornar resultado
+}
+
+// Obtener valor con default
+funcion config_obtener(config: mapa, ruta_clave: texto, default_val: cualquiera): cualquiera {
+    // Soporta rutas con punto: "db.host" → config["db"]["host"]
+    sea partes = texto_dividir(ruta_clave, ".")
+    sea actual = config
+    para parte en partes {
+        si (tipo_de(actual) != "mapa" o !tiene_clave(actual, parte)) {
+            retornar default_val
+        }
+        actual = actual[parte]
+    }
+    retornar actual
+}
+
+// ── Config con variables de entorno ───────────────────────────────────────────
+
+funcion config_desde_env(claves: lista): mapa {
+    sea resultado = {}
+    para clave en claves {
+        sea val = env_obtener(clave)
+        si (val != nulo y val != "") {
+            resultado[clave] = val
+        }
+    }
+    retornar resultado
+}
+
+// Config compuesta: archivo + env (env tiene prioridad)
+funcion config_cargar(ruta: texto, claves_env: lista): mapa {
+    sea base = {}
+    si (texto_termina_con(ruta, ".json")) {
+        base = config_desde_json(ruta)
+    } sino {
+        base = config_desde_ini(ruta)
+    }
+    sea env_conf = config_desde_env(claves_env)
+    retornar mapa_fusionar(base, env_conf)
+}
+
+// ── Serializar config ──────────────────────────────────────────────────────────
+
+funcion config_a_ini(config: mapa): texto {
+    sea resultado = ""
+    para kv_sec en mapa_entradas(config) {
+        sea sec = kv_sec[0]
+        sea valores = kv_sec[1]
+        resultado = resultado + "[" + sec + "]\n"
+        si (tipo_de(valores) == "mapa") {
+            para kv in mapa_entradas(valores) {
+                sea val_str = kv[1] + ""
+                resultado = resultado + kv[0] + " = " + val_str + "\n"
+            }
+        }
+        resultado = resultado + "\n"
+    }
+    retornar resultado
+}
+
+funcion config_guardar_ini(config: mapa, ruta: texto): nulo {
+    escribir_archivo(ruta, config_a_ini(config))
+}
+
+funcion config_guardar_json(config: mapa, ruta: texto): nulo {
+    escribir_archivo(ruta, json_bonito(config))
+}
+
+// ── Validar config ─────────────────────────────────────────────────────────────
+
+funcion config_validar(config: mapa, requeridas: lista): mapa {
+    sea errores = []
+    para clave en requeridas {
+        si (!tiene_clave(config, clave) o config[clave] == nulo o config[clave] == "") {
+            agregar(errores, "Falta config requerida: " + clave)
+        }
+    }
+    retornar {"valido": longitud(errores) == 0, "errores": errores}
+}

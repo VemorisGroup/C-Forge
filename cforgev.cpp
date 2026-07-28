@@ -2682,6 +2682,7 @@ Value cfv_eval_binario(Value cfv_op, Value cfv_izq, Value cfv_der) {
 #include <random>
 #include <regex>
 #include <ctime>
+#include <set>
 
 // Random
 static std::mt19937_64& cfv_rng() {
@@ -3488,7 +3489,128 @@ static Value cfv_texto_posiciones_fn(const Value& tv, const Value& sv){
   while((pos=t.find(s,pos))!=std::string::npos){ out->push_back(Value{(double)pos}); pos+=s.size(); }
   return Value{out};
 }
-// ── end file/ruta/extra helpers ───────────────────────────────────────────────
+// ── Lista extra helpers ────────────────────────────────────────────────────────
+static Value cfv_lista_slice_fn(const Value& lv, const Value& dv, const Value& hv){
+  if(lv.index()!=4) throw std::runtime_error("lista_slice: se esperaba lista");
+  auto lp=std::get<Lista>(lv.data);
+  int n=(int)lp->size();
+  int d=dv.index()==1?(int)std::get<double>(dv.data):0;
+  int h=hv.index()==1?(int)std::get<double>(hv.data):n;
+  if(d<0) d=std::max(0,n+d);
+  if(h<0) h=std::max(0,n+h);
+  if(d>n) d=n; if(h>n) h=n;
+  Lista out=std::make_shared<std::vector<Value>>(lp->begin()+d,lp->begin()+h);
+  return Value{out};
+}
+static Value cfv_lista_buscar_fn(const Value& lv, const Value& tv){
+  if(lv.index()!=4) throw std::runtime_error("lista_buscar: se esperaba lista");
+  auto lp=std::get<Lista>(lv.data);
+  for(int i=0;i<(int)lp->size();i++){
+    if(verdad(compara((*lp)[i],tv,"=="))) return Value{(double)i};
+  }
+  return Value{-1.0};
+}
+static Value cfv_lista_contiene_fn(const Value& lv, const Value& tv){
+  if(lv.index()!=4) throw std::runtime_error("lista_contiene: se esperaba lista");
+  auto lp=std::get<Lista>(lv.data);
+  for(auto& v: *lp) if(verdad(compara(v,tv,"=="))) return Value{true};
+  return Value{false};
+}
+static Value cfv_lista_contar_elem_fn(const Value& lv, const Value& tv){
+  if(lv.index()!=4) throw std::runtime_error("lista_contar_elem: se esperaba lista");
+  auto lp=std::get<Lista>(lv.data);
+  int c=0; for(auto& v: *lp) if(verdad(compara(v,tv,"=="))) c++;
+  return Value{(double)c};
+}
+static Value cfv_lista_invertir_fn(const Value& lv){
+  if(lv.index()!=4) throw std::runtime_error("lista_invertir: se esperaba lista");
+  auto lp=std::get<Lista>(lv.data);
+  Lista out=std::make_shared<std::vector<Value>>(lp->rbegin(),lp->rend());
+  return Value{out};
+}
+static Value cfv_lista_rellenar_fn(const Value& nv, const Value& tv){
+  int n=nv.index()==1?(int)std::get<double>(nv.data):0;
+  Lista out=std::make_shared<std::vector<Value>>(n,tv);
+  return Value{out};
+}
+static Value cfv_lista_cada_n_fn(const Value& lv, const Value& nv){
+  if(lv.index()!=4) throw std::runtime_error("lista_cada_n: se esperaba lista");
+  auto lp=std::get<Lista>(lv.data);
+  int step=nv.index()==1?(int)std::get<double>(nv.data):1;
+  if(step<1) step=1;
+  Lista out=std::make_shared<std::vector<Value>>();
+  for(int i=0;i<(int)lp->size();i+=step) out->push_back((*lp)[i]);
+  return Value{out};
+}
+// texto extra
+static Value cfv_texto_es_numero_fn(const Value& tv){
+  if(tv.index()!=2) return Value{false};
+  const std::string& s=std::get<std::string>(tv.data);
+  if(s.empty()) return Value{false};
+  try{ size_t pos; std::stod(s,&pos); return Value{pos==s.size()}; }
+  catch(...){ return Value{false}; }
+}
+static Value cfv_numero_es_entero_fn(const Value& v){
+  if(v.index()!=1) return Value{false};
+  double d=std::get<double>(v.data);
+  return Value{d==std::floor(d)&&!std::isinf(d)&&!std::isnan(d)};
+}
+static Value cfv_numero_es_nan_fn(const Value& v){
+  if(v.index()!=1) return Value{false};
+  return Value{std::isnan(std::get<double>(v.data))};
+}
+// Generar rango con paso
+static Value cfv_rango_paso_fn(const Value& dv, const Value& hv, const Value& sv){
+  double d=dv.index()==1?std::get<double>(dv.data):0;
+  double h=hv.index()==1?std::get<double>(hv.data):0;
+  double s=sv.index()==1?std::get<double>(sv.data):1;
+  if(s==0) throw std::runtime_error("rango_paso: el paso no puede ser cero");
+  Lista out=std::make_shared<std::vector<Value>>();
+  if(s>0){ for(double i=d;i<h;i+=s) out->push_back(Value{i}); }
+  else   { for(double i=d;i>h;i+=s) out->push_back(Value{i}); }
+  return Value{out};
+}
+// Mapa extra
+static Value cfv_mapa_filtrar_claves_fn(const Value& mv, const Value& lv){
+  if(mv.index()!=5) throw std::runtime_error("mapa_filtrar_claves: se esperaba mapa");
+  if(lv.index()!=4) throw std::runtime_error("mapa_filtrar_claves: se esperaba lista");
+  auto mp=std::get<Mapa>(mv.data);
+  auto lp=std::get<Lista>(lv.data);
+  Mapa out=std::make_shared<std::map<std::string,Value>>();
+  for(auto& v: *lp){
+    if(v.index()==2){
+      const std::string& k=std::get<std::string>(v.data);
+      if(mp->count(k)) (*out)[k]=(*mp)[k];
+    }
+  }
+  return Value{out};
+}
+static Value cfv_mapa_omitir_claves_fn(const Value& mv, const Value& lv){
+  if(mv.index()!=5) throw std::runtime_error("mapa_omitir_claves: se esperaba mapa");
+  if(lv.index()!=4) throw std::runtime_error("mapa_omitir_claves: se esperaba lista");
+  auto mp=std::get<Mapa>(mv.data);
+  auto lp=std::get<Lista>(lv.data);
+  std::set<std::string> excl;
+  for(auto& v: *lp) if(v.index()==2) excl.insert(std::get<std::string>(v.data));
+  Mapa out=std::make_shared<std::map<std::string,Value>>();
+  for(auto& kv: *mp) if(!excl.count(kv.first)) (*out)[kv.first]=kv.second;
+  return Value{out};
+}
+// Texto — unir lista con separador
+static Value cfv_texto_unir_fn(const Value& lv, const Value& sv){
+  if(lv.index()!=4) throw std::runtime_error("texto_unir: se esperaba lista");
+  auto lp=std::get<Lista>(lv.data);
+  std::string sep=sv.index()==2?std::get<std::string>(sv.data):"";
+  std::string r;
+  for(int i=0;i<(int)lp->size();i++){
+    if(i>0) r+=sep;
+    const Value& v=(*lp)[i];
+    if(v.index()==2) r+=std::get<std::string>(v.data);
+    else r+=cfv_valor_a_json(v);
+  }
+  return Value{r};
+}
+// ── end lista/mapa/texto extra helpers ────────────────────────────────────────
 
 Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cfv_fns) {
   cfv_jit_hit("eval_builtin");
@@ -4156,6 +4278,44 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
     return cfv_texto_contar_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
   if (verdad(compara(cfv_nombre, Value{std::string("texto_posiciones")}, "==")))
     return cfv_texto_posiciones_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  // ── lista/mapa/texto extra (v2.3b) ──────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_slice")}, "=="))) {
+    Value d2=verdad(compara(cfv_longitud(cfv_args),Value{2.0},">="))?indice(cfv_args,Value{1.0}):Value{0.0};
+    Value h2=verdad(compara(cfv_longitud(cfv_args),Value{3.0},">="))?indice(cfv_args,Value{2.0}):Value{};
+    return cfv_lista_slice_fn(indice(cfv_args,Value{0.0}),d2,h2);
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_buscar")}, "==")))
+    return cfv_lista_buscar_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_contiene")}, "==")))
+    return cfv_lista_contiene_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_contar_elem")}, "==")))
+    return cfv_lista_contar_elem_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_invertir")}, "==")))
+    return cfv_lista_invertir_fn(indice(cfv_args,Value{0.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_rellenar")}, "=="))) {
+    Value fill=verdad(compara(cfv_longitud(cfv_args),Value{2.0},">="))?indice(cfv_args,Value{1.0}):Value{};
+    return cfv_lista_rellenar_fn(indice(cfv_args,Value{0.0}),fill);
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("lista_cada_n")}, "==")))
+    return cfv_lista_cada_n_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_es_numero")}, "==")))
+    return cfv_texto_es_numero_fn(indice(cfv_args,Value{0.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("numero_es_entero")}, "==")))
+    return cfv_numero_es_entero_fn(indice(cfv_args,Value{0.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("numero_es_nan")}, "==")))
+    return cfv_numero_es_nan_fn(indice(cfv_args,Value{0.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("rango_paso")}, "=="))) {
+    Value sv=verdad(compara(cfv_longitud(cfv_args),Value{3.0},">="))?indice(cfv_args,Value{2.0}):Value{1.0};
+    return cfv_rango_paso_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),sv);
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("mapa_filtrar_claves")}, "==")))
+    return cfv_mapa_filtrar_claves_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("mapa_omitir_claves")}, "==")))
+    return cfv_mapa_omitir_claves_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("texto_unir")}, "=="))) {
+    Value sv=verdad(compara(cfv_longitud(cfv_args),Value{2.0},">="))?indice(cfv_args,Value{1.0}):Value{std::string("")};
+    return cfv_texto_unir_fn(indice(cfv_args,Value{0.0}),sv);
+  }
   return Value{std::string("__no_builtin__", 14)};
   return Value{};
 }
