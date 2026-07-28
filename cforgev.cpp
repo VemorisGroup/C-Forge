@@ -835,6 +835,28 @@ Value cfv_parse_sentencia(Value cfv_p) {
     size_t cfv_cuerpo_tipo = 4;
     return cfv_nodo(Value{std::string("Funcion", 7)}, cfv_fn_nombre, crear_lista({cfv_nodo(Value{std::string("Params", 6)}, Value{}, cfv_params), cfv_nodo(Value{std::string("Bloque", 6)}, Value{}, cfv_cuerpo)}));
   }
+  // lanzar expr;
+  if (verdad(cfv_ver(cfv_p, Value{std::string("lanzar")}))) {
+    (void)(cfv_avanzar(cfv_p));
+    Value cfv_msg = cfv_parse_expresion(cfv_p);
+    (void)(cfv_tomar(cfv_p, Value{std::string(";")}));
+    return cfv_nodo(Value{std::string("Lanzar")}, Value{}, crear_lista({cfv_msg}));
+  }
+  // intentar { ... } capturar (var) { ... }
+  if (verdad(cfv_ver(cfv_p, Value{std::string("intentar")}))) {
+    (void)(cfv_avanzar(cfv_p));
+    Value cfv_try_body = cfv_parse_bloque(cfv_p);
+    (void)(cfv_requerir(cfv_p, Value{std::string("capturar")}, Value{std::string("Se esperaba 'capturar' tras bloque intentar")}));
+    (void)(cfv_requerir(cfv_p, Value{std::string("(")}, Value{std::string("Se esperaba '(' tras 'capturar'")}));
+    Value cfv_var_tok = cfv_requerir_tipo(cfv_p, Value{std::string("IDENT")}, Value{std::string("Se esperaba nombre de variable de error")});
+    Value cfv_var_nombre = indice(cfv_var_tok, Value{std::string("lexema")});
+    (void)(cfv_requerir(cfv_p, Value{std::string(")")}, Value{std::string("Se esperaba ')'")}));
+    Value cfv_catch_body = cfv_parse_bloque(cfv_p);
+    return cfv_nodo(Value{std::string("Intentar")}, cfv_var_nombre, crear_lista({
+        cfv_nodo(Value{std::string("Bloque")}, Value{}, cfv_try_body),
+        cfv_nodo(Value{std::string("Bloque")}, Value{}, cfv_catch_body)
+    }));
+  }
   // importar "ruta"
   if (verdad(cfv_ver(cfv_p, Value{std::string("importar")}))) {
     (void)(cfv_avanzar(cfv_p));
@@ -1993,6 +2015,33 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
     Value cfv_tokens_imp = cfv_tokenizar(cfv_fuente_imp);
     Value cfv_ast_imp = cfv_parsear(cfv_tokens_imp);
     (void)(cfv_exec_bloque(cfv_ast_imp, cfv_env, cfv_fns));
+    return crear_lista({Value{std::string("normal")}, Value{}});
+  }
+  // Lanzar
+  if (verdad(compara(cfv_t, Value{std::string("Lanzar")}, "=="))) {
+    Value cfv_msg = cfv_eval_expr(indice(indice(cfv_stmt, Value{std::string("hijos")}), Value{0.0}), cfv_env, cfv_fns);
+    throw std::runtime_error(texto(cfv_msg));
+  }
+  // Intentar
+  if (verdad(compara(cfv_t, Value{std::string("Intentar")}, "=="))) {
+    Value cfv_var_nombre_int = indice(cfv_stmt, Value{std::string("valor")});
+    Value cfv_hijos_int = indice(cfv_stmt, Value{std::string("hijos")});
+    Value cfv_try_hijos = indice(indice(cfv_hijos_int, Value{0.0}), Value{std::string("hijos")});
+    Value cfv_catch_hijos = indice(indice(cfv_hijos_int, Value{1.0}), Value{std::string("hijos")});
+    try {
+      Value cfv_scope_try = cfv_env_nuevo_scope(cfv_env);
+      Value cfv_res_try = cfv_exec_bloque(cfv_try_hijos, cfv_scope_try, cfv_fns);
+      if (verdad(compara(indice(cfv_res_try, Value{0.0}), Value{std::string("normal")}, "!="))) {
+        return cfv_res_try;
+      }
+    } catch (const std::exception& e) {
+      Value cfv_scope_catch = cfv_env_nuevo_scope(cfv_env);
+      (void)(cfv_env_declarar(cfv_scope_catch, cfv_var_nombre_int, Value{std::string(e.what())}));
+      Value cfv_res_catch = cfv_exec_bloque(cfv_catch_hijos, cfv_scope_catch, cfv_fns);
+      if (verdad(compara(indice(cfv_res_catch, Value{0.0}), Value{std::string("normal")}, "!="))) {
+        return cfv_res_catch;
+      }
+    }
     return crear_lista({Value{std::string("normal")}, Value{}});
   }
   (void)(cfv_afirmar(Value{false}, suma(suma(Value{std::string("sentencia no implementada tipo '", 32)}, cfv_t), Value{std::string("'", 1)})));

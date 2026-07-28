@@ -3,7 +3,10 @@
 //
 // Uso: importar "stdlib/errores.cfv"
 //
-// C-Forge usa afirmar() para precondiciones en modo debug.
+// C-Forge tiene manejo de excepciones nativo con:
+//   intentar { ... } capturar (e) { ... }   — bloque try/catch
+//   lanzar "mensaje"                         — lanzar excepción
+//
 // Este módulo añade:
 //   1. Validadores con mensajes descriptivos
 //   2. Patrón Result (Ok/Error) — como Rust
@@ -120,3 +123,28 @@ funcion obtener_o(opt: cualquiera, por_defecto: cualquiera): cualquiera {
     }
     retornar por_defecto
 }
+
+// ── Helpers de lanzar ─────────────────────────────────────────────────────
+
+// Lanzar si la condición es falsa (como afirmar, pero usa lanzar explícito)
+funcion lanzar_si_no(cond: booleano, mensaje: texto): nulo {
+    si (no cond) {
+        lanzar mensaje
+    }
+}
+
+// Lanzar error desde un resultado de error
+funcion lanzar_si_err(resultado: cualquiera): cualquiera {
+    si (no resultado["ok"]) {
+        lanzar resultado["error"]
+    }
+    retornar resultado["valor"]
+}
+
+// Construir Result capturando lanzar (requiere bloque try/catch en el caller)
+// Uso:
+//   intentar {
+//       sea res: cualquiera = ok(dividir(10, 0))
+//   } capturar (e) {
+//       sea res: cualquiera = err(e)
+//   }

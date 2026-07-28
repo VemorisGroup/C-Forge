@@ -356,6 +356,27 @@ funcion parse_sentencia(p: cualquiera): cualquiera {
         retornar nodo("Funcion", fn_nombre, [nodo("Params", nulo, params), nodo("Bloque", nulo, cuerpo)])
     }
 
+    // lanzar expr;
+    si (ver(p, "lanzar")) {
+        avanzar(p)
+        sea msg_expr: cualquiera = parse_expresion(p)
+        tomar(p, ";")
+        retornar nodo("Lanzar", nulo, [msg_expr])
+    }
+
+    // intentar { ... } capturar (var) { ... }
+    si (ver(p, "intentar")) {
+        avanzar(p)
+        sea cuerpo_try: lista = parse_bloque(p)
+        requerir(p, "capturar", "Se esperaba 'capturar' tras bloque intentar")
+        requerir(p, "(", "Se esperaba '(' tras 'capturar'")
+        sea var_tok: cualquiera = requerir_tipo(p, "IDENT", "Se esperaba nombre de variable de error")
+        sea var_nombre: texto = var_tok["lexema"]
+        requerir(p, ")", "Se esperaba ')'")
+        sea cuerpo_cap: lista = parse_bloque(p)
+        retornar nodo("Intentar", var_nombre, [nodo("Bloque", nulo, cuerpo_try), nodo("Bloque", nulo, cuerpo_cap)])
+    }
+
     // importar "ruta/archivo.cfv"
     si (ver(p, "importar")) {
         avanzar(p)
@@ -1228,6 +1249,27 @@ funcion exec_stmt(stmt: cualquiera, env: lista, fns: cualquiera): lista {
         sea tokens_imp: lista = tokenizar(fuente_imp)
         sea ast_imp: lista = parsear(tokens_imp)
         exec_bloque(ast_imp, env, fns)
+        retornar ["normal", nulo]
+    }
+
+    si (t == "Lanzar") {
+        sea msg_v: cualquiera = eval_expr(stmt["hijos"][0], env, fns)
+        afirmar(falso, a_texto(msg_v))
+        retornar ["normal", nulo]
+    }
+
+    si (t == "Intentar") {
+        // En modo compilado (cforgev.cpp), se usa C++ try/catch real.
+        // En modo bootstrap (cforgev.cfv interpretado), ejecutamos el bloque try
+        // sin captura real de excepciones (limitación conocida del modo bootstrap).
+        sea var_err: texto = stmt["valor"]
+        sea blq_try: cualquiera = stmt["hijos"][0]
+        sea blq_cap: cualquiera = stmt["hijos"][1]
+        sea scope_int: lista = env_nuevo_scope(env)
+        sea res_int: lista = exec_bloque(blq_try["hijos"], scope_int, fns)
+        si (res_int[0] != "normal") {
+            retornar res_int
+        }
         retornar ["normal", nulo]
     }
 
