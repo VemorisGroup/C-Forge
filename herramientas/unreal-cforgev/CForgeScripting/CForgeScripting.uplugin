@@ -1,0 +1,24 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0.0",
+  "FriendlyName": "C-Forge Scripting",
+  "Description": "Embeds the C-Forge interpreter in Unreal Engine 5 for live .cfv scripting",
+  "Category": "Scripting",
+  "CreatedBy": "Vemoris Group",
+  "CreatedByURL": "https://github.com/VemorisGroup/C-Forge",
+  "DocsURL": "https://github.com/VemorisGroup/C-Forge",
+  "MarketplaceURL": "",
+  "SupportURL": "https://github.com/VemorisGroup/C-Forge/issues",
+  "CanContainContent": false,
+  "IsBetaVersion": false,
+  "IsExperimentalVersion": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "CForgeScripting",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

@@ -1,0 +1,186 @@
+// stdlib/sdl.cfv — Motor de juego 2D para C-Forge (sobre SDL2)
+// Compilar interprete con: -DCFV_WITH_SDL2 -lSDL2 [-lSDL2_mixer -lSDL2_image]
+// Uso: importar "stdlib/sdl.cfv"
+//
+// Ejemplo minimo:
+//   sea v = juego_iniciar("Mi Juego", 800, 600)
+//   mientras (juego_corriendo(v)) {
+//       juego_eventos(v)
+//       juego_limpiar(v, 30, 30, 50)
+//       // ... dibujar ...
+//       juego_mostrar(v)
+//       sdl_delay(16)
+//   }
+//   juego_terminar(v)
+
+// ── Motor de juego ─────────────────────────────────────────────────────────
+
+funcion juego_iniciar(titulo: texto, ancho: numero, alto: numero): mapa {
+    sea id = sdl_iniciar(titulo, ancho, alto)
+    sea estado = {
+        "id": id,
+        "ancho": ancho,
+        "alto": alto,
+        "corriendo": verdadero,
+        "teclas": {},
+        "raton_x": 0,
+        "raton_y": 0,
+        "fps_objetivo": 60,
+        "ultimo_tick": sdl_tiempo(),
+        "delta": 0
+    }
+    retornar estado
+}
+
+funcion juego_corriendo(v: mapa): booleano {
+    retornar v["corriendo"]
+}
+
+funcion juego_eventos(v: mapa): nulo {
+    sea evs = sdl_eventos(v["id"])
+    para e en evs {
+        sea tipo = e["tipo"]
+        si (tipo == "salir") {
+            v["corriendo"] = falso
+        }
+        si (tipo == "tecla_abajo") {
+            v["teclas"][e["tecla"]] = verdadero
+        }
+        si (tipo == "tecla_arriba") {
+            v["teclas"][e["tecla"]] = falso
+        }
+        si (tipo == "raton_movimiento") {
+            v["raton_x"] = e["x"]
+            v["raton_y"] = e["y"]
+        }
+    }
+    // Delta time
+    sea ahora = sdl_tiempo()
+    v["delta"] = (ahora - v["ultimo_tick"]) / 1000.0
+    v["ultimo_tick"] = ahora
+}
+
+funcion juego_limpiar(v: mapa, r: numero, g: numero, b: numero): nulo {
+    sdl_limpiar(v["id"], r, g, b)
+}
+
+funcion juego_mostrar(v: mapa): nulo {
+    sdl_mostrar(v["id"])
+}
+
+funcion juego_terminar(v: mapa): nulo {
+    sdl_cerrar(v["id"])
+    sdl_terminar()
+}
+
+funcion juego_tecla(v: mapa, nombre: texto): booleano {
+    si (v["teclas"][nombre] == nulo) { retornar falso }
+    retornar v["teclas"][nombre]
+}
+
+funcion juego_fps(v: mapa): numero {
+    si (v["delta"] <= 0) { retornar 0 }
+    retornar piso(1.0 / v["delta"])
+}
+
+funcion juego_delta(v: mapa): numero {
+    retornar v["delta"]
+}
+
+// ── Dibujo ────────────────────────────────────────────────────────────────
+
+funcion dibujar_rect(v: mapa, x: numero, y: numero, ancho: numero, alto: numero, r: numero, g: numero, b: numero): nulo {
+    sdl_dibujar_rect(v["id"], x, y, ancho, alto, r, g, b, 255)
+}
+
+funcion dibujar_rect_alfa(v: mapa, x: numero, y: numero, ancho: numero, alto: numero, r: numero, g: numero, b: numero, a: numero): nulo {
+    sdl_dibujar_rect(v["id"], x, y, ancho, alto, r, g, b, a)
+}
+
+funcion dibujar_circulo(v: mapa, cx: numero, cy: numero, radio: numero, r: numero, g: numero, b: numero): nulo {
+    sdl_dibujar_circulo(v["id"], cx, cy, radio, r, g, b)
+}
+
+funcion dibujar_linea(v: mapa, x1: numero, y1: numero, x2: numero, y2: numero, r: numero, g: numero, b: numero): nulo {
+    sdl_dibujar_linea(v["id"], x1, y1, x2, y2, r, g, b)
+}
+
+funcion dibujar_pixel(v: mapa, x: numero, y: numero, r: numero, g: numero, b: numero): nulo {
+    sdl_dibujar_pixel(v["id"], x, y, r, g, b)
+}
+
+// ── Entidades (Entity-Component simple) ────────────────────────────────────
+
+funcion entidad_nueva(x: numero, y: numero, ancho: numero, alto: numero): mapa {
+    retornar {
+        "x": x, "y": y,
+        "ancho": ancho, "alto": alto,
+        "vx": 0, "vy": 0,
+        "activa": verdadero,
+        "color_r": 255, "color_g": 255, "color_b": 255
+    }
+}
+
+funcion entidad_mover(e: mapa, delta: numero): nulo {
+    e["x"] = e["x"] + e["vx"] * delta
+    e["y"] = e["y"] + e["vy"] * delta
+}
+
+funcion entidad_dibujar(v: mapa, e: mapa): nulo {
+    si (e["activa"]) {
+        dibujar_rect(v, e["x"], e["y"], e["ancho"], e["alto"], e["color_r"], e["color_g"], e["color_b"])
+    }
+}
+
+funcion entidad_colision(a: mapa, b: mapa): booleano {
+    retornar (
+        a["x"] < b["x"] + b["ancho"] y
+        a["x"] + a["ancho"] > b["x"] y
+        a["y"] < b["y"] + b["alto"] y
+        a["y"] + a["alto"] > b["y"]
+    )
+}
+
+funcion entidad_en_pantalla(e: mapa, v: mapa): booleano {
+    retornar (
+        e["x"] + e["ancho"] > 0 y
+        e["x"] < v["ancho"] y
+        e["y"] + e["alto"] > 0 y
+        e["y"] < v["alto"]
+    )
+}
+
+// ── Audio ─────────────────────────────────────────────────────────────────
+
+funcion sonido_cargar(ruta: texto): numero {
+    retornar sdl_cargar_sonido(ruta)
+}
+
+funcion sonido_reproducir(id: numero): nulo {
+    sdl_reproducir_sonido(id)
+}
+
+funcion musica_reproducir(ruta: texto): nulo {
+    sdl_cargar_musica(ruta)
+}
+
+// ── Utilidades ────────────────────────────────────────────────────────────
+
+// Limitar valor entre min y max
+funcion acotar(valor: numero, minimo: numero, maximo: numero): numero {
+    si (valor < minimo) { retornar minimo }
+    si (valor > maximo) { retornar maximo }
+    retornar valor
+}
+
+// Distancia entre dos puntos
+funcion distancia(x1: numero, y1: numero, x2: numero, y2: numero): numero {
+    sea dx = x2 - x1
+    sea dy = y2 - y1
+    retornar raiz(dx*dx + dy*dy)
+}
+
+// Interpolar linealmente
+funcion lerp(a: numero, b: numero, t: numero): numero {
+    retornar a + (b - a) * t
+}

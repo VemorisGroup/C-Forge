@@ -51,6 +51,19 @@
 #include <openssl/aes.h>
 #include <openssl/rand.h>
 #endif
+// SDL2 (opcional — compilar con -DCFV_WITH_SDL2 -lSDL2 [-lSDL2_ttf -lSDL2_mixer -lSDL2_image])
+#ifdef CFV_WITH_SDL2
+#include <SDL2/SDL.h>
+#ifdef CFV_WITH_SDL2_TTF
+#include <SDL2/SDL_ttf.h>
+#endif
+#ifdef CFV_WITH_SDL2_MIXER
+#include <SDL2/SDL_mixer.h>
+#endif
+#ifdef CFV_WITH_SDL2_IMAGE
+#include <SDL2/SDL_image.h>
+#endif
+#endif
 struct ForgeValue;struct CfvDenseMatrix;struct CfvTuple;struct CfvSet;
 using Value=ForgeValue;using Lista=std::shared_ptr<std::vector<ForgeValue>>;using Mapa=std::shared_ptr<std::map<std::string,ForgeValue>>;using FastArray=std::shared_ptr<std::vector<double>>;using DenseMatrix=std::shared_ptr<CfvDenseMatrix>;using Tupla=std::shared_ptr<CfvTuple>;using Conjunto=std::shared_ptr<CfvSet>;
 struct CfvDenseMatrix{size_t rows=0,columns=0;std::vector<double>values;};
@@ -499,6 +512,300 @@ static Value cfv_crypto_rand_bytes(const Value& n_v) {
     if (f) { (void)fread(buf.data(), 1, (size_t)n, f); fclose(f); }
     return Value{cfv_hex_encode(buf.data(), (size_t)n)};
 }
+#endif
+
+// ── SDL2 BINDINGS ─────────────────────────────────────────────────────────
+#ifdef CFV_WITH_SDL2
+struct CfvSDLWindow {
+    SDL_Window*   win  = nullptr;
+    SDL_Renderer* ren  = nullptr;
+    bool          open = false;
+#ifdef CFV_WITH_SDL2_TTF
+    TTF_Font*     font = nullptr;
+#endif
+    ~CfvSDLWindow() {
+#ifdef CFV_WITH_SDL2_TTF
+        if (font) { TTF_CloseFont(font); font = nullptr; }
+#endif
+        if (ren)  { SDL_DestroyRenderer(ren); ren = nullptr; }
+        if (win)  { SDL_DestroyWindow(win);   win = nullptr; }
+    }
+};
+static std::map<int, std::shared_ptr<CfvSDLWindow>> cfv_sdl_windows;
+static int cfv_sdl_next_id = 1;
+static bool cfv_sdl_initialized = false;
+
+static std::shared_ptr<CfvSDLWindow>& cfv_sdl_get(int id) {
+    auto it = cfv_sdl_windows.find(id);
+    if (it == cfv_sdl_windows.end()) throw std::runtime_error("sdl: ventana invalida");
+    return it->second;
+}
+
+// sdl_iniciar(titulo, ancho, alto) → id
+static Value cfv_sdl_iniciar(const Value& titulo_v, const Value& ancho_v, const Value& alto_v) {
+    if (!cfv_sdl_initialized) {
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) != 0)
+            throw std::runtime_error(std::string("sdl_iniciar: ") + SDL_GetError());
+#ifdef CFV_WITH_SDL2_TTF
+        TTF_Init();
+#endif
+#ifdef CFV_WITH_SDL2_MIXER
+        Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048);
+#endif
+        cfv_sdl_initialized = true;
+    }
+    const std::string& titulo = (titulo_v.index()==2) ? std::get<std::string>(titulo_v.data) : "C-Forge";
+    int ancho = (int)numero(ancho_v), alto = (int)numero(alto_v);
+    auto w = std::make_shared<CfvSDLWindow>();
+    w->win = SDL_CreateWindow(titulo.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, ancho, alto, SDL_WINDOW_SHOWN);
+    if (!w->win) throw std::runtime_error(std::string("sdl_iniciar: ") + SDL_GetError());
+    w->ren = SDL_CreateRenderer(w->win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!w->ren) throw std::runtime_error(std::string("sdl_iniciar: renderer ") + SDL_GetError());
+    w->open = true;
+    int id = cfv_sdl_next_id++;
+    cfv_sdl_windows[id] = w;
+    return (double)id;
+}
+
+// sdl_limpiar(id, r, g, b) → nulo
+static Value cfv_sdl_limpiar(const Value& id_v, const Value& r_v, const Value& g_v, const Value& b_v) {
+    auto& w = cfv_sdl_get((int)numero(id_v));
+    SDL_SetRenderDrawColor(w->ren, (Uint8)numero(r_v), (Uint8)numero(g_v), (Uint8)numero(b_v), 255);
+    SDL_RenderClear(w->ren);
+    return Value{};
+}
+
+// sdl_dibujar_rect(id, x, y, ancho, alto, r, g, b, a=255) → nulo
+static Value cfv_sdl_dibujar_rect(const Value& id_v, const Value& x_v, const Value& y_v, const Value& w_v, const Value& h_v, const Value& r_v, const Value& g_v, const Value& b_v, const Value& a_v) {
+    auto& wnd = cfv_sdl_get((int)numero(id_v));
+    SDL_Rect rect{ (int)numero(x_v),(int)numero(y_v),(int)numero(w_v),(int)numero(h_v) };
+    SDL_SetRenderDrawColor(wnd->ren,(Uint8)numero(r_v),(Uint8)numero(g_v),(Uint8)numero(b_v),(Uint8)numero(a_v));
+    SDL_RenderFillRect(wnd->ren, &rect);
+    return Value{};
+}
+
+// sdl_dibujar_circulo(id, cx, cy, radio, r, g, b) → nulo
+static Value cfv_sdl_dibujar_circulo(const Value& id_v, const Value& cx_v, const Value& cy_v, const Value& rad_v, const Value& r_v, const Value& g_v, const Value& b_v) {
+    auto& wnd = cfv_sdl_get((int)numero(id_v));
+    int cx=(int)numero(cx_v), cy=(int)numero(cy_v), rad=(int)numero(rad_v);
+    SDL_SetRenderDrawColor(wnd->ren,(Uint8)numero(r_v),(Uint8)numero(g_v),(Uint8)numero(b_v),255);
+    for (int dy=-rad; dy<=rad; dy++) {
+        int dx=(int)std::sqrt((double)(rad*rad-dy*dy));
+        SDL_RenderDrawLine(wnd->ren, cx-dx, cy+dy, cx+dx, cy+dy);
+    }
+    return Value{};
+}
+
+// sdl_dibujar_linea(id, x1, y1, x2, y2, r, g, b) → nulo
+static Value cfv_sdl_dibujar_linea(const Value& id_v, const Value& x1_v, const Value& y1_v, const Value& x2_v, const Value& y2_v, const Value& r_v, const Value& g_v, const Value& b_v) {
+    auto& wnd = cfv_sdl_get((int)numero(id_v));
+    SDL_SetRenderDrawColor(wnd->ren,(Uint8)numero(r_v),(Uint8)numero(g_v),(Uint8)numero(b_v),255);
+    SDL_RenderDrawLine(wnd->ren,(int)numero(x1_v),(int)numero(y1_v),(int)numero(x2_v),(int)numero(y2_v));
+    return Value{};
+}
+
+// sdl_mostrar(id) → nulo
+static Value cfv_sdl_mostrar(const Value& id_v) {
+    auto& wnd = cfv_sdl_get((int)numero(id_v));
+    SDL_RenderPresent(wnd->ren);
+    return Value{};
+}
+
+// sdl_eventos(id) → lista de mapos {tipo, tecla, scancode, x, y, boton, rueda}
+static Value cfv_sdl_eventos(const Value& id_v) {
+    (void)id_v;
+    auto lista = std::make_shared<std::vector<Value>>();
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+        auto ev = std::make_shared<std::map<std::string,Value>>();
+        switch (e.type) {
+            case SDL_QUIT:
+                (*ev)["tipo"] = Value{std::string("salir")};
+                break;
+            case SDL_KEYDOWN:
+            case SDL_KEYUP: {
+                (*ev)["tipo"] = Value{std::string(e.type==SDL_KEYDOWN?"tecla_abajo":"tecla_arriba")};
+                (*ev)["tecla"] = Value{std::string(SDL_GetKeyName(e.key.keysym.sym))};
+                (*ev)["scancode"] = Value{(double)e.key.keysym.scancode};
+                (*ev)["repetir"] = Value{(bool)e.key.repeat};
+                break;
+            }
+            case SDL_MOUSEMOTION:
+                (*ev)["tipo"] = Value{std::string("raton_movimiento")};
+                (*ev)["x"] = Value{(double)e.motion.x};
+                (*ev)["y"] = Value{(double)e.motion.y};
+                (*ev)["dx"] = Value{(double)e.motion.xrel};
+                (*ev)["dy"] = Value{(double)e.motion.yrel};
+                break;
+            case SDL_MOUSEBUTTONDOWN:
+            case SDL_MOUSEBUTTONUP:
+                (*ev)["tipo"] = Value{std::string(e.type==SDL_MOUSEBUTTONDOWN?"raton_abajo":"raton_arriba")};
+                (*ev)["x"] = Value{(double)e.button.x};
+                (*ev)["y"] = Value{(double)e.button.y};
+                (*ev)["boton"] = Value{(double)e.button.button};
+                break;
+            case SDL_MOUSEWHEEL:
+                (*ev)["tipo"] = Value{std::string("rueda")};
+                (*ev)["x"] = Value{(double)e.wheel.x};
+                (*ev)["y"] = Value{(double)e.wheel.y};
+                break;
+            default:
+                (*ev)["tipo"] = Value{std::string("otro")};
+                (*ev)["codigo"] = Value{(double)e.type};
+                break;
+        }
+        lista->push_back(Value{ev});
+    }
+    return Value{lista};
+}
+
+// sdl_tecla_presionada(nombre) → booleano  (estado inmediato del teclado)
+static Value cfv_sdl_tecla_presionada(const Value& nombre_v) {
+    if (nombre_v.index()!=2) return Value{false};
+    const std::string& nombre = std::get<std::string>(nombre_v.data);
+    const Uint8* state = SDL_GetKeyboardState(nullptr);
+    SDL_Keycode kc = SDL_GetKeyFromName(nombre.c_str());
+    SDL_Scancode sc = SDL_GetScancodeFromKey(kc);
+    return Value{(bool)(sc != SDL_SCANCODE_UNKNOWN && state[sc])};
+}
+
+// sdl_raton() → mapa {x, y, izquierda, derecha, centro}
+static Value cfv_sdl_raton(const Value&) {
+    int x, y;
+    Uint32 btn = SDL_GetMouseState(&x, &y);
+    auto m = std::make_shared<std::map<std::string,Value>>();
+    (*m)["x"] = Value{(double)x};
+    (*m)["y"] = Value{(double)y};
+    (*m)["izquierda"] = Value{(bool)(btn & SDL_BUTTON(1))};
+    (*m)["centro"]    = Value{(bool)(btn & SDL_BUTTON(2))};
+    (*m)["derecha"]   = Value{(bool)(btn & SDL_BUTTON(3))};
+    return Value{m};
+}
+
+// sdl_delay(ms) → nulo
+static Value cfv_sdl_delay(const Value& ms_v) {
+    SDL_Delay((Uint32)numero(ms_v));
+    return Value{};
+}
+
+// sdl_tiempo() → ms desde init
+static Value cfv_sdl_tiempo(const Value&) {
+    return Value{(double)SDL_GetTicks()};
+}
+
+// sdl_tamanio_ventana(id) → mapa {ancho, alto}
+static Value cfv_sdl_tamanio_ventana(const Value& id_v) {
+    auto& wnd = cfv_sdl_get((int)numero(id_v));
+    int w=0, h=0;
+    SDL_GetWindowSize(wnd->win, &w, &h);
+    auto m = std::make_shared<std::map<std::string,Value>>();
+    (*m)["ancho"] = Value{(double)w};
+    (*m)["alto"]  = Value{(double)h};
+    return Value{m};
+}
+
+// sdl_titulo(id, titulo) → nulo
+static Value cfv_sdl_titulo(const Value& id_v, const Value& tit_v) {
+    auto& wnd = cfv_sdl_get((int)numero(id_v));
+    if (tit_v.index()==2) SDL_SetWindowTitle(wnd->win, std::get<std::string>(tit_v.data).c_str());
+    return Value{};
+}
+
+// sdl_abierto(id) → booleano
+static Value cfv_sdl_abierto(const Value& id_v) {
+    auto it = cfv_sdl_windows.find((int)numero(id_v));
+    if (it == cfv_sdl_windows.end()) return Value{false};
+    return Value{it->second->open};
+}
+
+// sdl_cerrar(id) → nulo
+static Value cfv_sdl_cerrar(const Value& id_v) {
+    cfv_sdl_windows.erase((int)numero(id_v));
+    return Value{};
+}
+
+// sdl_terminar() → nulo
+static Value cfv_sdl_terminar(const Value&) {
+    cfv_sdl_windows.clear();
+#ifdef CFV_WITH_SDL2_MIXER
+    Mix_CloseAudio();
+#endif
+#ifdef CFV_WITH_SDL2_TTF
+    TTF_Quit();
+#endif
+    if (cfv_sdl_initialized) { SDL_Quit(); cfv_sdl_initialized = false; }
+    return Value{};
+}
+
+// sdl_dibujar_pixel(id, x, y, r, g, b) → nulo
+static Value cfv_sdl_dibujar_pixel(const Value& id_v, const Value& x_v, const Value& y_v, const Value& r_v, const Value& g_v, const Value& b_v) {
+    auto& wnd = cfv_sdl_get((int)numero(id_v));
+    SDL_SetRenderDrawColor(wnd->ren,(Uint8)numero(r_v),(Uint8)numero(g_v),(Uint8)numero(b_v),255);
+    SDL_RenderDrawPoint(wnd->ren,(int)numero(x_v),(int)numero(y_v));
+    return Value{};
+}
+
+// sdl_color_fondo(id, r, g, b) → alias de sdl_limpiar
+static Value cfv_sdl_color_fondo(const Value& id_v, const Value& r_v, const Value& g_v, const Value& b_v) {
+    return cfv_sdl_limpiar(id_v, r_v, g_v, b_v);
+}
+
+#ifdef CFV_WITH_SDL2_MIXER
+// sdl_cargar_sonido(ruta) → id_sonido
+static std::map<int,Mix_Chunk*> cfv_sdl_sounds;
+static int cfv_sdl_sound_next = 1;
+static Value cfv_sdl_cargar_sonido(const Value& ruta_v) {
+    if (ruta_v.index()!=2) throw std::runtime_error("sdl_cargar_sonido: requiere ruta");
+    Mix_Chunk* chunk = Mix_LoadWAV(std::get<std::string>(ruta_v.data).c_str());
+    if (!chunk) throw std::runtime_error(std::string("sdl_cargar_sonido: ") + Mix_GetError());
+    int id = cfv_sdl_sound_next++;
+    cfv_sdl_sounds[id] = chunk;
+    return (double)id;
+}
+static Value cfv_sdl_reproducir_sonido(const Value& id_v) {
+    auto it = cfv_sdl_sounds.find((int)numero(id_v));
+    if (it == cfv_sdl_sounds.end()) throw std::runtime_error("sdl_reproducir_sonido: id invalido");
+    Mix_PlayChannel(-1, it->second, 0);
+    return Value{};
+}
+static Value cfv_sdl_cargar_musica_fn(const Value& ruta_v) {
+    if (ruta_v.index()!=2) throw std::runtime_error("sdl_cargar_musica: requiere ruta");
+    Mix_Music* mus = Mix_LoadMUS(std::get<std::string>(ruta_v.data).c_str());
+    if (!mus) throw std::runtime_error(std::string("sdl_cargar_musica: ") + Mix_GetError());
+    Mix_PlayMusic(mus, -1);
+    return Value{};
+}
+#endif
+
+#else
+// Stubs cuando SDL2 no esta disponible
+static Value cfv_sdl_iniciar(const Value&,const Value&,const Value&){throw std::runtime_error("sdl_iniciar: compilar con -DCFV_WITH_SDL2 -lSDL2");}
+static Value cfv_sdl_limpiar(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+static Value cfv_sdl_dibujar_rect(const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+static Value cfv_sdl_dibujar_circulo(const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+static Value cfv_sdl_dibujar_linea(const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+static Value cfv_sdl_mostrar(const Value&){throw std::runtime_error("SDL2 no disponible");}
+static Value cfv_sdl_eventos(const Value&){return std::make_shared<std::vector<Value>>();}
+static Value cfv_sdl_tecla_presionada(const Value&){return Value{false};}
+static Value cfv_sdl_raton(const Value&){return std::make_shared<std::map<std::string,Value>>();}
+static Value cfv_sdl_delay(const Value& ms_v){
+    int ms=(int)numero(ms_v);
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+    return Value{};
+}
+static Value cfv_sdl_tiempo(const Value&){return Value{(double)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()};}
+static Value cfv_sdl_tamanio_ventana(const Value&){auto m=std::make_shared<std::map<std::string,Value>>();(*m)["ancho"]=Value{800.0};(*m)["alto"]=Value{600.0};return Value{m};}
+static Value cfv_sdl_titulo(const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+static Value cfv_sdl_abierto(const Value&){return Value{false};}
+static Value cfv_sdl_cerrar(const Value&){return Value{};}
+static Value cfv_sdl_terminar(const Value&){return Value{};}
+static Value cfv_sdl_dibujar_pixel(const Value&,const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+static Value cfv_sdl_color_fondo(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+#ifdef CFV_WITH_SDL2_MIXER
+static Value cfv_sdl_cargar_sonido(const Value&){throw std::runtime_error("SDL2 no disponible");}
+static Value cfv_sdl_reproducir_sonido(const Value&){throw std::runtime_error("SDL2 no disponible");}
+static Value cfv_sdl_cargar_musica_fn(const Value&){throw std::runtime_error("SDL2 no disponible");}
+#endif
 #endif
 
 static Value cfv_raiz(const Value&v){double n=numero(v);if(n<0)throw std::runtime_error("no existe raíz real negativa");return std::sqrt(n);}static Value cfv_absoluto(const Value&v){return std::abs(numero(v));}static Value cfv_redondear(const Value&v){return std::round(numero(v));}static Value cfv_potencia(const Value&a,const Value&b){return std::pow(numero(a),numero(b));}
@@ -2554,6 +2861,70 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
     (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{2.0}, "=="), Value{std::string("contiene requiere 2 argumentos")}));
     return cfv_texto_contiene(indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0}));
   }
+  // ── SDL2 Graficos ─────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_iniciar")}, "=="))) {
+    return cfv_sdl_iniciar(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_limpiar")}, "=="))) {
+    return cfv_sdl_limpiar(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_dibujar_rect")}, "=="))) {
+    Value a = verdad(compara(cfv_longitud(cfv_args),Value{9.0},">=")) ? indice(cfv_args,Value{8.0}) : Value{255.0};
+    return cfv_sdl_dibujar_rect(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}),indice(cfv_args,Value{4.0}),indice(cfv_args,Value{5.0}),indice(cfv_args,Value{6.0}),indice(cfv_args,Value{7.0}),a);
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_dibujar_circulo")}, "=="))) {
+    return cfv_sdl_dibujar_circulo(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}),indice(cfv_args,Value{4.0}),indice(cfv_args,Value{5.0}),indice(cfv_args,Value{6.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_dibujar_linea")}, "=="))) {
+    return cfv_sdl_dibujar_linea(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}),indice(cfv_args,Value{4.0}),indice(cfv_args,Value{5.0}),indice(cfv_args,Value{6.0}),indice(cfv_args,Value{7.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_dibujar_pixel")}, "=="))) {
+    return cfv_sdl_dibujar_pixel(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}),indice(cfv_args,Value{4.0}),indice(cfv_args,Value{5.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_mostrar")}, "=="))) {
+    return cfv_sdl_mostrar(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_eventos")}, "=="))) {
+    return cfv_sdl_eventos(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_tecla_presionada")}, "=="))) {
+    return cfv_sdl_tecla_presionada(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_raton")}, "=="))) {
+    return cfv_sdl_raton(Value{});
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_delay")}, "=="))) {
+    return cfv_sdl_delay(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_tiempo")}, "=="))) {
+    return cfv_sdl_tiempo(Value{});
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_tamanio_ventana")}, "=="))) {
+    return cfv_sdl_tamanio_ventana(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_titulo")}, "=="))) {
+    return cfv_sdl_titulo(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_abierto")}, "=="))) {
+    return cfv_sdl_abierto(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_cerrar")}, "=="))) {
+    return cfv_sdl_cerrar(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_terminar")}, "=="))) {
+    return cfv_sdl_terminar(Value{});
+  }
+#ifdef CFV_WITH_SDL2_MIXER
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_cargar_sonido")}, "=="))) {
+    return cfv_sdl_cargar_sonido(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_reproducir_sonido")}, "=="))) {
+    return cfv_sdl_reproducir_sonido(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_cargar_musica")}, "=="))) {
+    return cfv_sdl_cargar_musica_fn(indice(cfv_args,Value{0.0}));
+  }
+#endif
   // ── HTTP Server ────────────────────────────────────────────────────────────
   if (verdad(compara(cfv_nombre, Value{std::string("servidor_http_escuchar")}, "=="))) {
     return cfv_servidor_http_escuchar(indice(cfv_args, Value{0.0}));
@@ -3516,6 +3887,117 @@ Value cfv_llamar_metodo(Value objeto,const std::string& nombre,std::vector<Value
   auto clase=texto(indice(objeto,Value{std::string("__clase")}));
   throw std::runtime_error("método desconocido");
 }
+
+// ── C-Forge Public C API (para usar como shared library / plugin) ──────────
+// Compilar como shared lib:
+//   g++ -std=c++20 -O2 -shared -fPIC -o libcforgev.so cforgev.cpp [flags]
+// Luego desde C/C#/Java:
+//   cfv_init() → cfv_run_file("script.cfv") → cfv_shutdown()
+
+struct CfvContext {
+    Value env;
+    Value fns;
+    bool  initialized = false;
+};
+
+extern "C" {
+
+// Crear contexto de ejecucion
+void* cfv_context_create() {
+    try {
+        auto* ctx = new CfvContext();
+        ctx->env = crear_lista({});
+        ctx->fns = crear_lista({});
+        ctx->initialized = true;
+        return ctx;
+    } catch (...) { return nullptr; }
+}
+
+// Destruir contexto
+void cfv_context_destroy(void* ctx_ptr) {
+    if (ctx_ptr) delete static_cast<CfvContext*>(ctx_ptr);
+}
+
+// Helper: crear entorno global fresco
+static Value cfv_make_env() { return crear_lista({crear_mapa({})}); }
+
+// Ejecutar un archivo .cfv. Retorna 0 en exito, 1 en error.
+int cfv_run_file(const char* path) {
+    try {
+        std::ifstream f(path);
+        if (!f) return 1;
+        std::string src((std::istreambuf_iterator<char>(f)),{});
+        cfv_base_archivos = std::filesystem::weakly_canonical(std::filesystem::path(path)).parent_path();
+        auto tokens = cfv_tokenizar(src);
+        auto ast    = cfv_parsear(tokens);
+        auto env    = cfv_make_env();
+        auto fns    = crear_lista({});
+        cfv_exec_bloque(ast, env, fns);
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[cfv] " << e.what() << "\n";
+        return 1;
+    } catch (...) { return 1; }
+}
+
+// Ejecutar un string de codigo C-Forge. Retorna 0 en exito.
+int cfv_run_string(const char* code) {
+    try {
+        std::string src(code);
+        auto tokens = cfv_tokenizar(src);
+        auto ast    = cfv_parsear(tokens);
+        auto env    = cfv_make_env();
+        auto fns    = crear_lista({});
+        cfv_exec_bloque(ast, env, fns);
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[cfv] " << e.what() << "\n";
+        return 1;
+    } catch (...) { return 1; }
+}
+
+// Evaluar expresion y retornar resultado serializado como JSON (string estatico)
+const char* cfv_eval_json(const char* code) {
+    static std::string cfv_last_result;
+    try {
+        std::string src(code);
+        auto tokens  = cfv_tokenizar(src);
+        auto ast     = cfv_parsear(tokens);
+        auto env     = cfv_make_env();
+        auto fns     = crear_lista({});
+        Value result = cfv_exec_bloque(ast, env, fns);
+        Value json   = cfv_json_serializar_fn(result);
+        cfv_last_result = (json.index()==2) ? std::get<std::string>(json.data) : "null";
+        return cfv_last_result.c_str();
+    } catch (const std::exception& e) {
+        cfv_last_result = std::string("{\"error\":\"") + e.what() + "\"}";
+        return cfv_last_result.c_str();
+    }
+}
+
+// Obtener version del interprete
+const char* cfv_version() { return "2.1.0"; }
+
+// Verificar disponibilidad de SDL2
+int cfv_has_sdl2() {
+#ifdef CFV_WITH_SDL2
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+// Verificar disponibilidad de OpenSSL
+int cfv_has_openssl() {
+#ifdef CFV_WITH_OPENSSL
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+} // extern "C"
+
 int main(int argc, char** argv){
   try {
     if (argc > 1) {
