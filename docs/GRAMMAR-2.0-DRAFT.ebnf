@@ -1,0 +1,331 @@
+(* C-Forge 2.0 — gramática normativa candidata.
+   Los saltos de línea separan sentencias cuando no hay ambigüedad.
+   El punto y coma es opcional. Los bloques siempre usan llaves. *)
+
+programa          = { item_modulo } ;
+item_modulo       = anotaciones ,
+                    [ visibilidad ] ,
+                    [ modificadores ] ,
+                    ( modulo | usar | tipo_alias | declaracion_tipo |
+                      declaracion_funcion | declaracion_delegado |
+                      declaracion_evento | declaracion_variable |
+                      impl | prueba ) ;
+
+visibilidad       = "publico" | "interno" | "privado" | "protegido" ;
+modificadores     = modificador , { modificador } ;
+modificador       = "async" | "unsafe" | "comptime" | "inline" |
+                    "sellado" | "abstracto" | "estatico" | "parcial" ;
+anotaciones       = { anotacion } ;
+anotacion         = "@" , nombre_calificado ,
+                    [ "(" , [ lista_argumentos ] , ")" ] ;
+
+modulo            = "modulo" , ruta_modulo , bloque_modulo ;
+bloque_modulo     = "{" , { item_modulo } , "}" ;
+usar              = "usar" , ruta_modulo ,
+                    [ "::" , ( "*" | "{" , lista_importados , "}" ) ] ,
+                    [ "como" , identificador ] , fin ;
+lista_importados  = importado , { "," , importado } , [ "," ] ;
+importado         = identificador , [ "como" , identificador ] ;
+ruta_modulo       = identificador , { "." , identificador } ;
+
+tipo_alias        = "tipo" , identificador , [ parametros_genericos ] ,
+                    "=" , tipo , fin ;
+declaracion_tipo  = estructura | registro | clase | interfaz | enumeracion ;
+
+estructura        = "estructura" , identificador , [ parametros_genericos ] ,
+                    [ clausula_donde ] , cuerpo_tipo ;
+registro          = "registro" , identificador , [ parametros_genericos ] ,
+                    [ parametros_registro ] , [ clausula_donde ] , cuerpo_tipo ;
+parametros_registro = "(" , [ parametro_registro ,
+                      { "," , parametro_registro } , [ "," ] ] , ")" ;
+parametro_registro = identificador , ":" , tipo , [ "=" , expresion ] ;
+
+clase             = "clase" , identificador , [ parametros_genericos ] ,
+                    [ ":" , tipo_nominal , { "," , tipo_nominal } ] ,
+                    [ clausula_donde ] , cuerpo_tipo ;
+interfaz          = "interfaz" , identificador , [ parametros_genericos ] ,
+                    [ ":" , tipo_nominal , { "," , tipo_nominal } ] ,
+                    [ clausula_donde ] , cuerpo_interfaz ;
+enumeracion       = "enum" , identificador , [ parametros_genericos ] ,
+                    [ clausula_donde ] , "{" ,
+                    [ variante_enum , { "," , variante_enum } , [ "," ] ] ,
+                    "}" ;
+variante_enum     = identificador ,
+                    [ "(" , lista_tipos , ")" |
+                      "{" , lista_campos_tipo , "}" ] ;
+
+cuerpo_tipo       = "{" , { miembro_tipo } , "}" ;
+cuerpo_interfaz   = "{" , { miembro_interfaz } , "}" ;
+miembro_tipo      = anotaciones , [ visibilidad ] , [ modificadores ] ,
+                    ( campo | propiedad | constructor | destructor |
+                      declaracion_funcion | declaracion_evento |
+                      declaracion_delegado | tipo_alias ) ;
+miembro_interfaz  = anotaciones , [ modificadores ] ,
+                    ( firma_funcion | firma_propiedad |
+                      declaracion_evento | tipo_asociado ) ;
+campo             = ( "sea" | "var" | "const" ) , patron_nombre ,
+                    [ ":" , tipo ] , [ "=" , expresion ] , fin ;
+propiedad         = "propiedad" , identificador , ":" , tipo ,
+                    ( fin | "{" , accesor_obtener ,
+                      [ accesor_establecer ] , "}" ) ;
+firma_propiedad   = "propiedad" , identificador , ":" , tipo ,
+                    "{" , "obtener" , fin ,
+                    [ "establecer" , fin ] , "}" ;
+accesor_obtener   = "obtener" , ( fin | bloque ) ;
+accesor_establecer = "establecer" , [ "(" , identificador , ")" ],
+                     ( fin | bloque ) ;
+constructor       = "iniciar" , "(" , [ parametros ] , ")" ,
+                    [ efectos ] , bloque ;
+destructor        = "destruir" , "(" , ")" , bloque ;
+tipo_asociado     = "tipo" , identificador , [ ":" , limites_tipo ] , fin ;
+
+declaracion_delegado = "delegado" , identificador ,
+                       [ parametros_genericos ] ,
+                       "(" , [ parametros_tipo ] , ")" ,
+                       [ "->" , tipo ] , [ efectos ] , fin ;
+declaracion_evento = "evento" , identificador , ":" , tipo , fin ;
+
+declaracion_funcion = "funcion" , identificador ,
+                      [ parametros_genericos ] ,
+                      "(" , [ parametros ] , ")" ,
+                      [ "->" , tipo ] , [ efectos ] ,
+                      [ clausula_donde ] , ( bloque | fin ) ;
+firma_funcion     = "funcion" , identificador ,
+                    [ parametros_genericos ] ,
+                    "(" , [ parametros_tipo ] , ")" ,
+                    [ "->" , tipo ] , [ efectos ] ,
+                    [ clausula_donde ] , fin ;
+parametros        = parametro , { "," , parametro } , [ "," ] ;
+parametro         = [ modo_parametro ] , patron_nombre , [ ":" , tipo ] ,
+                    [ "=" , expresion ] ;
+modo_parametro    = "mover" | "prestado" | "prestado_mut" ;
+parametros_tipo   = parametro_tipo , { "," , parametro_tipo } , [ "," ] ;
+parametro_tipo    = [ modo_parametro ] , identificador , ":" , tipo ;
+efectos           = "efectos" , "{" , identificador ,
+                    { "," , identificador } , [ "," ] , "}" ;
+
+parametros_genericos = "<" , parametro_generico ,
+                       { "," , parametro_generico } , [ "," ] , ">" ;
+parametro_generico = identificador ,
+                    [ ":" , limites_tipo ] , [ "=" , tipo ] ;
+limites_tipo      = tipo , { "+" , tipo } ;
+clausula_donde    = "donde" , restriccion ,
+                    { "," , restriccion } , [ "," ] ;
+restriccion       = tipo , ":" , limites_tipo ;
+
+impl              = [ "unsafe" ] , "impl" , [ parametros_genericos ] ,
+                    [ tipo_nominal , "para" ] , tipo_nominal ,
+                    [ clausula_donde ] , "{" , { miembro_tipo } , "}" ;
+
+declaracion_variable = ( "sea" | "var" | "const" ) , patron ,
+                       [ ":" , tipo ] , "=" , expresion , fin ;
+
+prueba            = "prueba" , texto , bloque ;
+
+bloque            = "{" , { sentencia } , [ expresion_final ] , "}" ;
+sentencia         = declaracion_variable | declaracion_funcion |
+                    sentencia_expresion | sentencia_si |
+                    sentencia_segun | sentencia_mientras |
+                    sentencia_para | sentencia_bucle |
+                    sentencia_retorno | sentencia_romper |
+                    sentencia_continuar | sentencia_lanzar |
+                    sentencia_deferir | sentencia_usar_recurso |
+                    sentencia_grupo | sentencia_seleccionar |
+                    sentencia_unsafe ;
+sentencia_expresion = expresion , fin ;
+expresion_final   = expresion , [ ";" ] ;
+
+sentencia_si      = "si" , expresion , bloque ,
+                    { "sino" , "si" , expresion , bloque } ,
+                    [ "sino" , bloque ] ;
+sentencia_segun   = "segun" , expresion , "{" ,
+                    { brazo_patron } , "}" ;
+brazo_patron      = patron , [ "si" , expresion ] , "=>" ,
+                    ( expresion | bloque ) , [ "," ] ;
+sentencia_mientras = "mientras" , expresion , bloque ;
+sentencia_para    = "para" , patron , "en" , expresion , bloque ;
+sentencia_bucle   = "bucle" , bloque ;
+sentencia_retorno = "retornar" , [ expresion ] , fin ;
+sentencia_romper  = "romper" , [ expresion ] , fin ;
+sentencia_continuar = "continuar" , fin ;
+sentencia_lanzar  = "lanzar" , expresion , fin ;
+sentencia_deferir = "deferir" , ( expresion , fin | bloque ) ;
+sentencia_usar_recurso = "recurso" , patron , "=" , expresion , bloque ;
+sentencia_unsafe  = "unsafe" , bloque ;
+
+sentencia_grupo   = "grupo" , [ identificador ] , bloque ;
+sentencia_seleccionar = "seleccionar" , "{" ,
+                        brazo_seleccion , { brazo_seleccion } , "}" ;
+brazo_seleccion   = ( "caso" , patron , "=" , "recibir" ,
+                      expresion | "timeout" , expresion |
+                      "sino" ) , "=>" , ( expresion | bloque ) , [ "," ] ;
+
+expresion         = asignacion ;
+asignacion        = condicional ,
+                    [ operador_asignacion , asignacion ] ;
+operador_asignacion = "=" | "+=" | "-=" | "*=" | "/=" | "%=" |
+                      "??=" | "&=" | "|=" | "^=" ;
+condicional       = coalescencia ,
+                    [ "si" , coalescencia , "sino" , condicional ] ;
+coalescencia      = disyuncion , { "??" , disyuncion } ;
+disyuncion        = conjuncion , { "o" , conjuncion } ;
+conjuncion        = comparacion , { "y" , comparacion } ;
+comparacion       = rango , { ( "==" | "!=" | "<" | "<=" | ">" | ">=" |
+                    "es" | "no" , "es" | "en" | "no" , "en" ) , rango } ;
+rango             = tuberia , [ ( ".." | "..=" ) , tuberia ] ;
+tuberia           = bit_o , { "|>" , bit_o } ;
+bit_o             = bit_xor , { "|" , bit_xor } ;
+bit_xor           = bit_y , { "^" , bit_y } ;
+bit_y             = desplazamiento , { "&" , desplazamiento } ;
+desplazamiento    = suma , { ( "<<" | ">>" ) , suma } ;
+suma              = producto , { ( "+" | "-" ) , producto } ;
+producto          = potencia , { ( "*" | "/" | "%" ) , potencia } ;
+potencia          = unaria , [ "**" , potencia ] ;
+unaria            = ( "no" | "-" | "+" | "~" | "mover" | "prestar" |
+                    "prestar_mut" | "*" | "&" ) , unaria | postfix ;
+
+postfix           = primaria , { sufijo } ;
+sufijo            = llamada | indice | miembro | miembro_seguro |
+                    argumento_generico | operador_postfijo ;
+llamada           = "(" , [ lista_argumentos ] , ")" ;
+indice            = "[" , expresion , "]" ;
+miembro           = "." , identificador ;
+miembro_seguro    = "?." , identificador ;
+argumento_generico = "::<" , lista_tipos , ">" ;
+operador_postfijo = "?" | "!" ;
+
+primaria          = literal | identificador | "esto" | "super" |
+                    agrupada | lista | mapa | conjunto | tupla |
+                    lambda | comprension | construir | expresion_si |
+                    expresion_segun | expresion_intentar |
+                    expresion_async | expresion_await |
+                    expresion_spawn | expresion_tipo |
+                    expresion_comptime ;
+agrupada          = "(" , expresion , ")" ;
+lista             = "[" , [ lista_argumentos ] , "]" ;
+tupla             = "(" , expresion , "," ,
+                    [ lista_argumentos ] , ")" ;
+mapa              = "{" , [ entrada_mapa ,
+                    { "," , entrada_mapa } , [ "," ] ] , "}" ;
+entrada_mapa      = expresion , ":" , expresion | "..." , expresion ;
+conjunto          = "#{" , [ lista_argumentos ] , "}" ;
+construir         = tipo_nominal , "{" ,
+                    [ inicializador_campo ,
+                    { "," , inicializador_campo } , [ "," ] ] , "}" ;
+inicializador_campo = identificador , [ ":" , expresion ] |
+                      "..." , expresion ;
+
+lambda            = [ "async" ] , "|" , [ parametros_lambda ] , "|" ,
+                    ( expresion | bloque ) ;
+parametros_lambda = parametro_lambda ,
+                    { "," , parametro_lambda } , [ "," ] ;
+parametro_lambda  = patron_nombre , [ ":" , tipo ] ;
+
+comprension       = "[" , expresion , "para" , patron , "en" , expresion ,
+                    { "para" , patron , "en" , expresion } ,
+                    [ "si" , expresion ] , "]" ;
+expresion_si      = "si" , expresion , bloque , "sino" , bloque ;
+expresion_segun   = "segun" , expresion , "{" , { brazo_patron } , "}" ;
+expresion_intentar = "intentar" , bloque ,
+                     { "capturar" , patron , [ "si" , expresion ] , bloque } ,
+                     [ "finalmente" , bloque ] ;
+expresion_async   = "async" , bloque ;
+expresion_await   = "esperar" , expresion ;
+expresion_spawn   = "lanzar_tarea" , expresion ;
+expresion_tipo    = ( "tipo_de" | "tamano_de" | "alineacion_de" ) ,
+                    "(" , ( expresion | tipo ) , ")" ;
+expresion_comptime = "comptime" , bloque ;
+
+lista_argumentos  = argumento , { "," , argumento } , [ "," ] ;
+argumento         = [ identificador , ":" ] , expresion |
+                    "..." , expresion ;
+
+patron            = patron_or ;
+patron_or         = patron_atomico , { "|" , patron_atomico } ;
+patron_atomico    = "_" | patron_nombre | literal |
+                    patron_tupla | patron_lista | patron_objeto |
+                    patron_variante | patron_tipo | patron_rango ;
+patron_nombre     = [ "var" ] , identificador ;
+patron_tupla      = "(" , patron , "," , [ lista_patrones ] , ")" ;
+patron_lista      = "[" , [ lista_patrones ] , "]" ;
+patron_objeto     = tipo_nominal , "{" , [ campo_patron ,
+                    { "," , campo_patron } , [ "," ] ] , "}" ;
+campo_patron      = identificador , [ ":" , patron ] | ".." ;
+patron_variante   = tipo_nominal , "::" , identificador ,
+                    [ "(" , [ lista_patrones ] , ")" ] ;
+patron_tipo       = patron_nombre , ":" , tipo ;
+patron_rango      = literal , ( ".." | "..=" ) , literal ;
+lista_patrones    = patron , { "," , patron } , [ "," ] ;
+
+tipo              = tipo_union ;
+tipo_union        = tipo_interseccion , { "|" , tipo_interseccion } ;
+tipo_interseccion = tipo_opcional , { "&" , tipo_opcional } ;
+tipo_opcional     = tipo_primario , [ "?" ] ;
+tipo_primario     = tipo_primitivo | tipo_nominal | tipo_tupla |
+                    tipo_funcion | tipo_referencia | tipo_puntero |
+                    tipo_array | tipo_condicional | tipo_mapeado |
+                    "dinamico" | "nunca" | "cualquiera" ;
+tipo_primitivo    = "bool" | "caracter" | "texto" |
+                    "i8" | "i16" | "i32" | "i64" | "isize" |
+                    "u8" | "u16" | "u32" | "u64" | "usize" |
+                    "f32" | "f64" | "decimal" | "unidad" ;
+tipo_nominal      = ruta_modulo , [ "<" , lista_tipos , ">" ] ;
+tipo_tupla        = "(" , tipo , "," , lista_tipos , ")" ;
+tipo_funcion      = [ "async" ] , "funcion" ,
+                    "(" , [ lista_tipos ] , ")" , "->" , tipo ,
+                    [ efectos ] ;
+tipo_referencia   = "&" , [ "mut" ] , tipo ;
+tipo_puntero      = "*" , ( "const" | "mut" ) , tipo ;
+tipo_array        = "[" , tipo , [ ";" , expresion_constante ] , "]" ;
+tipo_condicional  = "si_tipo" , "<" , tipo , "es" , tipo ,
+                    "," , tipo , "," , tipo , ">" ;
+tipo_mapeado      = "mapear_tipo" , "<" , identificador , "en" , tipo ,
+                    "," , tipo , ">" ;
+lista_tipos       = tipo , { "," , tipo } , [ "," ] ;
+lista_campos_tipo = parametro_registro ,
+                    { "," , parametro_registro } , [ "," ] ;
+expresion_constante = expresion ;
+
+literal           = numero | texto | caracter | booleano | ausencia ;
+booleano          = "verdadero" | "falso" ;
+ausencia          = "ninguno" ;
+
+numero            = entero | real ;
+entero            = decimal_entero | hexadecimal | binario | octal ;
+decimal_entero    = digito , { digito | "_" } , [ sufijo_entero ] ;
+hexadecimal       = "0x" , hex , { hex | "_" } , [ sufijo_entero ] ;
+binario           = "0b" , bit , { bit | "_" } , [ sufijo_entero ] ;
+octal             = "0o" , oct , { oct | "_" } , [ sufijo_entero ] ;
+real              = digito , { digito | "_" } , "." ,
+                    digito , { digito | "_" } ,
+                    [ exponente ] , [ sufijo_real ] ;
+exponente         = ( "e" | "E" ) , [ "+" | "-" ] ,
+                    digito , { digito | "_" } ;
+sufijo_entero     = "i8" | "i16" | "i32" | "i64" | "isize" |
+                    "u8" | "u16" | "u32" | "u64" | "usize" ;
+sufijo_real       = "f32" | "f64" | "dec" ;
+
+texto             = '"' , { caracter_texto | escape } , '"' |
+                    '"""' , { caracter_texto | salto | escape } , '"""' ;
+caracter          = "'" , ( caracter_texto | escape ) , "'" ;
+escape            = "\" , ( "\" | '"' | "'" | "n" | "r" | "t" | "0" |
+                    "u{" , hex , { hex } , "}" ) ;
+
+identificador     = inicio_id , { inicio_id | digito } ;
+inicio_id         = letra | "_" ;
+fin               = ";" | salto ;
+
+comentario_linea  = "//" , { caracter_texto } , salto |
+                    "#" , { caracter_texto } , salto ;
+comentario_bloque = "/*" , { cualquier_caracter } , "*/" ;
+
+letra             = ? letra Unicode XID_Start ? ;
+digito            = "0" | "1" | "2" | "3" | "4" |
+                    "5" | "6" | "7" | "8" | "9" ;
+hex               = digito | "a" | "b" | "c" | "d" | "e" | "f" |
+                    "A" | "B" | "C" | "D" | "E" | "F" ;
+bit               = "0" | "1" ;
+oct               = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" ;
+salto             = ? LF o CRLF ? ;
+caracter_texto    = ? carácter Unicode válido no reservado ? ;
+cualquier_caracter = ? cualquier valor escalar Unicode ? ;

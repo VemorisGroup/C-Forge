@@ -1,0 +1,11 @@
+// B3 debe rechazar este programa antes de generar C++.
+sea fuente_b3_invalida: texto =
+    "sea nombre: texto = \"C-Forge\"\n" +
+    "sea destino: texto = mover(nombre)\n" +
+    "mostrar(nombre)\n"
+sea programa_b3_invalido: cualquiera =
+    parsear_fuente_core(fuente_b3_invalida)
+sea emision_b3_invalida: cualquiera =
+    emitir_programa_core(programa_b3_invalido)
+mostrar(emision_b3_invalida.valido)
+mostrar(diagnosticos_semanticos_core(emision_b3_invalida))

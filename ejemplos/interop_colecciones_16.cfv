@@ -1,0 +1,8 @@
+extern("python") {
+def cfv_tipos_coleccion(tupla, conjunto):
+    return (type(tupla).__name__, type(conjunto).__name__, tupla[1], len(conjunto))
+}
+
+sea version: tupla = ("C-Forge", 2, verdadero)
+sea motores: conjunto = conjunto("LLVM", "VM", "LLVM")
+mostrar(use_python("__main__", "cfv_tipos_coleccion", [version, motores]))

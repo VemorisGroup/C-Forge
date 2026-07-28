@@ -1,0 +1,12 @@
+usar "utilidades.cfv";
+
+sea mensaje: texto = presentar("Javier");
+escribir_archivo("datos/mensaje.txt", mensaje);
+
+intentar {
+    mostrar(leer_archivo("datos/mensaje.txt"));
+    mostrar(existe_archivo("datos/mensaje.txt"));
+} capturar(error) {
+    mostrar("No fue posible trabajar con el archivo:");
+    mostrar(error);
+}

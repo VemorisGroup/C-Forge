@@ -1,0 +1,10 @@
+funcion doble(valor: numero): numero {
+    retornar valor * 2
+}
+
+sea datos: lista<numero> = [1, 2]
+datos.append(3)
+
+mostrar("C-Forge parity")
+mostrar(doble(datos.length))
+mostrar(verdadero)

@@ -1,0 +1,277 @@
+// Analizador de tipos y ownership de C-Forge Core Bootstrap 0.5.
+// Opera únicamente sobre NodoASTCore y no depende del runtime anfitrión.
+
+clase SimboloCore {
+    campo nombre: texto
+    campo tipo: texto
+    campo movido: booleano
+
+    metodo marcar_movido() {
+        este.movido = verdadero
+    }
+}
+
+estructura ResultadoSemanticoCore {
+    valido: booleano
+    errores: cualquiera
+}
+
+funcion diagnostico_core(
+    codigo: texto,
+    linea: numero,
+    mensaje: texto
+): texto {
+    retornar codigo + " línea " + a_texto(linea) + ": " + mensaje
+}
+
+funcion indice_dos_puntos_core(valor: texto): numero {
+    sea posicion: numero = 0
+    mientras (posicion < longitud(valor)) {
+        si (valor[posicion] == ":") {
+            retornar posicion
+        }
+        posicion = posicion + 1
+    }
+    retornar -1
+}
+
+funcion segmento_core(
+    valor: texto,
+    inicio: numero,
+    final: numero
+): texto {
+    sea salida: texto = ""
+    sea posicion: numero = inicio
+    mientras (posicion < final) {
+        salida = salida + valor[posicion]
+        posicion = posicion + 1
+    }
+    retornar salida
+}
+
+funcion nombre_declaracion_core(valor: texto): texto {
+    sea separador: numero = indice_dos_puntos_core(valor)
+    si (separador < 0) {
+        retornar valor
+    }
+    retornar segmento_core(valor, 0, separador)
+}
+
+funcion tipo_declaracion_core(valor: texto): texto {
+    sea separador: numero = indice_dos_puntos_core(valor)
+    si (separador < 0) {
+        retornar ""
+    }
+    retornar segmento_core(valor, separador + 1, longitud(valor))
+}
+
+funcion buscar_simbolo_core(simbolos: lista, nombre: texto): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(simbolos)) {
+        sea simbolo: cualquiera = simbolos[indice]
+        si (simbolo.nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion tipo_identificador_core(
+    nodo: cualquiera,
+    simbolos: lista,
+    errores: lista
+): texto {
+    sea indice: numero = buscar_simbolo_core(simbolos, nodo.valor)
+    si (indice < 0) {
+        agregar(
+            errores,
+            diagnostico_core(
+                "CFB2002", nodo.linea,
+                "variable no declarada '" + nodo.valor + "'"
+            )
+        )
+        retornar "error"
+    }
+    sea simbolo: cualquiera = simbolos[indice]
+    si (simbolo.movido) {
+        agregar(
+            errores,
+            diagnostico_core(
+                "CFB2003", nodo.linea,
+                "uso después de mover '" + nodo.valor + "'"
+            )
+        )
+        retornar "error"
+    }
+    retornar simbolo.tipo
+}
+
+funcion tipo_expresion_core(
+    nodo: cualquiera,
+    simbolos: lista,
+    errores: lista
+): texto {
+    si (nodo.tipo == "Numero") {
+        retornar "numero"
+    }
+    si (nodo.tipo == "Texto") {
+        retornar "texto"
+    }
+    si (nodo.tipo == "Identificador") {
+        retornar tipo_identificador_core(nodo, simbolos, errores)
+    }
+    si (nodo.tipo == "Mover") {
+        sea hijos_mover: lista = nodo.hijos
+        sea objetivo: cualquiera = hijos_mover[0]
+        si (objetivo.tipo != "Identificador") {
+            agregar(
+                errores,
+                diagnostico_core(
+                    "CFB2004", nodo.linea,
+                    "mover requiere una variable identificable"
+                )
+            )
+            retornar "error"
+        }
+        sea indice: numero = buscar_simbolo_core(simbolos, objetivo.valor)
+        sea tipo_objetivo: texto =
+            tipo_identificador_core(objetivo, simbolos, errores)
+        si (indice >= 0 y tipo_objetivo == "texto") {
+            sea simbolo: cualquiera = simbolos[indice]
+            simbolo.marcar_movido()
+        }
+        retornar tipo_objetivo
+    }
+    si (nodo.tipo == "Binario") {
+        sea hijos_binarios: lista = nodo.hijos
+        sea tipo_izquierdo: texto =
+            tipo_expresion_core(hijos_binarios[0], simbolos, errores)
+        sea tipo_derecho: texto =
+            tipo_expresion_core(hijos_binarios[1], simbolos, errores)
+        si (tipo_izquierdo == "error" o tipo_derecho == "error") {
+            retornar "error"
+        }
+        si (nodo.valor == "+") {
+            si (tipo_izquierdo == tipo_derecho y
+                (tipo_izquierdo == "numero" o tipo_izquierdo == "texto")) {
+                retornar tipo_izquierdo
+            }
+        } sino {
+            si (tipo_izquierdo == "numero" y tipo_derecho == "numero") {
+                retornar "numero"
+            }
+        }
+        agregar(
+            errores,
+            diagnostico_core(
+                "CFB2001", nodo.linea,
+                "operador '" + nodo.valor + "' incompatible con " +
+                tipo_izquierdo + " y " + tipo_derecho
+            )
+        )
+        retornar "error"
+    }
+    agregar(
+        errores,
+        diagnostico_core(
+            "CFB2099", nodo.linea,
+            "nodo de expresión desconocido '" + nodo.tipo + "'"
+        )
+    )
+    retornar "error"
+}
+
+funcion analizar_sentencia_core(
+    nodo: cualquiera,
+    simbolos: lista,
+    errores: lista
+) {
+    sea hijos: lista = nodo.hijos
+    si (nodo.tipo == "Declaracion") {
+        sea nombre: texto = nombre_declaracion_core(nodo.valor)
+        sea declarado: texto = tipo_declaracion_core(nodo.valor)
+        si (buscar_simbolo_core(simbolos, nombre) >= 0) {
+            agregar(
+                errores,
+                diagnostico_core(
+                    "CFB2005", nodo.linea,
+                    "variable duplicada '" + nombre + "'"
+                )
+            )
+            retornar errores
+        }
+        sea inferido: texto =
+            tipo_expresion_core(hijos[0], simbolos, errores)
+        sea tipo_final: texto = inferido
+        si (declarado != "") {
+            tipo_final = declarado
+            si (inferido != "error" y declarado != inferido) {
+                agregar(
+                    errores,
+                    diagnostico_core(
+                        "CFB2001", nodo.linea,
+                        "la variable '" + nombre + "' requiere " +
+                        declarado + " pero recibió " + inferido
+                    )
+                )
+            }
+        }
+        agregar(simbolos, SimboloCore(nombre, tipo_final, falso))
+        retornar errores
+    }
+    si (nodo.tipo == "Mostrar") {
+        tipo_expresion_core(hijos[0], simbolos, errores)
+        retornar errores
+    }
+    agregar(
+        errores,
+        diagnostico_core(
+            "CFB2098", nodo.linea,
+            "sentencia desconocida '" + nodo.tipo + "'"
+        )
+    )
+}
+
+funcion analizar_semantica_core(programa: cualquiera): cualquiera {
+    // Las declaraciones del propio compilador se validan estructuralmente por
+    // el parser Core 0.5. El análisis nominal entre funciones/clases se
+    // completa en B5 después de cerrar la reproducción Stage 2/3.
+    sea declaraciones: lista = programa.hijos
+    sea cursor_declaracion: numero = 0
+    mientras (cursor_declaracion < longitud(declaraciones)) {
+        sea declaracion_actual: cualquiera = declaraciones[cursor_declaracion]
+        sea tipo_declaracion: texto = declaracion_actual.tipo
+        si (
+            tipo_declaracion == "Funcion" o
+            tipo_declaracion == "Estructura" o
+            tipo_declaracion == "Clase"
+        ) {
+            retornar ResultadoSemanticoCore(verdadero, [])
+        }
+        cursor_declaracion = cursor_declaracion + 1
+    }
+    sea simbolos: lista = []
+    sea errores: lista = []
+    sea sentencias: lista = programa.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(sentencias)) {
+        analizar_sentencia_core(sentencias[indice], simbolos, errores)
+        indice = indice + 1
+    }
+    retornar ResultadoSemanticoCore(longitud(errores) == 0, errores)
+}
+
+funcion diagnosticos_semanticos_core(resultado: cualquiera): texto {
+    sea errores: lista = resultado.errores
+    sea salida: texto = ""
+    sea indice: numero = 0
+    mientras (indice < longitud(errores)) {
+        si (indice > 0) {
+            salida = salida + "\n"
+        }
+        salida = salida + errores[indice]
+        indice = indice + 1
+    }
+    retornar salida
+}

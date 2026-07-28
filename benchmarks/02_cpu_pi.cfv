@@ -1,0 +1,27 @@
+// CPU/ALU: serie de Leibniz sin operaciones de entrada/salida dentro del ciclo.
+iteraciones = 200000;
+indice = 0;
+suma = 0.0;
+signo = 1.0;
+inicio = tiempo_actual();
+
+mientras (indice < iteraciones) {
+    denominador = 2.0 * indice + 1.0;
+    suma = suma + signo / denominador;
+    signo = 0.0 - signo;
+    indice = indice + 1;
+}
+
+pi = 4.0 * suma;
+duracion = tiempo_actual() - inicio;
+mostrar("=== CPU: aproximación de Pi ===");
+mostrar("Iteraciones:");
+mostrar(iteraciones);
+mostrar("Pi aproximado:");
+mostrar(pi);
+mostrar("Error absoluto:");
+mostrar(absoluto(pi - 3.141592653589793));
+mostrar("Segundos:");
+mostrar(duracion);
+afirmar(absoluto(pi - 3.141592653589793) < 0.00001, "La aproximación de Pi se desvió");
+

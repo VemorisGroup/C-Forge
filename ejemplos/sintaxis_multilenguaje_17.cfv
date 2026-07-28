@@ -1,0 +1,19 @@
+// Todas estas formas se transforman en operaciones nativas ForgeValue.
+print("Salida estilo Python")
+console.log("Salida estilo JavaScript")
+System.out.println("Salida estilo Java")
+std::cout << "Salida estilo C++" << std::endl
+cout << "Salida C++ simplificada"
+
+lenguajes = ["C-Forge"]
+lenguajes.append("Python")
+lenguajes.push("JavaScript")
+
+print(lenguajes)
+print(lenguajes.length)
+print(lenguajes.length())
+print(lenguajes.len())
+print("ForgeValue".length)
+
+estado = forge_arena_estado()
+print(estado.offsets.compat_collection > 0)

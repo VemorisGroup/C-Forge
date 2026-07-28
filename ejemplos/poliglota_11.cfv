@@ -1,0 +1,20 @@
+import npm:path;
+
+mostrar("JavaScript npm:");
+mostrar(path.basename("/tmp/cforgev/demo.js"));
+mostrar(use_javascript("path", "extname", ["programa.ts"]));
+
+extern("javascript") {
+console.log("extern JavaScript activo");
+}
+
+extern("typescript") {
+const respuesta: number = 21 * 2;
+console.log("extern TypeScript: " + respuesta);
+}
+
+intentar {
+    mostrar(use_java("build/maven/demo.jar", "Demo", "sumar", [20, 22]));
+} capturar(error_java) {
+    mostrar("Java preparado; instala un JDK y agrega el JAR para ejecutarlo.");
+}

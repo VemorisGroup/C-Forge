@@ -1,0 +1,268 @@
+// C-Forge B6.3 — emisor directo Mach-O/ARM64 con firma ad hoc.
+// Produce un ejecutable nativo para macOS sin compilador, ensamblador,
+// enlazador ni la herramienta externa codesign durante la emisión.
+
+funcion agregar_le_macho(bytes: lista, valor_inicial: numero, cantidad: numero) {
+    sea valor: numero = valor_inicial
+    sea indice: numero = 0
+    mientras (indice < cantidad) {
+        sea byte: numero = valor % 256
+        agregar(bytes, byte)
+        valor = (valor - byte) / 256
+        indice = indice + 1
+    }
+}
+
+funcion agregar_be_macho(bytes: lista, valor_inicial: numero, cantidad: numero) {
+    sea temporales: lista = []
+    agregar_le_macho(temporales, valor_inicial, cantidad)
+    sea indice: numero = cantidad - 1
+    mientras (indice >= 0) {
+        agregar(bytes, temporales[indice])
+        indice = indice - 1
+    }
+}
+
+funcion agregar_ceros_macho(bytes: lista, cantidad: numero) {
+    sea indice: numero = 0
+    mientras (indice < cantidad) {
+        agregar(bytes, 0)
+        indice = indice + 1
+    }
+}
+
+funcion agregar_lista_macho(destino: lista, origen: lista) {
+    sea indice: numero = 0
+    mientras (indice < longitud(origen)) {
+        agregar(destino, origen[indice])
+        indice = indice + 1
+    }
+}
+
+funcion agregar_nombre_macho(bytes: lista, nombre: texto, ancho: numero) {
+    sea datos: lista = bytes_texto(nombre)
+    afirmar(longitud(datos) <= ancho, "nombre Mach-O demasiado largo")
+    agregar_lista_macho(bytes, datos)
+    agregar_ceros_macho(bytes, ancho - longitud(datos))
+}
+
+funcion primer_literal_macho(fuente: texto): texto {
+    sea resultado: texto = ""
+    sea dentro: booleano = falso
+    sea terminado: booleano = falso
+    sea indice: numero = 0
+    mientras (indice < longitud(fuente) y no terminado) {
+        sea caracter: texto = fuente[indice]
+        si (caracter == "\"") {
+            si (dentro) {
+                terminado = verdadero
+            } sino {
+                dentro = verdadero
+            }
+        } sino {
+            si (dentro) {
+                resultado = resultado + caracter
+            }
+        }
+        indice = indice + 1
+    }
+    afirmar(terminado, "B6.3 requiere mostrar(\"texto\")")
+    retornar resultado
+}
+
+funcion agregar_segmento_macho(
+    bytes: lista,
+    nombre: texto,
+    vmaddr: numero,
+    vmsize: numero,
+    fileoff: numero,
+    filesize: numero,
+    maxprot: numero,
+    initprot: numero,
+    secciones: numero
+) {
+    agregar_le_macho(bytes, 25, 4)
+    si (secciones == 0) {
+        agregar_le_macho(bytes, 72, 4)
+    } sino {
+        agregar_le_macho(bytes, 152, 4)
+    }
+    agregar_nombre_macho(bytes, nombre, 16)
+    agregar_le_macho(bytes, vmaddr, 8)
+    agregar_le_macho(bytes, vmsize, 8)
+    agregar_le_macho(bytes, fileoff, 8)
+    agregar_le_macho(bytes, filesize, 8)
+    agregar_le_macho(bytes, maxprot, 4)
+    agregar_le_macho(bytes, initprot, 4)
+    agregar_le_macho(bytes, secciones, 4)
+    agregar_le_macho(bytes, 0, 4)
+}
+
+funcion codigo_arm64_macho(tamano_mensaje: numero): lista {
+    afirmar(tamano_mensaje < 65536, "literal demasiado grande para MOVZ ARM64")
+    sea codigo: lista = []
+    agregar_le_macho(codigo, 3531604000, 4)
+    agregar_le_macho(codigo, 268435681, 4)
+    agregar_le_macho(codigo, 3531603970 + tamano_mensaje * 32, 4)
+    agregar_le_macho(codigo, 3531604112, 4)
+    agregar_le_macho(codigo, 3556773889, 4)
+    agregar_le_macho(codigo, 3531603968, 4)
+    agregar_le_macho(codigo, 3531604016, 4)
+    agregar_le_macho(codigo, 3556773889, 4)
+    retornar codigo
+}
+
+funcion firma_macho(imagen_texto: lista): lista {
+    afirmar(longitud(imagen_texto) == 16384, "página __TEXT inválida")
+    sea identificador: lista = bytes_texto("org.vemoris.cforge.direct")
+    agregar(identificador, 0)
+
+    sea hash_offset: numero = 88 + longitud(identificador)
+    sea longitud_directorio: numero = hash_offset + 128
+    sea longitud_superblob: numero = 20 + longitud_directorio
+    sea firma: lista = []
+
+    agregar_be_macho(firma, 4208856256, 4)
+    agregar_be_macho(firma, longitud_superblob, 4)
+    agregar_be_macho(firma, 1, 4)
+    agregar_be_macho(firma, 0, 4)
+    agregar_be_macho(firma, 20, 4)
+
+    agregar_be_macho(firma, 4208856066, 4)
+    agregar_be_macho(firma, longitud_directorio, 4)
+    agregar_be_macho(firma, 132096, 4)
+    agregar_be_macho(firma, 2, 4)
+    agregar_be_macho(firma, hash_offset, 4)
+    agregar_be_macho(firma, 88, 4)
+    agregar_be_macho(firma, 0, 4)
+    agregar_be_macho(firma, 4, 4)
+    agregar_be_macho(firma, 16384, 4)
+    agregar_lista_macho(firma, [32, 2, 0, 12])
+    agregar_be_macho(firma, 0, 4)
+    agregar_be_macho(firma, 0, 4)
+    agregar_be_macho(firma, 0, 4)
+    agregar_be_macho(firma, 0, 4)
+    agregar_be_macho(firma, 0, 8)
+    agregar_be_macho(firma, 0, 8)
+    agregar_be_macho(firma, 32, 8)
+    agregar_be_macho(firma, 1, 8)
+    agregar_lista_macho(firma, identificador)
+
+    sea pagina: numero = 0
+    mientras (pagina < 4) {
+        sea hash: lista = sha256_rango(imagen_texto, pagina * 4096, 4096)
+        agregar_lista_macho(firma, hash)
+        pagina = pagina + 1
+    }
+    mientras (longitud(firma) < 272) {
+        agregar(firma, 0)
+    }
+    afirmar(longitud(firma) == 272, "firma Mach-O inválida")
+    retornar firma
+}
+
+funcion emitir_macho_arm64(mensaje_sin_salto: texto): lista {
+    sea mensaje: lista = bytes_texto(mensaje_sin_salto)
+    agregar(mensaje, 10)
+    sea codigo: lista = codigo_arm64_macho(longitud(mensaje))
+    sea imagen: lista = []
+
+    agregar_le_macho(imagen, 4277009103, 4)
+    agregar_le_macho(imagen, 16777228, 4)
+    agregar_le_macho(imagen, 0, 4)
+    agregar_le_macho(imagen, 2, 4)
+    agregar_le_macho(imagen, 10, 4)
+    agregar_le_macho(imagen, 496, 4)
+    agregar_le_macho(imagen, 2097285, 4)
+    agregar_le_macho(imagen, 0, 4)
+
+    agregar_segmento_macho(imagen, "__PAGEZERO", 0, 4294967296, 0, 0, 0, 0, 0)
+    agregar_segmento_macho(
+        imagen, "__TEXT", 4294967296, 16384, 0, 16384, 5, 5, 1
+    )
+    agregar_nombre_macho(imagen, "__text", 16)
+    agregar_nombre_macho(imagen, "__TEXT", 16)
+    agregar_le_macho(imagen, 4294967824, 8)
+    agregar_le_macho(imagen, 32, 8)
+    agregar_le_macho(imagen, 528, 4)
+    agregar_le_macho(imagen, 2, 4)
+    agregar_le_macho(imagen, 0, 4)
+    agregar_le_macho(imagen, 0, 4)
+    agregar_le_macho(imagen, 2147484672, 4)
+    agregar_le_macho(imagen, 0, 4)
+    agregar_le_macho(imagen, 0, 4)
+    agregar_le_macho(imagen, 0, 4)
+
+    agregar_segmento_macho(
+        imagen, "__LINKEDIT", 4294983680, 16384, 16384, 272, 1, 1, 0
+    )
+
+    agregar_le_macho(imagen, 14, 4)
+    agregar_le_macho(imagen, 32, 4)
+    agregar_le_macho(imagen, 12, 4)
+    agregar_lista_macho(imagen, bytes_texto("/usr/lib/dyld"))
+    agregar(imagen, 0)
+    agregar_ceros_macho(imagen, 6)
+
+    agregar_le_macho(imagen, 50, 4)
+    agregar_le_macho(imagen, 32, 4)
+    agregar_le_macho(imagen, 1, 4)
+    agregar_le_macho(imagen, 851968, 4)
+    agregar_le_macho(imagen, 1769472, 4)
+    agregar_le_macho(imagen, 1, 4)
+    agregar_le_macho(imagen, 3, 4)
+    agregar_le_macho(imagen, 0, 4)
+
+    agregar_le_macho(imagen, 42, 4)
+    agregar_le_macho(imagen, 16, 4)
+    agregar_le_macho(imagen, 0, 8)
+
+    agregar_le_macho(imagen, 2147483688, 4)
+    agregar_le_macho(imagen, 24, 4)
+    agregar_le_macho(imagen, 528, 8)
+    agregar_le_macho(imagen, 0, 8)
+
+    agregar_le_macho(imagen, 12, 4)
+    agregar_le_macho(imagen, 56, 4)
+    agregar_le_macho(imagen, 24, 4)
+    agregar_le_macho(imagen, 2, 4)
+    agregar_le_macho(imagen, 89063424, 4)
+    agregar_le_macho(imagen, 65536, 4)
+    agregar_lista_macho(imagen, bytes_texto("/usr/lib/libSystem.B.dylib"))
+    agregar(imagen, 0)
+    agregar_ceros_macho(imagen, 5)
+
+    agregar_le_macho(imagen, 29, 4)
+    agregar_le_macho(imagen, 16, 4)
+    agregar_le_macho(imagen, 16384, 4)
+    agregar_le_macho(imagen, 272, 4)
+
+    agregar_le_macho(imagen, 27, 4)
+    agregar_le_macho(imagen, 24, 4)
+    agregar_ceros_macho(imagen, 16)
+
+    afirmar(longitud(imagen) == 528, "comandos Mach-O no terminan en 528")
+    agregar_lista_macho(imagen, codigo)
+    agregar_lista_macho(imagen, mensaje)
+    mientras (longitud(imagen) < 16384) {
+        agregar(imagen, 0)
+    }
+    afirmar(longitud(imagen) == 16384, "__TEXT excede una página ARM64")
+    sea firma: lista = firma_macho(imagen)
+    agregar_lista_macho(imagen, firma)
+    retornar imagen
+}
+
+sea argumentos: lista = argumentos_programa()
+afirmar(
+    longitud(argumentos) == 4,
+    "uso: cforge-macho-arm64 archivo.cfv -o ejecutable"
+)
+afirmar(argumentos[2] == "-o", "se esperaba -o")
+
+sea fuente: texto = leer_archivo(argumentos[1])
+sea mensaje: texto = primer_literal_macho(fuente)
+sea ejecutable: lista = emitir_macho_arm64(mensaje)
+afirmar(escribir_bytes(argumentos[3], ejecutable), "no se pudo escribir Mach-O")
+afirmar(hacer_ejecutable(argumentos[3]), "no se pudo marcar como ejecutable")
+mostrar("C-Forge emitió código máquina Mach-O/ARM64: " + argumentos[3])

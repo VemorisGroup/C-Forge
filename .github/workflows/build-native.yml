@@ -1,0 +1,102 @@
+name: Build cforgev native binary
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos-arm64
+            binary: cforgev
+          - os: ubuntu-latest
+            platform: linux-x64
+            binary: cforgev
+          - os: windows-latest
+            platform: windows-x64
+            binary: cforgev.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang++ (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang
+
+      - name: Add clang++ to PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "C:/Program Files/LLVM/bin" >> $GITHUB_PATH
+          clang++ --version || echo "clang++ no encontrado en ruta default"
+
+      - name: Bootstrap — compile cforgev.cpp to temporary interpreter
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            clang++ -std=c++17 -O2 -Iinclude cforgev.cpp -o cforgev_bootstrap.exe
+          else
+            clang++ -std=c++17 -O2 -Iinclude cforgev.cpp -o cforgev_bootstrap
+          fi
+
+      - name: Self-host — use bootstrap to compile cforgev.cfv
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ./cforgev_bootstrap.exe compilador_nativo.cfv cforgev.cfv ${{ matrix.binary }}
+          else
+            ./cforgev_bootstrap compilador_nativo.cfv cforgev.cfv ${{ matrix.binary }}
+          fi
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          echo 'mostrar("C-Forge native OK en ${{ matrix.platform }}")' > smoke.cfv
+          ./${{ matrix.binary }} smoke.cfv
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cforgev-${{ matrix.platform }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+
+  # Adjuntar binarios al release de GitHub cuando se crea un tag vX.Y.Z
+  attach-to-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Rename binaries with platform suffix
+        run: |
+          mkdir release-bins
+          mv artifacts/cforgev-macos-arm64/cforgev    release-bins/cforgev-macos-arm64
+          mv artifacts/cforgev-linux-x64/cforgev      release-bins/cforgev-linux-x64
+          mv artifacts/cforgev-windows-x64/cforgev.exe release-bins/cforgev-windows-x64.exe
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.ref_name }}" release-bins/* \
+            --repo "${{ github.repository }}"

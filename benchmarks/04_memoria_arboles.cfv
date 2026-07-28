@@ -1,0 +1,31 @@
+// Memoria/RAII: objetos recursivos que quedan sin referencias al terminar cada llamada.
+clase Nodo {
+    campo izquierda: cualquiera;
+    campo derecha: cualquiera;
+}
+
+funcion crear_arbol(profundidad) {
+    si (profundidad <= 0) {
+        retornar Nodo(nulo, nulo);
+    }
+    retornar Nodo(crear_arbol(profundidad - 1), crear_arbol(profundidad - 1));
+}
+
+profundidad = 14;
+repeticiones = 5;
+vuelta = 0;
+inicio = tiempo_actual();
+
+mientras (vuelta < repeticiones) {
+    crear_arbol(profundidad);
+    vuelta = vuelta + 1;
+}
+
+nodos_por_arbol = potencia(2, profundidad + 1) - 1;
+duracion = tiempo_actual() - inicio;
+mostrar("=== Memoria: árboles binarios ===");
+mostrar("Nodos creados aproximadamente:");
+mostrar(nodos_por_arbol * repeticiones);
+mostrar("Segundos:");
+mostrar(duracion);
+

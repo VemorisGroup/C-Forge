@@ -1,0 +1,58 @@
+// Contrato ilustrativo de C-Forge 2.0 Draft.
+// Este archivo documenta la sintaxis objetivo; no se anuncia como ejecutable
+// por el motor 1.6 hasta que la matriz de capacidades lo demuestre.
+
+modulo demostracion
+
+publico interfaz Describible {
+    funcion describir() -> texto
+}
+
+publico registro Persona(nombre: texto, edad: u8)
+
+impl Describible para Persona {
+    funcion describir() -> texto {
+        retornar nombre + " (" + edad.como_texto() + ")"
+    }
+}
+
+publico enum ErrorDemo {
+    EntradaVacia,
+    EdadInvalida(valor: i64)
+}
+
+funcion crear_persona(nombre: texto, edad: i64)
+    -> Resultado<Persona, ErrorDemo>
+{
+    si nombre.longitud == 0 {
+        retornar error(ErrorDemo::EntradaVacia)
+    }
+    si edad < 0 o edad > 255 {
+        retornar error(ErrorDemo::EdadInvalida(edad))
+    }
+    retornar correcto(Persona(nombre: nombre, edad: edad.convertir<u8>()?))
+}
+
+async funcion describir_en_paralelo(personas: &Lista<Persona>)
+    -> Lista<texto>
+{
+    grupo descripciones {
+        sea tareas = [
+            lanzar_tarea async { persona.describir() }
+            para persona en personas
+        ]
+        retornar esperar todas(tareas)
+    }
+}
+
+funcion principal() -> async Resultado<unidad, ErrorDemo> {
+    var personas: Lista<Persona> = []
+    personas.agregar(crear_persona("Javier", 20)?)
+    personas.agregar(crear_persona("C-Forge", 2)?)
+
+    sea textos = esperar describir_en_paralelo(&personas)
+    para texto en textos {
+        mostrar(texto)
+    }
+    retornar correcto(())
+}

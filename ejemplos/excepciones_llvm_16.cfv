@@ -1,0 +1,16 @@
+sea capturado = falso
+
+intentar {
+    intentar {
+        mostrar(8 / 2)
+    } capturar (error_interno) {
+        mostrar(error_interno)
+    }
+
+    mostrar(10 / 0)
+} capturar (error) {
+    mostrar("Excepción LLVM capturada: " + error)
+    capturado = verdadero
+}
+
+mostrar(capturado)

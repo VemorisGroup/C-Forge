@@ -1,0 +1,13 @@
+clase Contador {
+    campo valor: numero
+
+    metodo sumar(x: numero): numero {
+        este.valor = este.valor + x
+        retornar este.valor
+    }
+}
+
+sea contador = Contador(10)
+mostrar(contador.sumar(5))
+mostrar(contador.valor)
+destruir(contador)

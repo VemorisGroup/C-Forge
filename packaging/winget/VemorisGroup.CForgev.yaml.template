@@ -1,0 +1,18 @@
+# Se completa con packaging/winget/generate.py después de publicar el ejecutable.
+PackageIdentifier: VemorisGroup.CForgev
+PackageVersion: VERSION
+PackageLocale: es-CL
+Publisher: Vemoris Group
+PackageName: C-Forge
+License: Proprietary
+ShortDescription: Lenguaje de programación experimental C-Forge
+PackageUrl: https://github.com/VemorisGroup/C-Forge
+InstallerType: portable
+Commands:
+  - cforge
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/VemorisGroup/C-Forge/releases/download/vVERSION/cforge-VERSION-windows-x64.exe
+    InstallerSha256: SHA256
+ManifestType: singleton
+ManifestVersion: 1.9.0

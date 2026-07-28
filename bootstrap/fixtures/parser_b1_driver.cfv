@@ -1,0 +1,19 @@
+// Driver B1. Se concatena después de core_lexer, core_ast y core_parser.
+sea fuente_b1: texto =
+    "sea respuesta: numero = 40 + 2 * 3\n" +
+    "mostrar(respuesta)\n"
+sea programa_b1: cualquiera = parsear_fuente_core(fuente_b1)
+mostrar(ast_core_canonico(programa_b1))
+
+sea fuente_texto_b1: texto =
+    "sea nombre: texto = \"C-\" + \"Forge\";\n" +
+    "print((nombre + \" B1\"));\n"
+sea programa_texto_b1: cualquiera = parsear_fuente_core(fuente_texto_b1)
+mostrar(ast_core_canonico(programa_texto_b1))
+
+sea fuente_asociatividad_b1: texto =
+    "sea calculo = 20 - 5 - 3\n" +
+    "mostrar(calculo)\n"
+sea programa_asociatividad_b1: cualquiera =
+    parsear_fuente_core(fuente_asociatividad_b1)
+mostrar(ast_core_canonico(programa_asociatividad_b1))

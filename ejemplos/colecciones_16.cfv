@@ -1,0 +1,11 @@
+sea identidad: tupla = ("C-Forge", 2, verdadero)
+sea motores: conjunto = conjunto("LLVM", "VM", "LLVM")
+
+mostrar(identidad)
+mostrar(identidad[1])
+mostrar(longitud(identidad))
+mostrar(motores)
+mostrar(longitud(motores))
+
+destruir(identidad)
+destruir(motores)

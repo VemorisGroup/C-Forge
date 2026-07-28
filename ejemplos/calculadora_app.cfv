@@ -1,0 +1,188 @@
+print("Iniciando Calculadora C-Forge para macOS...");
+
+extern("python") {
+import ast
+import operator
+import tkinter as tk
+
+
+OPERACIONES = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+}
+
+
+def evaluar_seguro(texto):
+    def resolver(nodo):
+        if isinstance(nodo, ast.Expression):
+            return resolver(nodo.body)
+        if isinstance(nodo, ast.Constant) and isinstance(nodo.value, (int, float)):
+            return nodo.value
+        if isinstance(nodo, ast.BinOp) and type(nodo.op) in OPERACIONES:
+            return OPERACIONES[type(nodo.op)](resolver(nodo.left), resolver(nodo.right))
+        if isinstance(nodo, ast.UnaryOp) and type(nodo.op) in OPERACIONES:
+            return OPERACIONES[type(nodo.op)](resolver(nodo.operand))
+        raise ValueError("Expresión no permitida")
+
+    return resolver(ast.parse(texto, mode="eval"))
+
+
+class CalculadoraCForge:
+    def __init__(self):
+        self.ventana = tk.Tk()
+        self.ventana.title("Calculadora C-Forge")
+        self.ventana.geometry("390x600")
+        self.ventana.minsize(350, 540)
+        self.ventana.configure(bg="#0d1117")
+
+        self.expresion = ""
+        self.pantalla = tk.StringVar(value="0")
+        self.crear_interfaz()
+        self.ventana.bind("<Key>", self.usar_teclado)
+
+    def crear_interfaz(self):
+        cabecera = tk.Frame(self.ventana, bg="#0d1117")
+        cabecera.pack(fill="x", padx=22, pady=(20, 10))
+
+        tk.Label(
+            cabecera,
+            text="CFv",
+            bg="#0d1117",
+            fg="#ff6b35",
+            font=("Helvetica Neue", 20, "bold"),
+        ).pack(side="left")
+        tk.Label(
+            cabecera,
+            text="Calculadora C-Forge",
+            bg="#0d1117",
+            fg="#94a3b8",
+            font=("Helvetica Neue", 14, "bold"),
+        ).pack(side="right")
+
+        pantalla = tk.Label(
+            self.ventana,
+            textvariable=self.pantalla,
+            anchor="e",
+            padx=18,
+            bg="#080c12",
+            fg="#f8fafc",
+            font=("Helvetica Neue", 34, "bold"),
+            relief="flat",
+        )
+        pantalla.pack(fill="x", padx=20, pady=(0, 18), ipady=18)
+
+        teclado = tk.Frame(self.ventana, bg="#0d1117")
+        teclado.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        for columna in range(4):
+            teclado.grid_columnconfigure(columna, weight=1)
+        for fila in range(5):
+            teclado.grid_rowconfigure(fila, weight=1)
+
+        teclas = [
+            ("AC", 0, 0, "accion", self.limpiar),
+            ("⌫", 0, 1, "accion", self.borrar),
+            ("%", 0, 2, "accion", self.porcentaje),
+            ("÷", 0, 3, "operador", lambda: self.agregar("/")),
+            ("7", 1, 0, "numero", lambda: self.agregar("7")),
+            ("8", 1, 1, "numero", lambda: self.agregar("8")),
+            ("9", 1, 2, "numero", lambda: self.agregar("9")),
+            ("×", 1, 3, "operador", lambda: self.agregar("*")),
+            ("4", 2, 0, "numero", lambda: self.agregar("4")),
+            ("5", 2, 1, "numero", lambda: self.agregar("5")),
+            ("6", 2, 2, "numero", lambda: self.agregar("6")),
+            ("−", 2, 3, "operador", lambda: self.agregar("-")),
+            ("1", 3, 0, "numero", lambda: self.agregar("1")),
+            ("2", 3, 1, "numero", lambda: self.agregar("2")),
+            ("3", 3, 2, "numero", lambda: self.agregar("3")),
+            ("+", 3, 3, "operador", lambda: self.agregar("+")),
+            ("0", 4, 0, "numero", lambda: self.agregar("0")),
+            (".", 4, 2, "numero", lambda: self.agregar(".")),
+            ("=", 4, 3, "igual", self.calcular),
+        ]
+
+        colores = {
+            "numero": "#253247",
+            "accion": "#475569",
+            "operador": "#ff6b35",
+            "igual": "#0ea5e9",
+        }
+        for texto, fila, columna, estilo, accion in teclas:
+            ancho = 2 if texto == "0" else 1
+            boton = tk.Button(
+                teclado,
+                text=texto,
+                command=accion,
+                bg=colores[estilo],
+                fg="white",
+                activebackground=colores[estilo],
+                activeforeground="white",
+                relief="flat",
+                borderwidth=0,
+                font=("Helvetica Neue", 20, "bold"),
+                cursor="hand2",
+            )
+            boton.grid(
+                row=fila,
+                column=columna,
+                columnspan=ancho,
+                sticky="nsew",
+                padx=5,
+                pady=5,
+            )
+
+    def mostrar(self):
+        self.pantalla.set(self.expresion if self.expresion else "0")
+
+    def agregar(self, valor):
+        self.expresion += valor
+        self.mostrar()
+
+    def limpiar(self):
+        self.expresion = ""
+        self.mostrar()
+
+    def borrar(self):
+        self.expresion = self.expresion[:-1]
+        self.mostrar()
+
+    def porcentaje(self):
+        try:
+            self.expresion = str(evaluar_seguro(self.expresion) / 100)
+            self.mostrar()
+        except Exception:
+            self.error()
+
+    def calcular(self):
+        try:
+            resultado = evaluar_seguro(self.expresion)
+            if isinstance(resultado, float) and resultado.is_integer():
+                resultado = int(resultado)
+            self.expresion = str(resultado)
+            self.mostrar()
+        except Exception:
+            self.error()
+
+    def error(self):
+        self.expresion = ""
+        self.pantalla.set("Error")
+
+    def usar_teclado(self, evento):
+        if evento.char in "0123456789.+-*/":
+            self.agregar(evento.char)
+        elif evento.keysym in ("Return", "KP_Enter"):
+            self.calcular()
+        elif evento.keysym == "BackSpace":
+            self.borrar()
+        elif evento.keysym == "Escape":
+            self.limpiar()
+
+    def ejecutar(self):
+        self.ventana.mainloop()
+
+
+CalculadoraCForge().ejecutar()
+}

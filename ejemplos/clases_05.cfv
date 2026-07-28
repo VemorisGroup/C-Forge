@@ -1,0 +1,22 @@
+clase Cuenta {
+    campo titular: texto;
+    campo saldo: numero;
+
+    metodo depositar(cantidad) {
+        este.saldo = este.saldo + cantidad;
+        retornar este.saldo;
+    }
+
+    metodo describir() {
+        retornar este.titular + ": " + a_texto(este.saldo);
+    }
+}
+
+sea cuenta: Cuenta = Cuenta("Javier", 100);
+cuenta.depositar(50);
+
+mostrar(cuenta.describir());
+mostrar("Raíz de 81:");
+mostrar(raiz(81));
+mostrar("Argumentos recibidos:");
+mostrar(argumentos());

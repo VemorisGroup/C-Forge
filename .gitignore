@@ -1,0 +1,45 @@
+# C-Forgev build products
+build/
+dist/
+*.dylib
+*.so
+*.dll
+*.exe
+*.o
+*.obj
+*.ll
+*.dSYM/
+
+# Generated and temporary workspaces
+work/
+__pycache__/
+*.egg-info/
+*.py[cod]
+*.cfv.bak
+.DS_Store
+
+# .NET generated files
+**/bin/
+**/obj/
+
+# Node / VS Code packaging
+node_modules/
+*.vsix
+*.zip
+.vscode-test/
+outputs/marketplace-assets/
+outputs/main.cfv
+
+# Only current official deliverables belong in the repository
+outputs/*
+!outputs/C-FORGE-CHEATSHEET.md
+!outputs/GUIA-PUBLICACION.md
+!outputs/cforge-master
+!outputs/cforge_master.cpp
+
+# Local editor settings
+.vscode/
+
+# Local clones and package-manager workspaces
+C-Forgev/
+mi-proyecto/

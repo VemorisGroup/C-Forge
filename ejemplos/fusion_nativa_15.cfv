@@ -1,0 +1,27 @@
+// Un solo archivo, sintaxis C-Forge y ForgeValue de extremo a extremo.
+funcion calcular_puntaje(valor) {
+    retornar valor * 2 + 1
+}
+
+entrada = "{\"proyecto\":\"C-Forge\",\"autor\":\"Javier\",\"valor\":21}"
+datos = json_parse(entrada)
+puntaje = calcular_puntaje(datos.valor)
+resumen = {
+    "proyecto": datos.proyecto,
+    "autor": datos.autor,
+    "puntaje": puntaje
+}
+
+huella = forge_hash(resumen)
+rendimiento = forge_bench("calcular_puntaje", 10000, [datos.valor])
+
+mostrar("=== Fusión nativa C-Forge ===")
+mostrar(resumen)
+mostrar("SHA-256 universal:")
+mostrar(huella)
+mostrar("Resultado del benchmark:")
+mostrar(rendimiento.resultado)
+mostrar("Operaciones por segundo:")
+mostrar(rendimiento.por_segundo)
+
+afirmar(rendimiento.resultado == 43, "El flujo ForgeValue perdió el valor")
