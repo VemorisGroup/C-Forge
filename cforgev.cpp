@@ -1749,6 +1749,76 @@ Value cfv_parse_sentencia(Value cfv_p) {
     (void)(cfv_tomar(cfv_p, Value{std::string(";", 1)}));
     return cfv_nodo(Value{std::string("Continuar", 9)}, Value{}, crear_lista({}));
   }
+  // match (expr) { caso patron [si guarda] { bloque } ... }
+  if (verdad(cfv_ver(cfv_p, Value{std::string("match", 5)}))) {
+    (void)(cfv_avanzar(cfv_p));
+    (void)(cfv_requerir(cfv_p, Value{std::string("(", 1)}, Value{std::string("Se esperaba '(' tras 'match'", 28)}));
+    Value cfv_match_expr = cfv_parse_expresion(cfv_p);
+    (void)(cfv_requerir(cfv_p, Value{std::string(")", 1)}, Value{std::string("Se esperaba ')' tras expresion match", 36)}));
+    (void)(cfv_requerir(cfv_p, Value{std::string("{", 1)}, Value{std::string("Se esperaba '{' en match", 24)}));
+    Value cfv_match_casos = crear_lista({});
+    while (verdad(Value{!verdad(cfv_ver(cfv_p, Value{std::string("}", 1)})) && !verdad(cfv_al_final(cfv_p))})) {
+      // caso patron [si guarda] { bloque }
+      if (verdad(cfv_ver(cfv_p, Value{std::string("caso", 4)}))) {
+        (void)(cfv_avanzar(cfv_p));
+      }
+      // Parse patron: literal, ident (bind), Tipo, [lista], {mapa}, _
+      Value cfv_patron = Value{};
+      std::string cfv_patron_tipo_str = "cualquiera";
+      if (verdad(cfv_ver(cfv_p, Value{std::string("_", 1)}))) {
+        // wildcard
+        (void)(cfv_avanzar(cfv_p));
+        cfv_patron = Value{std::string("_", 1)};
+        cfv_patron_tipo_str = "wildcard";
+      } else if (verdad(cfv_ver_tipo(cfv_p, Value{std::string("NUMBER", 6)}))) {
+        cfv_patron = cfv_parse_primaria(cfv_p);
+        cfv_patron_tipo_str = "literal_num";
+      } else if (verdad(cfv_ver_tipo(cfv_p, Value{std::string("STRING", 6)}))) {
+        cfv_patron = cfv_parse_primaria(cfv_p);
+        cfv_patron_tipo_str = "literal_txt";
+      } else if (verdad(cfv_ver(cfv_p, Value{std::string("verdadero", 9)})) || verdad(cfv_ver(cfv_p, Value{std::string("falso", 5)}))) {
+        cfv_patron = cfv_parse_primaria(cfv_p);
+        cfv_patron_tipo_str = "literal_bool";
+      } else if (verdad(cfv_ver(cfv_p, Value{std::string("nulo", 4)}))) {
+        (void)(cfv_avanzar(cfv_p));
+        cfv_patron = Value{};
+        cfv_patron_tipo_str = "literal_nulo";
+      } else if (verdad(cfv_ver_tipo(cfv_p, Value{std::string("IDENT", 5)}))) {
+        Value cfv_pt = cfv_avanzar(cfv_p);
+        cfv_patron = indice(cfv_pt, Value{std::string("lexema", 6)});
+        cfv_patron_tipo_str = "bind";
+      } else {
+        cfv_patron = Value{std::string("_", 1)};
+        cfv_patron_tipo_str = "wildcard";
+      }
+      // Guard: si (expr)
+      Value cfv_guarda = Value{};
+      if (verdad(cfv_ver(cfv_p, Value{std::string("si", 2)}))) {
+        (void)(cfv_avanzar(cfv_p));
+        (void)(cfv_requerir(cfv_p, Value{std::string("(", 1)}, Value{std::string("Se esperaba '(' en guarda", 25)}));
+        cfv_guarda = cfv_parse_expresion(cfv_p);
+        (void)(cfv_requerir(cfv_p, Value{std::string(")", 1)}, Value{std::string("Se esperaba ')' en guarda", 25)}));
+      }
+      // Arrow: =>  o bloque { }
+      (void)(cfv_tomar(cfv_p, Value{std::string("=>", 2)}));
+      Value cfv_caso_cuerpo = crear_lista({});
+      if (verdad(cfv_ver(cfv_p, Value{std::string("{", 1)}))) {
+        cfv_caso_cuerpo = cfv_parse_bloque(cfv_p);
+      } else {
+        // Single expression
+        Value cfv_expr_caso = cfv_parse_expresion(cfv_p);
+        (void)(cfv_tomar(cfv_p, Value{std::string(";", 1)}));
+        (void)(cfv_agregar(cfv_caso_cuerpo, cfv_nodo(Value{std::string("Retornar", 8)}, Value{}, crear_lista({cfv_expr_caso}))));
+      }
+      // Store caso as [tipo_patron, patron, guarda, bloque]
+      Value cfv_caso_nodo = cfv_nodo(Value{std::string("MatchCaso", 9)}, Value{std::string(cfv_patron_tipo_str)},
+          crear_lista({cfv_patron, cfv_guarda, cfv_nodo(Value{std::string("Bloque", 6)}, Value{}, cfv_caso_cuerpo)}));
+      (void)(cfv_agregar(cfv_match_casos, cfv_caso_nodo));
+      (void)(cfv_tomar(cfv_p, Value{std::string(",", 1)}));
+    }
+    (void)(cfv_requerir(cfv_p, Value{std::string("}", 1)}, Value{std::string("Se esperaba '}' al cerrar match", 31)}));
+    return cfv_nodo(Value{std::string("Match", 5)}, Value{}, crear_lista({cfv_match_expr, cfv_match_casos}));
+  }
   if (verdad(cfv_ver(cfv_p, Value{std::string("si", 2)}))) {
     (void)(cfv_avanzar(cfv_p));
     (void)(cfv_requerir(cfv_p, Value{std::string("(", 1)}, Value{std::string("Se esperaba '(' tras 'si'", 25)}));
@@ -5668,6 +5738,61 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
       asignar(cfv_i, cfv_i_tipo, suma(cfv_i, Value{1.0}), "i");
     }
     return crear_lista({Value{std::string("normal", 6)}, Value{}});
+  }
+  // ── Match/case runtime ────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_t, Value{std::string("Match", 5)}, "=="))) {
+    Value cfv_match_hijos = indice(cfv_stmt, Value{std::string("hijos", 5)});
+    Value cfv_match_val = cfv_eval_expr(indice(cfv_match_hijos, Value{0.0}), cfv_env, cfv_fns);
+    Value cfv_casos_lista = indice(cfv_match_hijos, Value{1.0});
+    bool cfv_match_ejecutado = false;
+    auto cfv_match_n = std::get_if<Lista>(&cfv_casos_lista.data);
+    if (cfv_match_n) {
+      for (auto& cfv_caso : **cfv_match_n) {
+        if (cfv_match_ejecutado) break;
+        // cfv_caso = MatchCaso node: valor=tipo_patron, hijos=[patron, guarda, bloque]
+        std::string cfv_tipo_patron = texto(indice(cfv_caso, Value{std::string("valor")}));
+        Value cfv_caso_hijos = indice(cfv_caso, Value{std::string("hijos")});
+        Value cfv_patron_val = indice(cfv_caso_hijos, Value{0.0});
+        Value cfv_guarda_val = indice(cfv_caso_hijos, Value{1.0});
+        Value cfv_caso_bloque = indice(cfv_caso_hijos, Value{2.0});
+        // Check match
+        bool cfv_match_ok = false;
+        Value cfv_bind_name = Value{};
+        if (cfv_tipo_patron == "wildcard") {
+          cfv_match_ok = true;
+        } else if (cfv_tipo_patron == "literal_num" || cfv_tipo_patron == "literal_txt" || cfv_tipo_patron == "literal_bool") {
+          cfv_match_ok = verdad(compara(cfv_match_val, cfv_eval_expr(cfv_patron_val, cfv_env, cfv_fns), "=="));
+        } else if (cfv_tipo_patron == "literal_nulo") {
+          cfv_match_ok = (cfv_match_val.index() == 0);
+        } else if (cfv_tipo_patron == "bind") {
+          // Bind variable name — always matches, binds value
+          cfv_match_ok = true;
+          cfv_bind_name = cfv_patron_val;
+        }
+        if (cfv_match_ok) {
+          // Check guard
+          if (cfv_guarda_val.index() != 0) {
+            Value cfv_guard_scope = cfv_env_nuevo_scope(cfv_env);
+            if (cfv_bind_name.index() == 2) {
+              (void)(cfv_env_declarar(cfv_guard_scope, cfv_bind_name, cfv_match_val));
+            }
+            Value cfv_guard_res = cfv_eval_expr(cfv_guarda_val, cfv_guard_scope, cfv_fns);
+            if (!verdad(cfv_guard_res)) continue;
+          }
+          // Execute block
+          Value cfv_scope_m = cfv_env_nuevo_scope(cfv_env);
+          if (cfv_bind_name.index() == 2) {
+            (void)(cfv_env_declarar(cfv_scope_m, cfv_bind_name, cfv_match_val));
+          }
+          Value cfv_senal_m = cfv_exec_bloque(indice(cfv_caso_bloque, Value{std::string("hijos")}), cfv_scope_m, cfv_fns);
+          cfv_match_ejecutado = true;
+          if (verdad(compara(indice(cfv_senal_m, Value{0.0}), Value{std::string("normal")}, "!="))) {
+            return cfv_senal_m;
+          }
+        }
+      }
+    }
+    return crear_lista({Value{std::string("normal")}, Value{}});
   }
   if (verdad(compara(cfv_t, Value{std::string("Mientras", 8)}, "=="))) {
     Value cfv_cond_nodo = indice(indice(cfv_stmt, Value{std::string("hijos", 5)}), Value{0.0});

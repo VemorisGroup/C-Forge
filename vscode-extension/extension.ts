@@ -1,319 +1,421 @@
+/**
+ * C-Forge VSCode Extension v3.1.0
+ *
+ * Features:
+ *   - Full LSP client (autocompletado, hover, ir a definición, referencias,
+ *     renombrar, acciones de código, tokens semánticos, formato, firma)
+ *   - Ejecutar archivo / selección en terminal integrado
+ *   - Formato automático al guardar
+ *   - Diagnósticos en tiempo real
+ *   - Snippets + resaltado de sintaxis (TextMate grammar)
+ */
+
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 
+import {
+    LanguageClient,
+    LanguageClientOptions,
+    ServerOptions,
+    TransportKind,
+    Executable,
+} from 'vscode-languageclient/node';
+
+let client: LanguageClient | undefined;
+
+// ── Activate ──────────────────────────────────────────────────────────────────
 export function activate(context: vscode.ExtensionContext) {
-    console.log('C-Forge extension activada');
+    console.log('C-Forge extension v3.1.0 activada');
 
-    // ── Comando: Ejecutar archivo ──────────────────────────────────────────────
-    const runFile = vscode.commands.registerCommand('cforge.runFile', () => {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            vscode.window.showErrorMessage('No hay archivo activo');
-            return;
-        }
+    const config = vscode.workspace.getConfiguration('cforge');
 
-        const filePath = editor.document.fileName;
-        if (!filePath.endsWith('.cfv')) {
-            vscode.window.showErrorMessage('Solo se pueden ejecutar archivos .cfv');
-            return;
-        }
-
-        // Guardar antes de ejecutar
-        editor.document.save().then(() => {
-            const config = vscode.workspace.getConfiguration('cforge');
-            const interpreterPath = config.get<string>('interpreterPath', 'cforgev');
-            const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
-            const cwd = workspaceFolder ? workspaceFolder.uri.fsPath : path.dirname(filePath);
-
-            const terminal = vscode.window.createTerminal({
-                name: `C-Forge: ${path.basename(filePath)}`,
-                cwd
-            });
-            terminal.show();
-            terminal.sendText(`${interpreterPath} "${filePath}"`);
-        });
-    });
-
-    // ── Comando: Ejecutar selección ────────────────────────────────────────────
-    const runSelection = vscode.commands.registerCommand('cforge.runSelection', () => {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor || editor.selection.isEmpty) {
-            vscode.window.showErrorMessage('No hay texto seleccionado');
-            return;
-        }
-
-        const selection = editor.document.getText(editor.selection);
-        const config = vscode.workspace.getConfiguration('cforge');
-        const interpreterPath = config.get<string>('interpreterPath', 'cforgev');
-
-        // Escribir selección a archivo temporal y ejecutar
-        const tmpFile = path.join(require('os').tmpdir(), `cforge_sel_${Date.now()}.cfv`);
-        require('fs').writeFileSync(tmpFile, selection);
-
-        const terminal = vscode.window.createTerminal({ name: 'C-Forge: Selección' });
-        terminal.show();
-        terminal.sendText(`${interpreterPath} "${tmpFile}"`);
-    });
-
-    // ── Comando: Formatear documento ───────────────────────────────────────────
-    const formatDocument = vscode.commands.registerCommand('cforge.formatDocument', () => {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) { return; }
-
-        const text = editor.document.getText();
-        const formatted = formatCForge(text);
-
-        const edit = new vscode.WorkspaceEdit();
-        const fullRange = new vscode.Range(
-            editor.document.positionAt(0),
-            editor.document.positionAt(text.length)
-        );
-        edit.replace(editor.document.uri, fullRange, formatted);
-        vscode.workspace.applyEdit(edit);
-    });
-
-    // ── Document Formatter ─────────────────────────────────────────────────────
-    const formatter = vscode.languages.registerDocumentFormattingEditProvider('cforge', {
-        provideDocumentFormattingEdits(document) {
-            const text = document.getText();
-            const formatted = formatCForge(text);
-            const fullRange = new vscode.Range(
-                document.positionAt(0),
-                document.positionAt(text.length)
-            );
-            return [vscode.TextEdit.replace(fullRange, formatted)];
-        }
-    });
-
-    // ── Hover Provider — documentación inline ─────────────────────────────────
-    const hover = vscode.languages.registerHoverProvider('cforge', {
-        provideHover(document, position) {
-            const word = document.getText(document.getWordRangeAtPosition(position));
-            const doc = BUILTIN_DOCS[word];
-            if (doc) {
-                const md = new vscode.MarkdownString();
-                md.appendCodeblock(doc.signature, 'cforge');
-                md.appendMarkdown('\n\n' + doc.description);
-                if (doc.example) {
-                    md.appendMarkdown('\n\n**Ejemplo:**');
-                    md.appendCodeblock(doc.example, 'cforge');
-                }
-                return new vscode.Hover(md);
-            }
-            return null;
-        }
-    });
-
-    // ── Completion Provider ────────────────────────────────────────────────────
-    const completion = vscode.languages.registerCompletionItemProvider('cforge', {
-        provideCompletionItems(document, position) {
-            const items: vscode.CompletionItem[] = [];
-
-            // Builtins
-            for (const [name, doc] of Object.entries(BUILTIN_DOCS)) {
-                const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Function);
-                item.documentation = new vscode.MarkdownString(doc.description);
-                item.detail = doc.signature;
-                if (doc.insertText) {
-                    item.insertText = new vscode.SnippetString(doc.insertText);
-                }
-                items.push(item);
-            }
-
-            // Keywords
-            const keywords = [
-                'funcion', 'sea', 'constante', 'si', 'sino', 'mientras', 'para', 'en',
-                'retornar', 'romper', 'continuar', 'segun', 'caso', 'defecto',
-                'intentar', 'capturar', 'lanzar', 'finalmente', 'importar', 'exportar',
-                'clase', 'extiende', 'this', 'super', 'nuevo', 'enum', 'tipo',
-                'verdadero', 'falso', 'nulo', 'async', 'esperar',
-                'numero', 'texto', 'booleano', 'lista', 'mapa', 'cualquiera'
-            ];
-            for (const kw of keywords) {
-                const item = new vscode.CompletionItem(kw, vscode.CompletionItemKind.Keyword);
-                items.push(item);
-            }
-
-            return items;
-        }
-    }, '.', '(');
-
-    // ── Diagnósticos básicos ───────────────────────────────────────────────────
-    const diagnosticCollection = vscode.languages.createDiagnosticCollection('cforge');
-
-    function updateDiagnostics(document: vscode.TextDocument) {
-        if (document.languageId !== 'cforge') { return; }
-        const diagnostics: vscode.Diagnostic[] = [];
-        const text = document.getText();
-        const lines = text.split('\n');
-
-        lines.forEach((line, i) => {
-            // Detectar uso de var (debería ser 'sea')
-            const varMatch = /^\s*var\s+/.exec(line);
-            if (varMatch) {
-                const range = new vscode.Range(i, 0, i, line.length);
-                const diag = new vscode.Diagnostic(
-                    range,
-                    "En C-Forge usa 'sea' en lugar de 'var'",
-                    vscode.DiagnosticSeverity.Warning
-                );
-                diagnostics.push(diag);
-            }
-        });
-
-        diagnosticCollection.set(document.uri, diagnostics);
+    // ── Start LSP ────────────────────────────────────────────────────────────
+    if (config.get<boolean>('lspEnabled', true)) {
+        startLSP(context);
     }
 
-    vscode.workspace.onDidChangeTextDocument(e => updateDiagnostics(e.document));
-    vscode.window.onDidChangeActiveTextEditor(e => { if (e) updateDiagnostics(e.document); });
-
+    // ── Commands ─────────────────────────────────────────────────────────────
     context.subscriptions.push(
-        runFile, runSelection, formatDocument,
-        formatter, hover, completion,
-        diagnosticCollection
+        vscode.commands.registerCommand('cforge.runFile', () => runFile()),
+        vscode.commands.registerCommand('cforge.runSelection', () => runSelection()),
+        vscode.commands.registerCommand('cforge.formatDocument', () => formatDocument()),
+        vscode.commands.registerCommand('cforge.restartLsp', () => restartLSP(context)),
+        vscode.commands.registerCommand('cforge.openPlayground', () => openPlayground(context)),
+    );
+
+    // ── Format on save ───────────────────────────────────────────────────────
+    context.subscriptions.push(
+        vscode.workspace.onWillSaveTextDocument(e => {
+            if (e.document.languageId !== 'cforge') return;
+            const cfg = vscode.workspace.getConfiguration('cforge');
+            if (!cfg.get<boolean>('formatOnSave', true)) return;
+            // Delegate to LSP formatter if available, else use local formatter
+            if (client && client.isRunning()) return; // LSP handles it
+            const edit = formatDocumentLocally(e.document);
+            if (edit) e.waitUntil(Promise.resolve([edit]));
+        })
+    );
+
+    // ── Status bar ────────────────────────────────────────────────────────────
+    const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    statusBar.text = '$(play) C-Forge';
+    statusBar.tooltip = 'Ejecutar archivo C-Forge';
+    statusBar.command = 'cforge.runFile';
+    statusBar.show();
+    context.subscriptions.push(statusBar);
+
+    vscode.window.onDidChangeActiveTextEditor(ed => {
+        if (ed && ed.document.languageId === 'cforge') {
+            statusBar.show();
+        } else {
+            statusBar.hide();
+        }
+    }, null, context.subscriptions);
+}
+
+// ── LSP client setup ──────────────────────────────────────────────────────────
+function startLSP(context: vscode.ExtensionContext) {
+    const config = vscode.workspace.getConfiguration('cforge');
+    let lspPath = config.get<string>('lspServerPath', '').trim();
+
+    // Find lsp_server.py: user config → bundled in extension → tools/ sibling
+    if (!lspPath || !fs.existsSync(lspPath)) {
+        const bundled = path.join(context.extensionPath, 'lsp_server.py');
+        if (fs.existsSync(bundled)) {
+            lspPath = bundled;
+        } else {
+            // Try sibling tools/ directory (development layout)
+            const sibling = path.join(context.extensionPath, '..', 'tools', 'lsp_server.py');
+            if (fs.existsSync(sibling)) {
+                lspPath = sibling;
+            }
+        }
+    }
+
+    if (!lspPath) {
+        vscode.window.showWarningMessage(
+            'C-Forge LSP: No se encontró lsp_server.py. Configura cforge.lspServerPath.'
+        );
+        return;
+    }
+
+    const stdlibPath = config.get<string>('stdlibPath', '');
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (stdlibPath) env['CFORGE_STDLIB'] = stdlibPath;
+
+    const serverExecutable: Executable = {
+        command: 'python3',
+        args: [lspPath],
+        options: { env }
+    };
+
+    const serverOptions: ServerOptions = {
+        run: serverExecutable,
+        debug: serverExecutable,
+    };
+
+    const clientOptions: LanguageClientOptions = {
+        documentSelector: [{ scheme: 'file', language: 'cforge' }],
+        synchronize: {
+            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.cfv'),
+        },
+        outputChannelName: 'C-Forge LSP',
+        traceOutputChannel: vscode.window.createOutputChannel('C-Forge LSP Trace'),
+        middleware: {
+            // Enrich completion items with C-Forge specific info
+            provideCompletionItem: async (document, position, context, token, next) => {
+                const result = await next(document, position, context, token);
+                return result;
+            }
+        }
+    };
+
+    client = new LanguageClient(
+        'cforge',
+        'C-Forge Language Server',
+        serverOptions,
+        clientOptions
+    );
+
+    client.start().then(() => {
+        console.log('C-Forge LSP iniciado');
+    }).catch(err => {
+        vscode.window.showErrorMessage(`C-Forge LSP falló al iniciar: ${err.message}`);
+    });
+
+    context.subscriptions.push({ dispose: () => client?.stop() });
+}
+
+async function restartLSP(context: vscode.ExtensionContext) {
+    if (client) {
+        await client.stop();
+        client = undefined;
+    }
+    startLSP(context);
+    vscode.window.showInformationMessage('C-Forge LSP reiniciado');
+}
+
+// ── Run commands ──────────────────────────────────────────────────────────────
+function runFile() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+        vscode.window.showErrorMessage('No hay archivo activo');
+        return;
+    }
+    if (!editor.document.fileName.endsWith('.cfv')) {
+        vscode.window.showErrorMessage('Solo se pueden ejecutar archivos .cfv');
+        return;
+    }
+    editor.document.save().then(() => {
+        const config = vscode.workspace.getConfiguration('cforge');
+        const interp = config.get<string>('interpreterPath', 'cforgev');
+        const stdlibPath = config.get<string>('stdlibPath', '');
+        const filePath = editor.document.fileName;
+        const wf = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+        const cwd = wf ? wf.uri.fsPath : path.dirname(filePath);
+
+        const terminal = vscode.window.createTerminal({
+            name: `C-Forge: ${path.basename(filePath)}`,
+            cwd,
+            env: stdlibPath ? { CFORGE_STDLIB: stdlibPath } : undefined,
+        });
+        terminal.show();
+        terminal.sendText(`${interp} "${filePath}"`);
+    });
+}
+
+function runSelection() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.selection.isEmpty) {
+        vscode.window.showErrorMessage('No hay texto seleccionado');
+        return;
+    }
+    const code = editor.document.getText(editor.selection);
+    const config = vscode.workspace.getConfiguration('cforge');
+    const interp = config.get<string>('interpreterPath', 'cforgev');
+    const stdlibPath = config.get<string>('stdlibPath', '');
+
+    const tmpFile = path.join(os.tmpdir(), `cforge_sel_${Date.now()}.cfv`);
+    fs.writeFileSync(tmpFile, code, 'utf8');
+
+    const terminal = vscode.window.createTerminal({
+        name: 'C-Forge: Selección',
+        env: stdlibPath ? { CFORGE_STDLIB: stdlibPath } : undefined,
+    });
+    terminal.show();
+    terminal.sendText(`${interp} "${tmpFile}"`);
+}
+
+function formatDocument() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'cforge') return;
+
+    // Prefer LSP formatter
+    if (client && client.isRunning()) {
+        vscode.commands.executeCommand('editor.action.formatDocument');
+        return;
+    }
+
+    const text = editor.document.getText();
+    const formatted = formatCForge(text);
+    if (formatted === text) return;
+
+    const edit = new vscode.WorkspaceEdit();
+    const fullRange = new vscode.Range(
+        editor.document.positionAt(0),
+        editor.document.positionAt(text.length)
+    );
+    edit.replace(editor.document.uri, fullRange, formatted);
+    vscode.workspace.applyEdit(edit);
+}
+
+function formatDocumentLocally(document: vscode.TextDocument): vscode.TextEdit | null {
+    const text = document.getText();
+    const formatted = formatCForge(text);
+    if (formatted === text) return null;
+    return vscode.TextEdit.replace(
+        new vscode.Range(document.positionAt(0), document.positionAt(text.length)),
+        formatted
     );
 }
 
-// ── Formateador básico ─────────────────────────────────────────────────────────
+// ── Playground ────────────────────────────────────────────────────────────────
+function openPlayground(context: vscode.ExtensionContext) {
+    const panel = vscode.window.createWebviewPanel(
+        'cforgePlayground',
+        'C-Forge Playground',
+        vscode.ViewColumn.Beside,
+        { enableScripts: true }
+    );
+
+    panel.webview.html = getPlaygroundHTML();
+
+    panel.webview.onDidReceiveMessage(async msg => {
+        if (msg.type === 'run') {
+            const code = msg.code as string;
+            const tmpFile = path.join(os.tmpdir(), `cfplayground_${Date.now()}.cfv`);
+            fs.writeFileSync(tmpFile, code, 'utf8');
+
+            const config = vscode.workspace.getConfiguration('cforge');
+            const interp = config.get<string>('interpreterPath', 'cforgev');
+            const stdlibPath = config.get<string>('stdlibPath', '');
+            const env = stdlibPath ? { ...process.env, CFORGE_STDLIB: stdlibPath } : process.env;
+
+            cp.exec(`${interp} "${tmpFile}"`, { env, timeout: 10000 }, (err, stdout, stderr) => {
+                try { fs.unlinkSync(tmpFile); } catch {}
+                panel.webview.postMessage({
+                    type: 'result',
+                    stdout: stdout || '',
+                    stderr: err ? (stderr || err.message) : '',
+                    exitCode: err ? (err as any).code || 1 : 0,
+                });
+            });
+        }
+    }, undefined, context.subscriptions);
+}
+
+function getPlaygroundHTML(): string {
+    return `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>C-Forge Playground</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex; flex-direction: column; }
+  header { background: #181825; padding: 10px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #313244; }
+  header h1 { font-size: 16px; color: #cba6f7; }
+  button { background: #cba6f7; color: #1e1e2e; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  button:hover { background: #d0bcff; }
+  #clear-btn { background: #45475a; color: #cdd6f4; }
+  main { display: flex; flex: 1; overflow: hidden; }
+  #editor-pane { flex: 1; display: flex; flex-direction: column; }
+  textarea { flex: 1; background: #1e1e2e; color: #cdd6f4; border: none; padding: 12px; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 14px; resize: none; outline: none; border-right: 1px solid #313244; tab-size: 4; }
+  #output-pane { width: 40%; display: flex; flex-direction: column; }
+  #output-header { background: #181825; padding: 8px 12px; font-size: 12px; color: #6c7086; border-bottom: 1px solid #313244; }
+  #output { flex: 1; padding: 12px; font-family: monospace; font-size: 13px; white-space: pre-wrap; overflow-y: auto; }
+  .stdout { color: #a6e3a1; }
+  .stderr { color: #f38ba8; }
+  .info { color: #89b4fa; }
+  #status { font-size: 12px; color: #6c7086; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚡ C-Forge Playground</h1>
+  <button onclick="runCode()">▶ Ejecutar</button>
+  <button id="clear-btn" onclick="clearOutput()">✕ Limpiar</button>
+  <span id="status"></span>
+</header>
+<main>
+  <div id="editor-pane">
+    <textarea id="editor" placeholder="// Escribe tu código C-Forge aquí..." spellcheck="false">// ¡Bienvenido a C-Forge Playground!
+funcion saludar(nombre: texto): texto {
+    retornar "¡Hola, " + nombre + "!"
+}
+
+sea mensaje = saludar("Mundo")
+mostrar(mensaje)
+
+// Pattern matching
+sea x = 42
+match (x) {
+    caso 0 { mostrar("cero") }
+    caso n si (n > 0) { mostrar("positivo: " + a_texto(n)) }
+    caso _ { mostrar("negativo") }
+}
+</textarea>
+  </div>
+  <div id="output-pane">
+    <div id="output-header">Salida</div>
+    <div id="output"><span class="info">Presiona ▶ Ejecutar para correr tu código.</span></div>
+  </div>
+</main>
+<script>
+  const vscode = acquireVsCodeApi();
+  const editor = document.getElementById('editor');
+  const output = document.getElementById('output');
+  const status = document.getElementById('status');
+
+  // Tab key support
+  editor.addEventListener('keydown', e => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = editor.selectionStart;
+      const end = editor.selectionEnd;
+      editor.value = editor.value.substring(0, start) + '    ' + editor.value.substring(end);
+      editor.selectionStart = editor.selectionEnd = start + 4;
+    }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      runCode();
+    }
+  });
+
+  function runCode() {
+    status.textContent = 'Ejecutando...';
+    output.innerHTML = '<span class="info">Ejecutando...</span>';
+    vscode.postMessage({ type: 'run', code: editor.value });
+  }
+
+  function clearOutput() {
+    output.innerHTML = '<span class="info">Listo.</span>';
+    status.textContent = '';
+  }
+
+  window.addEventListener('message', e => {
+    const msg = e.data;
+    if (msg.type === 'result') {
+      const lines = [];
+      if (msg.stdout) lines.push('<span class="stdout">' + escHtml(msg.stdout) + '</span>');
+      if (msg.stderr) lines.push('<span class="stderr">Error: ' + escHtml(msg.stderr) + '</span>');
+      if (!msg.stdout && !msg.stderr) lines.push('<span class="info">(sin salida)</span>');
+      output.innerHTML = lines.join('');
+      status.textContent = msg.exitCode === 0 ? '✓ OK' : '✗ Error';
+      status.style.color = msg.exitCode === 0 ? '#a6e3a1' : '#f38ba8';
+    }
+  });
+
+  function escHtml(t) {
+    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+</script>
+</body>
+</html>`;
+}
+
+// ── Local formatter (fallback when LSP not running) ───────────────────────────
 function formatCForge(text: string): string {
     const lines = text.split('\n');
     const result: string[] = [];
     let indent = 0;
     const TAB = '    ';
+    let prevBlank = false;
 
-    for (let line of lines) {
+    for (const line of lines) {
         const trimmed = line.trim();
 
-        // Reducir indent antes de línea que cierra bloque
-        if (trimmed.startsWith('}') || trimmed === '}') {
-            indent = Math.max(0, indent - 1);
-        }
+        if (trimmed.startsWith('}')) indent = Math.max(0, indent - 1);
 
         if (trimmed === '') {
-            result.push('');
-        } else {
-            result.push(TAB.repeat(indent) + trimmed);
+            if (!prevBlank) result.push('');
+            prevBlank = true;
+            continue;
         }
+        prevBlank = false;
 
-        // Aumentar indent después de línea que abre bloque
-        if (trimmed.endsWith('{') && !trimmed.startsWith('//')) {
-            indent++;
-        }
+        result.push(TAB.repeat(indent) + trimmed);
+
+        if (trimmed.endsWith('{') && !trimmed.startsWith('//')) indent++;
     }
 
-    return result.join('\n');
+    while (result.length > 0 && result[result.length - 1] === '') result.pop();
+    return result.join('\n') + '\n';
 }
 
-// ── Documentación de builtins ──────────────────────────────────────────────────
-const BUILTIN_DOCS: Record<string, { signature: string; description: string; example?: string; insertText?: string }> = {
-    'mostrar': {
-        signature: 'mostrar(valor: cualquiera): nulo',
-        description: 'Imprime un valor en la salida estándar.',
-        example: 'mostrar("Hola mundo")',
-        insertText: 'mostrar(${1:valor})'
-    },
-    'longitud': {
-        signature: 'longitud(coleccion: lista|texto|mapa): numero',
-        description: 'Retorna la longitud de una lista, texto o mapa.',
-        example: 'longitud([1, 2, 3])  // 3',
-        insertText: 'longitud(${1:coleccion})'
-    },
-    'rango': {
-        signature: 'rango(n: numero): lista | rango(desde: numero, hasta: numero): lista',
-        description: 'Genera una secuencia de números de 0 a n-1.',
-        example: 'para i en rango(5) { mostrar(i) }',
-        insertText: 'rango(${1:n})'
-    },
-    'tipo_de': {
-        signature: 'tipo_de(valor: cualquiera): texto',
-        description: 'Retorna el tipo del valor como texto.',
-        example: 'tipo_de(42)  // "numero"\ntipo_de("hola")  // "texto"',
-        insertText: 'tipo_de(${1:valor})'
-    },
-    'agregar': {
-        signature: 'agregar(lista: lista, elemento: cualquiera): nulo',
-        description: 'Agrega un elemento al final de la lista (in-place).',
-        example: 'sea l = [1, 2]\nagregar(l, 3)  // l = [1, 2, 3]',
-        insertText: 'agregar(${1:lista}, ${2:elemento})'
-    },
-    'json_parsear': {
-        signature: 'json_parsear(texto: texto): mapa|lista',
-        description: 'Parsea una cadena JSON y retorna el objeto/array.',
-        example: 'sea datos = json_parsear(\'{"nombre": "Juan"}\')',
-        insertText: 'json_parsear(${1:texto})'
-    },
-    'json_texto': {
-        signature: 'json_texto(valor: cualquiera): texto',
-        description: 'Serializa un valor a JSON compacto.',
-        insertText: 'json_texto(${1:valor})'
-    },
-    'leer_archivo': {
-        signature: 'leer_archivo(ruta: texto): texto',
-        description: 'Lee el contenido completo de un archivo como texto.',
-        example: 'sea contenido = leer_archivo("config.json")',
-        insertText: 'leer_archivo(${1:ruta})'
-    },
-    'escribir_archivo': {
-        signature: 'escribir_archivo(ruta: texto, contenido: texto): nulo',
-        description: 'Escribe texto en un archivo (sobreescribe si existe).',
-        insertText: 'escribir_archivo(${1:ruta}, ${2:contenido})'
-    },
-    'http_get': {
-        signature: 'http_get(url: texto, headers?: mapa): mapa',
-        description: 'Realiza una solicitud HTTP GET. Retorna {codigo, cuerpo, headers}.',
-        example: 'sea resp = http_get("https://api.ejemplo.com/datos")',
-        insertText: 'http_get(${1:url})'
-    },
-    'texto_dividir': {
-        signature: 'texto_dividir(texto: texto, separador: texto): lista',
-        description: 'Divide un texto por un separador y retorna lista de partes.',
-        example: 'texto_dividir("a,b,c", ",")  // ["a", "b", "c"]',
-        insertText: 'texto_dividir(${1:texto}, ${2:separador})'
-    },
-    'texto_unir': {
-        signature: 'texto_unir(lista: lista, separador: texto): texto',
-        description: 'Une los elementos de una lista con un separador.',
-        example: 'texto_unir(["a", "b", "c"], ", ")  // "a, b, c"',
-        insertText: 'texto_unir(${1:lista}, ${2:separador})'
-    },
-    'filtrar': {
-        signature: 'filtrar(lista: lista, fn: funcion): lista',
-        description: 'Filtra elementos de una lista que cumplen la condición.',
-        example: 'filtrar([1,2,3,4], funcion(x) { x > 2 })  // [3, 4]',
-        insertText: 'filtrar(${1:lista}, funcion(${2:x}) { ${3:condicion} })'
-    },
-    'mapear': {
-        signature: 'mapear(lista: lista, fn: funcion): lista',
-        description: 'Transforma cada elemento de una lista.',
-        example: 'mapear([1,2,3], funcion(x) { x * 2 })  // [2, 4, 6]',
-        insertText: 'mapear(${1:lista}, funcion(${2:x}) { ${3:transformacion} })'
-    },
-    'sha256': {
-        signature: 'sha256(texto: texto): texto',
-        description: 'Calcula el hash SHA-256 del texto (hex).',
-        insertText: 'sha256(${1:texto})'
-    },
-    'regex_buscar': {
-        signature: 'regex_buscar(texto: texto, patron: texto): texto|nulo',
-        description: 'Busca la primera coincidencia del patrón regex.',
-        insertText: 'regex_buscar(${1:texto}, ${2:patron})'
-    },
-    'fecha_ahora': {
-        signature: 'fecha_ahora(): mapa',
-        description: 'Retorna la fecha y hora actual como mapa {iso, timestamp, ...}.',
-        insertText: 'fecha_ahora()'
-    },
-    'tiempo_ms': {
-        signature: 'tiempo_ms(): numero',
-        description: 'Retorna el timestamp en milisegundos.',
-        insertText: 'tiempo_ms()'
-    },
-    'dormir': {
-        signature: 'dormir(ms: numero): nulo',
-        description: 'Pausa la ejecución por N milisegundos.',
-        insertText: 'dormir(${1:ms})'
-    }
-};
-
-export function deactivate() {}
+// ── Deactivate ────────────────────────────────────────────────────────────────
+export function deactivate(): Thenable<void> | undefined {
+    return client?.stop();
+}

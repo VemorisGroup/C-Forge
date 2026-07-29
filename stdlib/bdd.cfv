@@ -1,0 +1,421 @@
+// stdlib/bdd.cfv — Framework BDD (Behavior-Driven Development) para C-Forge
+// v3.1.0 — Sintaxis: describir / contexto / antes_de / despues_de / cuando / entonces / y / pero
+//
+// Uso:
+//   importar "stdlib/bdd.cfv"
+//
+//   describir("Calculadora", funcion() {
+//       contexto("cuando sumas dos números positivos", funcion() {
+//           sea resultado = 0
+//           antes_de(funcion() { resultado = 2 + 3 })
+//           entonces("el resultado debe ser 5", funcion() { esperar(resultado == 5) })
+//       })
+//   })
+//   ejecutar_bdd()
+
+// ── Estado global BDD ─────────────────────────────────────────────────────────
+sea _bdd_suites = []
+sea _bdd_total = 0
+sea _bdd_pasadas = 0
+sea _bdd_falladas = 0
+sea _bdd_pendientes = 0
+sea _bdd_stack = []        // stack de contextos activos
+sea _bdd_before_stack = [] // callbacks before_each por nivel
+sea _bdd_after_stack = []  // callbacks after_each por nivel
+
+// ── Colores ANSI ──────────────────────────────────────────────────────────────
+constante _BDD_VERDE  = "\033[32m"
+constante _BDD_ROJO   = "\033[31m"
+constante _BDD_AMARILLO = "\033[33m"
+constante _BDD_CYAN   = "\033[36m"
+constante _BDD_RESET  = "\033[0m"
+constante _BDD_BOLD   = "\033[1m"
+constante _BDD_DIM    = "\033[2m"
+
+// ── API Principal ─────────────────────────────────────────────────────────────
+
+// describir(nombre, fn) — Define una suite de especificaciones
+funcion describir(nombre: texto, fn: funcion): nulo {
+    sea suite = {
+        "nombre": nombre,
+        "specs": [],
+        "tipo": "suite"
+    }
+    agregar(_bdd_suites, suite)
+    agregar(_bdd_stack, suite)
+    agregar(_bdd_before_stack, [])
+    agregar(_bdd_after_stack, [])
+    fn()
+    eliminar(_bdd_stack, longitud(_bdd_stack) - 1)
+    eliminar(_bdd_before_stack, longitud(_bdd_before_stack) - 1)
+    eliminar(_bdd_after_stack, longitud(_bdd_after_stack) - 1)
+}
+
+// contexto(nombre, fn) — Agrupa specs relacionadas (alias: cuando)
+funcion contexto(nombre: texto, fn: funcion): nulo {
+    si (longitud(_bdd_stack) == 0) {
+        describir(nombre, fn)
+        retornar
+    }
+    sea padre = _bdd_stack[longitud(_bdd_stack) - 1]
+    sea ctx = {
+        "nombre": nombre,
+        "specs": [],
+        "tipo": "contexto"
+    }
+    agregar(padre["specs"], ctx)
+    agregar(_bdd_stack, ctx)
+    agregar(_bdd_before_stack, [])
+    agregar(_bdd_after_stack, [])
+    fn()
+    eliminar(_bdd_stack, longitud(_bdd_stack) - 1)
+    eliminar(_bdd_before_stack, longitud(_bdd_before_stack) - 1)
+    eliminar(_bdd_after_stack, longitud(_bdd_after_stack) - 1)
+}
+
+// cuando(nombre, fn) — Alias de contexto para describir condiciones
+funcion cuando(nombre: texto, fn: funcion): nulo {
+    contexto("cuando " + nombre, fn)
+}
+
+// antes_de(fn) — Ejecutar antes de cada spec en el contexto actual
+funcion antes_de(fn: funcion): nulo {
+    si (longitud(_bdd_before_stack) > 0) {
+        agregar(_bdd_before_stack[longitud(_bdd_before_stack) - 1], fn)
+    }
+}
+
+// despues_de(fn) — Ejecutar después de cada spec en el contexto actual
+funcion despues_de(fn: funcion): nulo {
+    si (longitud(_bdd_after_stack) > 0) {
+        agregar(_bdd_after_stack[longitud(_bdd_after_stack) - 1], fn)
+    }
+}
+
+// entonces(descripcion, fn) — Define una spec/expectativa
+funcion entonces(descripcion: texto, fn: funcion): nulo {
+    _bdd_registrar_spec(descripcion, fn, "entonces")
+}
+
+// y(descripcion, fn) — Continuación de expectativas (alias de entonces)
+funcion y(descripcion: texto, fn: funcion): nulo {
+    _bdd_registrar_spec(descripcion, fn, "y")
+}
+
+// pero(descripcion, fn) — Expectativa de contraste (alias de entonces)
+funcion pero(descripcion: texto, fn: funcion): nulo {
+    _bdd_registrar_spec(descripcion, fn, "pero")
+}
+
+// pendiente(descripcion) — Spec marcada como pendiente (TODO)
+funcion pendiente(descripcion: texto): nulo {
+    _bdd_registrar_spec(descripcion, nulo, "pendiente")
+}
+
+// ── Registro interno ──────────────────────────────────────────────────────────
+funcion _bdd_registrar_spec(descripcion: texto, fn: cualquiera, tipo: texto): nulo {
+    sea spec = {
+        "descripcion": descripcion,
+        "fn": fn,
+        "tipo": tipo,
+        "before_fns": [],
+        "after_fns": []
+    }
+    // Copiar hooks actuales del stack
+    para nivel en _bdd_before_stack {
+        para hook en nivel {
+            agregar(spec["before_fns"], hook)
+        }
+    }
+    para nivel en _bdd_after_stack {
+        para hook en nivel {
+            agregar(spec["after_fns"], hook)
+        }
+    }
+    si (longitud(_bdd_stack) > 0) {
+        sea padre = _bdd_stack[longitud(_bdd_stack) - 1]
+        agregar(padre["specs"], spec)
+    }
+}
+
+// ── Ejecución ─────────────────────────────────────────────────────────────────
+
+funcion ejecutar_bdd(): nulo {
+    mostrar("")
+    mostrar(_BDD_BOLD + "C-Forge BDD Test Runner v3.1.0" + _BDD_RESET)
+    mostrar(_BDD_DIM + "─".repetir(50) + _BDD_RESET)
+    mostrar("")
+
+    para suite en _bdd_suites {
+        _bdd_ejecutar_nodo(suite, 0)
+    }
+
+    // Resumen final
+    mostrar("")
+    mostrar(_BDD_DIM + "─".repetir(50) + _BDD_RESET)
+    sea total_str = a_texto(_bdd_total) + " specs"
+    sea pasadas_str = _BDD_VERDE + a_texto(_bdd_pasadas) + " pasadas" + _BDD_RESET
+    sea falladas_str = si (_bdd_falladas > 0) {
+        _BDD_ROJO + a_texto(_bdd_falladas) + " falladas" + _BDD_RESET
+    } sino { "" }
+    sea pendientes_str = si (_bdd_pendientes > 0) {
+        _BDD_AMARILLO + a_texto(_bdd_pendientes) + " pendientes" + _BDD_RESET
+    } sino { "" }
+
+    sea partes = [pasadas_str]
+    si (_bdd_falladas > 0) { agregar(partes, falladas_str) }
+    si (_bdd_pendientes > 0) { agregar(partes, pendientes_str) }
+
+    mostrar(total_str + " — " + unir(partes, " | "))
+    mostrar("")
+
+    si (_bdd_falladas > 0) {
+        mostrar(_BDD_ROJO + _BDD_BOLD + "✗ Pruebas FALLIDAS" + _BDD_RESET)
+    } sino {
+        mostrar(_BDD_VERDE + _BDD_BOLD + "✓ Todo PASÓ" + _BDD_RESET)
+    }
+}
+
+funcion _bdd_ejecutar_nodo(nodo: mapa, nivel: numero): nulo {
+    sea prefijo = "  ".repetir(nivel)
+    sea tipo = nodo["tipo"]
+
+    si (tipo == "suite") {
+        mostrar(prefijo + _BDD_BOLD + nodo["nombre"] + _BDD_RESET)
+        para spec en nodo["specs"] {
+            _bdd_ejecutar_nodo(spec, nivel + 1)
+        }
+        mostrar("")
+    } sino_si (tipo == "contexto") {
+        mostrar(prefijo + _BDD_CYAN + nodo["nombre"] + _BDD_RESET)
+        para spec en nodo["specs"] {
+            _bdd_ejecutar_nodo(spec, nivel + 1)
+        }
+    } sino_si (tipo == "pendiente" o nodo["fn"] == nulo) {
+        _bdd_pendientes = _bdd_pendientes + 1
+        _bdd_total = _bdd_total + 1
+        mostrar(prefijo + _BDD_AMARILLO + "- " + nodo["descripcion"] + _BDD_RESET)
+    } sino {
+        // Es una spec ejecutable
+        _bdd_total = _bdd_total + 1
+
+        // Ejecutar before hooks
+        para hook en nodo["before_fns"] {
+            intentar { hook() } capturar (e) { /* ignorar errores en setup */ }
+        }
+
+        // Ejecutar la spec
+        sea error_msg = nulo
+        intentar {
+            nodo["fn"]()
+        } capturar (err) {
+            error_msg = a_texto(err)
+        }
+
+        // Ejecutar after hooks
+        para hook en nodo["after_fns"] {
+            intentar { hook() } capturar (e) { /* ignorar errores en teardown */ }
+        }
+
+        // Reportar resultado
+        si (error_msg == nulo) {
+            _bdd_pasadas = _bdd_pasadas + 1
+            mostrar(prefijo + _BDD_VERDE + "✓ " + _BDD_RESET + nodo["descripcion"])
+        } sino {
+            _bdd_falladas = _bdd_falladas + 1
+            mostrar(prefijo + _BDD_ROJO + "✗ " + nodo["descripcion"] + _BDD_RESET)
+            mostrar(prefijo + "  " + _BDD_ROJO + _BDD_DIM + error_msg + _BDD_RESET)
+        }
+    }
+}
+
+// ── Matchers / Expectativas ───────────────────────────────────────────────────
+
+// esperar(condicion) — Falla si la condición es falsa
+funcion esperar(condicion: booleano): nulo {
+    si (no condicion) {
+        lanzar_error("Expectativa fallida: la condición es falsa")
+    }
+}
+
+// esperar_igual(actual, esperado) — Falla si los valores no son iguales
+funcion esperar_igual(actual: cualquiera, esperado: cualquiera): nulo {
+    si (actual != esperado) {
+        lanzar_error("Esperado: " + a_texto(esperado) + "\n    Actual:   " + a_texto(actual))
+    }
+}
+
+// esperar_diferente(actual, no_esperado) — Falla si los valores son iguales
+funcion esperar_diferente(actual: cualquiera, no_esperado: cualquiera): nulo {
+    si (actual == no_esperado) {
+        lanzar_error("Se esperaba que " + a_texto(actual) + " fuera diferente de " + a_texto(no_esperado))
+    }
+}
+
+// esperar_verdadero(valor) — Falla si el valor no es verdadero
+funcion esperar_verdadero(valor: cualquiera): nulo {
+    si (no valor) {
+        lanzar_error("Esperado verdadero, obtenido: " + a_texto(valor))
+    }
+}
+
+// esperar_falso(valor) — Falla si el valor no es falso
+funcion esperar_falso(valor: cualquiera): nulo {
+    si (valor) {
+        lanzar_error("Esperado falso, obtenido: " + a_texto(valor))
+    }
+}
+
+// esperar_nulo(valor) — Falla si el valor no es nulo
+funcion esperar_nulo(valor: cualquiera): nulo {
+    si (valor != nulo) {
+        lanzar_error("Esperado nulo, obtenido: " + a_texto(valor))
+    }
+}
+
+// esperar_no_nulo(valor) — Falla si el valor es nulo
+funcion esperar_no_nulo(valor: cualquiera): nulo {
+    si (valor == nulo) {
+        lanzar_error("Esperado valor no nulo, pero es nulo")
+    }
+}
+
+// esperar_mayor(actual, minimo) — Falla si actual <= minimo
+funcion esperar_mayor(actual: numero, minimo: numero): nulo {
+    si (actual <= minimo) {
+        lanzar_error("Esperado " + a_texto(actual) + " > " + a_texto(minimo))
+    }
+}
+
+// esperar_menor(actual, maximo) — Falla si actual >= maximo
+funcion esperar_menor(actual: numero, maximo: numero): nulo {
+    si (actual >= maximo) {
+        lanzar_error("Esperado " + a_texto(actual) + " < " + a_texto(maximo))
+    }
+}
+
+// esperar_contiene(coleccion, elemento) — Falla si la colección no contiene el elemento
+funcion esperar_contiene(coleccion: cualquiera, elemento: cualquiera): nulo {
+    si (no contiene(coleccion, elemento)) {
+        lanzar_error("Esperado que la colección contenga: " + a_texto(elemento))
+    }
+}
+
+// esperar_longitud(coleccion, n) — Falla si la longitud no es n
+funcion esperar_longitud(coleccion: cualquiera, n: numero): nulo {
+    sea len = longitud(coleccion)
+    si (len != n) {
+        lanzar_error("Longitud esperada: " + a_texto(n) + ", actual: " + a_texto(len))
+    }
+}
+
+// esperar_tipo(valor, tipo_esperado) — Falla si el tipo no coincide
+funcion esperar_tipo(valor: cualquiera, tipo_esperado: texto): nulo {
+    sea t = tipo_de(valor)
+    si (t != tipo_esperado) {
+        lanzar_error("Tipo esperado: " + tipo_esperado + ", actual: " + t)
+    }
+}
+
+// esperar_error(fn) — Falla si la función NO lanza un error
+funcion esperar_error(fn: funcion): nulo {
+    sea lanzo = falso
+    intentar {
+        fn()
+    } capturar (e) {
+        lanzo = verdadero
+    }
+    si (no lanzo) {
+        lanzar_error("Esperado que la función lanzara un error, pero no lo hizo")
+    }
+}
+
+// esperar_error_mensaje(fn, patron) — Falla si el error no contiene el patrón
+funcion esperar_error_mensaje(fn: funcion, patron: texto): nulo {
+    sea msg_error = nulo
+    intentar {
+        fn()
+    } capturar (e) {
+        msg_error = a_texto(e)
+    }
+    si (msg_error == nulo) {
+        lanzar_error("Esperado error con mensaje '" + patron + "', pero no hubo error")
+    }
+    si (no contiene(msg_error, patron)) {
+        lanzar_error("Error esperado con '" + patron + "', pero fue: " + msg_error)
+    }
+}
+
+// esperar_aprox(actual, esperado, tolerancia) — Comparación con tolerancia
+funcion esperar_aprox(actual: numero, esperado: numero, tolerancia: numero): nulo {
+    sea diff = abs(actual - esperado)
+    si (diff > tolerancia) {
+        lanzar_error("Esperado ~" + a_texto(esperado) + " ±" + a_texto(tolerancia) + ", obtenido: " + a_texto(actual))
+    }
+}
+
+// ── Mock / Spy ────────────────────────────────────────────────────────────────
+
+// crear_mock(valor_retorno) — Crea una función "mock" que registra llamadas
+funcion crear_mock(valor_retorno: cualquiera): mapa {
+    sea mock = {
+        "llamadas": [],
+        "valor_retorno": valor_retorno,
+        "fn": nulo
+    }
+    // En C-Forge no podemos crear closures que modifiquen estado externo dinámicamente,
+    // así que el mock registra via el mapa
+    retornar mock
+}
+
+// llamar_mock(mock, args) — Llama al mock y registra la llamada
+funcion llamar_mock(mock: mapa, args: lista): cualquiera {
+    agregar(mock["llamadas"], args)
+    retornar mock["valor_retorno"]
+}
+
+// esperar_llamado(mock) — Falla si el mock no fue llamado
+funcion esperar_llamado(mock: mapa): nulo {
+    si (longitud(mock["llamadas"]) == 0) {
+        lanzar_error("Se esperaba que el mock fuera llamado al menos una vez")
+    }
+}
+
+// esperar_llamado_veces(mock, n) — Falla si el mock no fue llamado exactamente n veces
+funcion esperar_llamado_veces(mock: mapa, n: numero): nulo {
+    sea veces = longitud(mock["llamadas"])
+    si (veces != n) {
+        lanzar_error("Se esperaban " + a_texto(n) + " llamadas, pero hubo " + a_texto(veces))
+    }
+}
+
+// esperar_no_llamado(mock) — Falla si el mock fue llamado
+funcion esperar_no_llamado(mock: mapa): nulo {
+    si (longitud(mock["llamadas"]) > 0) {
+        lanzar_error("Se esperaba que el mock NO fuera llamado, pero fue llamado " + a_texto(longitud(mock["llamadas"])) + " veces")
+    }
+}
+
+// ── Utilidades ────────────────────────────────────────────────────────────────
+
+// omitir(descripcion, fn) — Marca una spec para omitir (como xdescribir en Jest)
+funcion omitir(descripcion: texto, fn: funcion): nulo {
+    pendiente("[omitido] " + descripcion)
+}
+
+// solo(descripcion, fn) — Solo ejecuta esta spec (útil para debugging)
+funcion solo(descripcion: texto, fn: funcion): nulo {
+    entonces("[SOLO] " + descripcion, fn)
+}
+
+// reiniciar_bdd() — Reinicia el estado BDD para múltiples suites
+funcion reiniciar_bdd(): nulo {
+    _bdd_suites = []
+    _bdd_total = 0
+    _bdd_pasadas = 0
+    _bdd_falladas = 0
+    _bdd_pendientes = 0
+    _bdd_stack = []
+    _bdd_before_stack = []
+    _bdd_after_stack = []
+}

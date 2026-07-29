@@ -153,23 +153,39 @@ def read_message() -> Optional[dict]:
         return None
 
 # ── Análisis de código ─────────────────────────────────────────────────────────
+def _make_range(line_no: int, col: int, length: int) -> dict:
+    return {
+        "start": {"line": line_no, "character": col},
+        "end": {"line": line_no, "character": col + length}
+    }
+
 def extract_symbols(code: str) -> dict:
     """Extrae funciones, variables y clases del código."""
-    symbols = {"funciones": [], "variables": [], "clases": []}
+    symbols = {"funciones": [], "variables": [], "clases": [], "all": []}
+    PATS = [
+        (r'\s*(?:asincrona\s+)?funcion\s+(\w+)\s*\(', 12, "funciones"),   # Function
+        (r'\s*clase\s+(\w+)', 5, "clases"),                                # Class
+        (r'\s*interfaz\s+(\w+)', 11, "all"),                               # Interface
+        (r'\s*enum\s+(\w+)', 10, "all"),                                   # Enum
+        (r'\s*(?:sea|constante)\s+(\w+)', 13, "variables"),                # Variable
+    ]
     for line_no, line in enumerate(code.split("\n")):
-        m = re.match(r'\s*(?:async\s+)?funcion\s+(\w+)\s*\(([^)]*)\)', line)
-        if m:
-            symbols["funciones"].append({
-                "nombre": m.group(1),
-                "params": m.group(2),
-                "linea": line_no
-            })
-        m = re.match(r'\s*(?:sea|constante)\s+(\w+)', line)
-        if m:
-            symbols["variables"].append({"nombre": m.group(1), "linea": line_no})
-        m = re.match(r'\s*clase\s+(\w+)', line)
-        if m:
-            symbols["clases"].append({"nombre": m.group(1), "linea": line_no})
+        for pattern, kind, bucket in PATS:
+            m = re.match(pattern, line)
+            if m:
+                name = m.group(1)
+                col = m.start(1)
+                entry = {
+                    "name": name,
+                    "kind": kind,
+                    "range": _make_range(line_no, col, len(name)),
+                    # legacy keys for backward compat
+                    "nombre": name,
+                    "linea": line_no,
+                }
+                symbols[bucket].append(entry)
+                symbols["all"].append(entry)
+                break
     return symbols
 
 def check_diagnostics(code: str, uri: str) -> list:
@@ -229,9 +245,9 @@ class CForgeLSP:
                 "jsonrpc": "2.0", "id": mid,
                 "result": {
                     "capabilities": {
-                        "textDocumentSync": 1,
+                        "textDocumentSync": {"openClose": True, "change": 1, "save": {"includeText": True}},
                         "completionProvider": {
-                            "triggerCharacters": [".", "(", "\"", "/"],
+                            "triggerCharacters": [".", "(", "\"", "/", " "],
                             "resolveProvider": False
                         },
                         "hoverProvider": True,
@@ -240,9 +256,19 @@ class CForgeLSP:
                         "workspaceSymbolProvider": True,
                         "referencesProvider": True,
                         "documentFormattingProvider": True,
+                        "signatureHelpProvider": {"triggerCharacters": ["(", ","]},
+                        "renameProvider": True,
+                        "codeActionProvider": True,
+                        "semanticTokensProvider": {
+                            "legend": {
+                                "tokenTypes": ["keyword","number","string","comment","function","type","variable","class","operator","parameter"],
+                                "tokenModifiers": ["declaration","definition","readonly","static"]
+                            },
+                            "full": True
+                        },
                         "diagnosticProvider": {"interFileDependencies": False, "workspaceDiagnostics": False}
                     },
-                    "serverInfo": {"name": "cforge-lsp", "version": "2.4.0"}
+                    "serverInfo": {"name": "cforge-lsp", "version": "3.1.0"}
                 }
             }
 
@@ -283,6 +309,24 @@ class CForgeLSP:
 
         if method == "textDocument/definition":
             return {"jsonrpc": "2.0", "id": mid, "result": self._definition(params)}
+
+        if method == "textDocument/references":
+            return {"jsonrpc": "2.0", "id": mid, "result": self._references(params)}
+
+        if method == "textDocument/signatureHelp":
+            return {"jsonrpc": "2.0", "id": mid, "result": self._signature_help(params)}
+
+        if method == "textDocument/rename":
+            return {"jsonrpc": "2.0", "id": mid, "result": self._rename(params)}
+
+        if method == "textDocument/codeAction":
+            return {"jsonrpc": "2.0", "id": mid, "result": self._code_actions(params)}
+
+        if method == "workspace/symbol":
+            return {"jsonrpc": "2.0", "id": mid, "result": self._workspace_symbols(params)}
+
+        if method == "textDocument/semanticTokens/full":
+            return {"jsonrpc": "2.0", "id": mid, "result": self._semantic_tokens(params)}
 
         if method == "shutdown":
             return {"jsonrpc": "2.0", "id": mid, "result": None}
@@ -401,29 +445,14 @@ class CForgeLSP:
     def _doc_symbols(self, params: dict) -> list:
         uri = params.get("textDocument", {}).get("uri", "")
         text = self.docs.get(uri, "")
-        if not text:
-            return []
+        if not text: return []
         syms = extract_symbols(text)
-        result = []
-        for fn in syms["funciones"]:
-            result.append({
-                "name": fn["nombre"],
-                "kind": 12,  # Function
-                "location": {"uri": uri, "range": {
-                    "start": {"line": fn["linea"], "character": 0},
-                    "end": {"line": fn["linea"], "character": 100}
-                }}
-            })
-        for c in syms["clases"]:
-            result.append({
-                "name": c["nombre"],
-                "kind": 5,  # Class
-                "location": {"uri": uri, "range": {
-                    "start": {"line": c["linea"], "character": 0},
-                    "end": {"line": c["linea"], "character": 100}
-                }}
-            })
-        return result
+        return [{
+            "name": s["name"],
+            "kind": s["kind"],
+            "range": s["range"],
+            "selectionRange": s["range"]
+        } for s in syms["all"]]
 
     def _format(self, params: dict) -> list:
         uri = params.get("textDocument", {}).get("uri", "")
@@ -439,6 +468,183 @@ class CForgeLSP:
             },
             "newText": formatted
         }]
+
+    def _word_at(self, text: str, line_no: int, char: int) -> str:
+        lines = text.split("\n") if text else []
+        if line_no >= len(lines): return ""
+        line = lines[line_no]
+        start = char
+        while start > 0 and re.match(r'\w', line[start-1]): start -= 1
+        end = char
+        while end < len(line) and re.match(r'\w', line[end]): end += 1
+        return line[start:end]
+
+    def _references(self, params: dict) -> list:
+        uri = params.get("textDocument", {}).get("uri", "")
+        pos = params.get("position", {})
+        text = self.docs.get(uri, "")
+        word = self._word_at(text, pos.get("line", 0), pos.get("character", 0))
+        if not word: return []
+        refs = []
+        pattern = re.compile(r'\b' + re.escape(word) + r'\b')
+        for i, line in enumerate(text.split("\n")):
+            for m in pattern.finditer(line):
+                refs.append({
+                    "uri": uri,
+                    "range": {
+                        "start": {"line": i, "character": m.start()},
+                        "end": {"line": i, "character": m.end()}
+                    }
+                })
+        return refs
+
+    def _signature_help(self, params: dict) -> Optional[dict]:
+        uri = params.get("textDocument", {}).get("uri", "")
+        pos = params.get("position", {})
+        text = self.docs.get(uri, "")
+        lines = text.split("\n") if text else []
+        line_no = pos.get("line", 0)
+        char = pos.get("character", 0)
+        if line_no >= len(lines): return None
+        prefix = lines[line_no][:char]
+        m = re.search(r'(\w+)\s*\([^)]*$', prefix)
+        if not m: return None
+        func_name = m.group(1)
+        # Check builtins
+        if func_name in BUILTINS:
+            sig = BUILTINS[func_name]
+            params_raw = re.search(r'\(([^)]*)\)', sig)
+            param_list = []
+            if params_raw:
+                for p in params_raw.group(1).split(","):
+                    p = p.strip()
+                    if p: param_list.append({"label": p})
+            active_param = prefix.count(",")
+            return {
+                "signatures": [{"label": f"{func_name}{sig}", "parameters": param_list}],
+                "activeSignature": 0,
+                "activeParameter": active_param
+            }
+        # Check user-defined functions
+        func_pat = re.compile(rf'^\s*(?:asincrona\s+)?funcion\s+{re.escape(func_name)}\s*\(([^)]*)\)')
+        for line in lines:
+            fm = func_pat.search(line)
+            if fm:
+                params_raw = fm.group(1)
+                param_list = [{"label": p.strip()} for p in params_raw.split(",") if p.strip()]
+                return {
+                    "signatures": [{"label": f"{func_name}({params_raw})", "parameters": param_list}],
+                    "activeSignature": 0,
+                    "activeParameter": prefix.count(",")
+                }
+        return None
+
+    def _rename(self, params: dict) -> Optional[dict]:
+        uri = params.get("textDocument", {}).get("uri", "")
+        pos = params.get("position", {})
+        new_name = params.get("newName", "")
+        text = self.docs.get(uri, "")
+        if not text or not new_name: return None
+        old_name = self._word_at(text, pos.get("line", 0), pos.get("character", 0))
+        if not old_name: return None
+        pattern = re.compile(r'\b' + re.escape(old_name) + r'\b')
+        edits = []
+        for i, line in enumerate(text.split("\n")):
+            for m in pattern.finditer(line):
+                edits.append({
+                    "range": {
+                        "start": {"line": i, "character": m.start()},
+                        "end": {"line": i, "character": m.end()}
+                    },
+                    "newText": new_name
+                })
+        return {"changes": {uri: edits}}
+
+    def _code_actions(self, params: dict) -> list:
+        diags = params.get("context", {}).get("diagnostics", [])
+        actions = []
+        for d in diags:
+            msg = d.get("message", "")
+            if "var" in msg.lower():
+                actions.append({
+                    "title": "Cambiar 'var' por 'sea'",
+                    "kind": "quickfix",
+                    "diagnostics": [d],
+                })
+            if "paréntesis" in msg or "parentesis" in msg:
+                actions.append({
+                    "title": "Agregar paréntesis",
+                    "kind": "quickfix",
+                    "diagnostics": [d],
+                })
+        return actions
+
+    def _workspace_symbols(self, params: dict) -> list:
+        query = params.get("query", "").lower()
+        symbols = []
+        for uri, text in self.docs.items():
+            for sym in extract_symbols(text).get("all", []):
+                if not query or query in sym["name"].lower():
+                    symbols.append({
+                        "name": sym["name"],
+                        "kind": sym["kind"],
+                        "location": {"uri": uri, "range": sym["range"]}
+                    })
+        return symbols[:100]
+
+    def _semantic_tokens(self, params: dict) -> dict:
+        """Build semantic token data for syntax highlighting."""
+        uri = params.get("textDocument", {}).get("uri", "")
+        text = self.docs.get(uri, "")
+        if not text: return {"data": []}
+
+        KEYWORD_RE = re.compile(r'\b(' + '|'.join(re.escape(k) for k in KEYWORDS) + r')\b')
+        BUILTIN_RE = re.compile(r'\b(' + '|'.join(re.escape(k) for k in BUILTINS.keys()) + r')\b')
+        FUNC_DEF_RE = re.compile(r'\bfuncion\s+(\w+)\s*\(')
+        CLASS_DEF_RE = re.compile(r'\bclase\s+(\w+)')
+        NUMBER_RE = re.compile(r'\b\d+(\.\d+)?\b')
+        STRING_RE = re.compile(r'"([^"\\]|\\.)*"')
+        COMMENT_RE = re.compile(r'//.*$')
+
+        data = []
+        prev_line = 0
+        prev_char = 0
+        tokens = []
+
+        for line_no, line in enumerate(text.split("\n")):
+            for pat, tok_type, tok_mod in [
+                (COMMENT_RE, 3, 0),    # comment
+                (STRING_RE, 2, 0),     # string
+                (NUMBER_RE, 1, 0),     # number
+                (KEYWORD_RE, 0, 0),    # keyword
+                (FUNC_DEF_RE, 4, 1),   # function declaration
+                (CLASS_DEF_RE, 6, 1),  # class declaration
+                (BUILTIN_RE, 4, 0),    # function (builtin)
+            ]:
+                for m in pat.finditer(line):
+                    # Use group(1) for named captures (funcion/clase name), else full match
+                    start = m.start(1) if pat.groups else m.start()
+                    length = len(m.group(1)) if pat.groups else len(m.group())
+                    tokens.append((line_no, start, length, tok_type, tok_mod))
+
+        tokens.sort(key=lambda t: (t[0], t[1]))
+        # Remove overlapping tokens (keep first)
+        filtered = []
+        last_end = (-1, -1)
+        for tok in tokens:
+            l, s, length, tt, tm = tok
+            if (l, s) >= last_end:
+                filtered.append(tok)
+                last_end = (l, s + length)
+
+        for l, s, length, tt, tm in filtered:
+            delta_line = l - prev_line
+            delta_char = s if delta_line > 0 else s - prev_char
+            data.extend([delta_line, delta_char, length, tt, tm])
+            prev_line = l
+            prev_char = s
+
+        return {"data": data}
 
     def _definition(self, params: dict) -> Optional[dict]:
         uri = params.get("textDocument", {}).get("uri", "")

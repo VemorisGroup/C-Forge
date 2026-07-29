@@ -1,8 +1,8 @@
 {
   "name": "cforge-language",
   "displayName": "C-Forge Language",
-  "description": "Soporte de lenguaje para C-Forge (.cfv) — resaltado de sintaxis, snippets, iconos y más",
-  "version": "2.3.0",
+  "description": "Soporte completo para C-Forge (.cfv) — LSP, autocompletado, hover, ir a definición, diagnósticos, snippets, formato",
+  "version": "3.1.0",
   "publisher": "VemorisGroup",
   "icon": "icon.png",
   "galleryBanner": {
@@ -24,7 +24,8 @@
   "categories": [
     "Programming Languages",
     "Snippets",
-    "Formatters"
+    "Formatters",
+    "Linters"
   ],
   "keywords": [
     "c-forge",
@@ -77,6 +78,14 @@
       {
         "command": "cforge.formatDocument",
         "title": "C-Forge: Formatear documento"
+      },
+      {
+        "command": "cforge.restartLsp",
+        "title": "C-Forge: Reiniciar servidor LSP"
+      },
+      {
+        "command": "cforge.openPlayground",
+        "title": "C-Forge: Abrir Playground"
       }
     ],
     "menus": {
@@ -108,15 +117,36 @@
           "default": "cforgev",
           "description": "Ruta al intérprete C-Forge (cforgev)"
         },
+        "cforge.lspEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Habilitar servidor LSP (autocompletado, hover, ir a definición, diagnósticos)"
+        },
+        "cforge.lspServerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Ruta al lsp_server.py (vacío = usa el incluido en la extensión)"
+        },
+        "cforge.stdlibPath": {
+          "type": "string",
+          "default": "",
+          "description": "Ruta al directorio stdlib/ de C-Forge (CFORGE_STDLIB)"
+        },
         "cforge.formatOnSave": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Formatear automáticamente al guardar"
         },
         "cforge.showRunButton": {
           "type": "boolean",
           "default": true,
           "description": "Mostrar botón de ejecución en la barra de título"
+        },
+        "cforge.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Nivel de traza de comunicación con el servidor LSP"
         }
       }
     },
@@ -137,6 +167,9 @@
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
     "publish": "vsce publish"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",
