@@ -1,0 +1,37 @@
+// 07_stdlib_lista.cfv — Operaciones de lista y HOF en C-Forge
+
+sea nums = [5, 2, 8, 1, 9, 3, 7, 4, 6]
+
+// Funciones de orden superior
+sea cuadrados = mapear(nums, funcion(x) { retornar x * x })
+mostrar("Cuadrados: " + a_texto(cuadrados))
+
+sea pares = filtrar(nums, funcion(x) { retornar x % 2 == 0 })
+mostrar("Pares: " + a_texto(pares))
+
+sea suma_total = reducir(nums, funcion(a, b) { retornar a + b }, 0)
+mostrar("Suma: " + numero_a_texto(suma_total))
+
+// Ordenar
+sea ordenados = ordenar(nums, funcion(a, b) { retornar a - b })
+mostrar("Ordenados: " + a_texto(ordenados))
+
+sea desc = ordenar(nums, funcion(a, b) { retornar b - a })
+mostrar("Desc: " + a_texto(desc))
+
+// Operaciones básicas
+sea lista = ["alpha", "beta", "gamma"]
+agregar(lista, "delta")
+mostrar("Lista: " + a_texto(lista))
+mostrar("Longitud: " + numero_a_texto(longitud(lista)))
+mostrar("Contiene beta: " + a_texto(lista_contiene(lista, "beta")))
+mostrar("Invertida: " + a_texto(lista_invertir(lista)))
+
+// Aplanar
+sea anidada = [[1, 2], [3, 4], [5, 6]]
+mostrar("Aplanada: " + a_texto(lista_aplanar(anidada)))
+
+// para_cada
+para_cada([1, 2, 3], funcion(n) {
+    mostrar("Item: " + numero_a_texto(n))
+})

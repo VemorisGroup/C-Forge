@@ -1,0 +1,52 @@
+// 03_funciones.cfv — Funciones en C-Forge
+
+// Función básica con tipo de retorno anotado
+funcion saludar(nombre: texto): texto {
+    retornar "¡Hola, " + nombre + "!"
+}
+
+// Función con múltiples parámetros
+funcion sumar(a: numero, b: numero): numero {
+    retornar a + b
+}
+
+// Función recursiva
+funcion fibonacci(n: numero): numero {
+    si (n <= 1) { retornar n }
+    retornar fibonacci(n - 1) + fibonacci(n - 2)
+}
+
+// Funciones de orden superior (HOF)
+funcion aplicar_mapeo(lista, fn) {
+    retornar mapear(lista, fn)
+}
+
+// Funciones anónimas (lambdas)
+sea cuadrado = funcion(x) { retornar x * x }
+sea doble    = funcion(x) { retornar x * 2 }
+
+mostrar(saludar("mundo"))
+mostrar("5 + 3 = " + numero_a_texto(sumar(5, 3)))
+mostrar("fib(10) = " + numero_a_texto(fibonacci(10)))
+mostrar(aplicar_mapeo([1, 2, 3, 4, 5], cuadrado))
+mostrar(aplicar_mapeo([1, 2, 3, 4, 5], doble))
+
+// Closures
+funcion crear_contador(inicio) {
+    sea n = inicio
+    retornar funcion() {
+        n = n + 1
+        retornar n
+    }
+}
+sea contador = crear_contador(0)
+mostrar(contador())  // 1
+mostrar(contador())  // 2
+mostrar(contador())  // 3
+
+// Parámetros con valores por defecto
+funcion potenciar(base, exp = 2) {
+    retornar potencia(base, exp)
+}
+mostrar("4^2 = " + numero_a_texto(potenciar(4)))
+mostrar("2^8 = " + numero_a_texto(potenciar(2, 8)))

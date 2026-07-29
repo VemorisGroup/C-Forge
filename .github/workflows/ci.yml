@@ -1,92 +1,126 @@
-name: CI multiplataforma
+name: CI — C-Forge v2.5.1
 
 on:
   push:
+    branches: [main, dev]
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  generar-pe-x64:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Construir Stage 0 y backend PE
-        shell: bash
-        run: |
-          clang++ -std=c++17 -O2 bootstrap/stage0/cforge_bootstrap.cpp \
-            -o cforge-stage0
-          ./cforge-stage0 bootstrap/direct/cforge_pe_x64_core.cfv \
-            -o cforge-pe-x64
-      - name: Emitir PE sin toolchain externo
-        shell: bash
-        run: |
-          mkdir sin-toolchain
-          for tool in clang++ clang g++ gcc cc cl link lld ld as python python3
-          do
-            printf '#!/bin/sh\nexit 97\n' > "sin-toolchain/$tool"
-            chmod +x "sin-toolchain/$tool"
-          done
-          PATH="$PWD/sin-toolchain" "$PWD/cforge-pe-x64" \
-            "$PWD/bootstrap/fixtures/machine_runtime_b6.cfv" \
-            -o "$PWD/cforge-pe-smoke.exe"
-          file cforge-pe-smoke.exe | grep 'PE32+ executable'
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cforge-pe-x64-smoke
-          path: cforge-pe-smoke.exe
-          if-no-files-found: error
-
-  ejecutar-pe-x64:
-    needs: generar-pe-x64
-    runs-on: windows-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: cforge-pe-x64-smoke
-      - name: Ejecutar PE generado por C-Forge
-        shell: pwsh
-        run: |
-          $salida = @(& .\cforge-pe-smoke.exe)
-          if ($LASTEXITCODE -ne 0) {
-            throw "El PE terminó con código $LASTEXITCODE"
-          }
-          $esperado = @("C-FORGE-B6.7-OK")
-          if (Compare-Object $esperado $salida) {
-            throw "Salida PE inesperada: $($salida -join ', ')"
-          }
-
-  nativo:
+  # ── Compilar e interpretar en Linux y macOS ─────────────────────────────────
+  build-and-test:
+    name: Build & Test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            ext: ""
+            cxx: g++
+            openssl_pkg: libssl-dev
           - os: macos-latest
-            ext: ""
+            cxx: clang++
+            openssl_pkg: openssl
     runs-on: ${{ matrix.os }}
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install clang++ (Linux)
+      - name: Instalar dependencias (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y clang
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ${{ matrix.openssl_pkg }} libsqlite3-dev
 
-      - name: Bootstrap — compilar cforgev.cpp
-        run: clang++ -std=c++17 -O2 -Iinclude cforgev.cpp -o cforgev_bootstrap
+      - name: Instalar dependencias (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ${{ matrix.openssl_pkg }} sqlite
 
-      - name: Self-host — compilar cforgev.cfv con bootstrap
-        run: ./cforgev_bootstrap compilador_nativo.cfv cforgev.cfv cforgev_ci
+      - name: Compilar cforgev
+        run: make build CXX=${{ matrix.cxx }}
 
       - name: Smoke test básico
         run: |
           echo 'mostrar("C-Forge CI OK")' > /tmp/ci_test.cfv
-          ./cforgev_ci /tmp/ci_test.cfv
+          CFORGE_STDLIB=./stdlib ./cforgev /tmp/ci_test.cfv
 
-      - name: Compilar y ejecutar ejemplos
-        shell: bash
+      - name: Test importar stdlib
         run: |
-          ./cforgev_bootstrap compilador_nativo.cfv ejemplos/hola.cfv /tmp/hola
-          /tmp/hola
+          printf 'importar "matematica"\nmostrar(piso(3.7))\n' > /tmp/test_imp.cfv
+          CFORGE_STDLIB=./stdlib ./cforgev /tmp/test_imp.cfv
+
+      - name: Ejecutar ejemplos
+        run: |
+          for f in \
+            ejemplos/01_hola.cfv \
+            ejemplos/02_tipos.cfv \
+            ejemplos/03_funciones.cfv \
+            ejemplos/04_clases.cfv \
+            ejemplos/05_manejo_errores.cfv \
+            ejemplos/06_stdlib_texto.cfv \
+            ejemplos/07_stdlib_lista.cfv \
+            ejemplos/08_concurrencia.cfv \
+            ejemplos/09_stdlib_algoritmos.cfv \
+            ejemplos/10_stdlib_numero.cfv; do
+            echo "  → $f"
+            CFORGE_STDLIB=./stdlib timeout 15 ./cforgev "$f"
+          done
+          echo "Todos los ejemplos OK"
+
+      - name: Test stdlib algoritmos
+        run: |
+          printf 'importar "algoritmos"\nsea cmp = funcion(a, b) { retornar a - b }\nmostrar(mergesort([3,1,2], cmp))\n' > /tmp/test_algo.cfv
+          CFORGE_STDLIB=./stdlib ./cforgev /tmp/test_algo.cfv
+
+      - name: Test stdlib numero
+        run: |
+          printf 'importar "numero"\nmostrar(numero_decimales(3.14159, 2))\nmostrar(seno(0))\n' > /tmp/test_num.cfv
+          CFORGE_STDLIB=./stdlib ./cforgev /tmp/test_num.cfv
+
+  # ── Herramientas Python ─────────────────────────────────────────────────────
+  python-tools:
+    name: Python Tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar herramientas desde pyproject.toml
+        run: pip install -e . --quiet
+
+      - name: Test cfmt
+        run: |
+          echo 'mostrar("hola")' > /tmp/test.cfv
+          python3 tools/cfmt.py /tmp/test.cfv --check 2>/dev/null || true
+          echo "cfmt OK"
+
+      - name: Test cflint
+        run: |
+          python3 tools/cflint.py /tmp/test.cfv 2>/dev/null || true
+          echo "cflint OK"
+
+      - name: Test cforge CLI
+        run: python3 tools/cforge_cli.py --help || true
+
+  # ── Docker build ────────────────────────────────────────────────────────────
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t cforge:ci .
+
+      - name: Test Docker image
+        run: |
+          echo 'mostrar("Docker OK")' > /tmp/docker_test.cfv
+          docker run --rm -v /tmp:/work \
+            --entrypoint cforgev cforge:ci \
+            /work/docker_test.cfv

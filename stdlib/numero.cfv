@@ -1,0 +1,328 @@
+// stdlib/numero.cfv — Utilidades y formateo numérico avanzado
+// C-Forge Standard Library v2.5.0
+
+// ── Constantes ─────────────────────────────────────────────────────────────────
+sea PI    = 3.14159265358979323846
+sea E     = 2.71828182845904523536
+sea PHI   = 1.61803398874989484820   // Razón áurea
+sea INF   = 999999999999999
+sea NAN   = 0                        // Not a Number (C-Forge usa 0 como placeholder)
+
+// ── Formateo ───────────────────────────────────────────────────────────────────
+
+/// @doc Formatear número con decimales fijos
+/// @ejemplo numero_decimales(3.14159, 2) → "3.14"
+funcion numero_decimales(n, decimales) {
+    sea factor = potencia(10, decimales)
+    sea redondeado = redondear(n * factor) / factor
+    sea s = numero_a_texto(redondeado)
+    // Asegurar cantidad correcta de decimales
+    sea partes = texto_dividir(s, ".")
+    sea entero = partes[0]
+    sea dec = longitud(partes) > 1 ? partes[1] : ""
+    mientras (longitud(dec) < decimales) { dec = dec + "0" }
+    si (decimales == 0) { retornar entero }
+    retornar entero + "." + dec
+}
+
+/// @doc Formatear con separadores de miles
+/// @ejemplo numero_formato_miles(1234567.89) → "1,234,567.89"
+funcion numero_formato_miles(n, separador_miles, separador_decimal) {
+    sea sep_m = separador_miles ?? ","
+    sea sep_d = separador_decimal ?? "."
+    sea s = numero_a_texto(absoluto(n))
+    sea partes = texto_dividir(s, ".")
+    sea entero = partes[0]
+    sea decimal = longitud(partes) > 1 ? partes[1] : ""
+    // Insertar separadores de miles
+    sea resultado = ""
+    sea len = longitud(entero)
+    sea i = 0
+    mientras (i < len) {
+        si (i > 0 y (len - i) % 3 == 0) {
+            resultado = resultado + sep_m
+        }
+        resultado = resultado + entero[i]
+        i = i + 1
+    }
+    si (longitud(decimal) > 0) {
+        resultado = resultado + sep_d + decimal
+    }
+    si (n < 0) { resultado = "-" + resultado }
+    retornar resultado
+}
+
+/// @doc Formatear como moneda
+/// @ejemplo numero_moneda(1234.5, "USD") → "$1,234.50"
+funcion numero_moneda(n, moneda) {
+    sea simbolos = {
+        "USD": "$", "EUR": "€", "GBP": "£",
+        "JPY": "¥", "MXN": "$", "COP": "$",
+        "ARS": "$", "CLP": "$", "PEN": "S/"
+    }
+    sea sym = simbolos[moneda ?? "USD"] ?? "$"
+    sea decimales = moneda == "JPY" ? 0 : 2
+    sea valor = numero_formato_miles(n, ",", ".")
+    sea partes = texto_dividir(valor, ".")
+    sea decimal_str = longitud(partes) > 1 ? partes[1] : ""
+    mientras (longitud(decimal_str) < decimales) { decimal_str = decimal_str + "0" }
+    sea base = partes[0]
+    si (decimales == 0) {
+        retornar sym + base
+    }
+    retornar sym + base + "." + decimal_str
+}
+
+/// @doc Formatear como porcentaje
+/// @ejemplo numero_porcentaje(0.1575, 1) → "15.8%"
+funcion numero_porcentaje(n, decimales) {
+    retornar numero_decimales(n * 100, decimales ?? 0) + "%"
+}
+
+/// @doc Formatear en notación científica
+/// @ejemplo numero_cientifico(0.00042) → "4.20e-4"
+funcion numero_cientifico(n, decimales) {
+    si (n == 0) { retornar "0.0e0" }
+    sea negativo = n < 0
+    sea abs_n = absoluto(n)
+    sea exp = piso(log10_aprox(abs_n))
+    sea mantisa = abs_n / potencia(10, exp)
+    sea dec = decimales ?? 2
+    sea resultado = numero_decimales(mantisa, dec) + "e" + numero_a_texto(exp)
+    si (negativo) { retornar "-" + resultado }
+    retornar resultado
+}
+
+/// @doc Aproximación de log base 10 (usando ln / ln10)
+funcion log10_aprox(n) {
+    // ln(x) ≈ serie de Taylor — aproximación básica
+    // Usamos potencias: encontrar k tal que 10^k <= n < 10^(k+1)
+    si (n <= 0) { lanzar "log10: argumento debe ser positivo" }
+    sea k = 0
+    sea x = n
+    mientras (x >= 10) { x = x / 10; k = k + 1 }
+    mientras (x < 1)   { x = x * 10; k = k - 1 }
+    retornar k + log_natural(x) / log_natural(10)
+}
+
+/// @doc Logaritmo natural (aproximación numérica)
+funcion log_natural(n) {
+    si (n <= 0) { lanzar "ln: argumento debe ser positivo" }
+    si (n == 1) { retornar 0 }
+    // Usando la identidad: ln(x) = 2 * arctanh((x-1)/(x+1))
+    sea y = (n - 1) / (n + 1)
+    sea y2 = y * y
+    sea suma = y
+    sea term = y
+    sea k = 1
+    mientras (k < 50) {
+        term = term * y2
+        suma = suma + term / (2 * k + 1)
+        k = k + 1
+    }
+    retornar 2 * suma
+}
+
+/// @doc Logaritmo en base arbitraria
+funcion log_base(n, base) {
+    retornar log_natural(n) / log_natural(base)
+}
+
+// ── Funciones matemáticas extendidas ──────────────────────────────────────────
+
+/// @doc Seno (radianes) — serie de Taylor
+funcion seno(x) {
+    // Normalizar a [-2π, 2π]
+    sea dos_pi = 2 * PI
+    mientras (x > PI)   { x = x - dos_pi }
+    mientras (x < -PI)  { x = x + dos_pi }
+    sea suma = x
+    sea term = x
+    sea k = 1
+    mientras (k <= 10) {
+        term = term * (-x * x) / ((2 * k) * (2 * k + 1))
+        suma = suma + term
+        k = k + 1
+    }
+    retornar suma
+}
+
+/// @doc Coseno (radianes)
+funcion coseno(x) {
+    retornar seno(PI / 2 - x)
+}
+
+/// @doc Tangente (radianes)
+funcion tangente(x) {
+    sea c = coseno(x)
+    si (absoluto(c) < 0.0000001) { lanzar "tan: asíntota" }
+    retornar seno(x) / c
+}
+
+/// @doc Grados a radianes
+funcion grados_a_rad(deg) {
+    retornar deg * PI / 180
+}
+
+/// @doc Radianes a grados
+funcion rad_a_grados(rad) {
+    retornar rad * 180 / PI
+}
+
+// ── Estadísticas ───────────────────────────────────────────────────────────────
+
+/// @doc Suma de lista numérica
+funcion suma(lista) {
+    retornar reducir(lista, funcion(a, b) { retornar a + b }, 0)
+}
+
+/// @doc Media aritmética
+funcion media(lista) {
+    sea n = longitud(lista)
+    si (n == 0) { retornar 0 }
+    retornar suma(lista) / n
+}
+
+/// @doc Mediana
+funcion mediana(lista) {
+    sea ord = ordenar(lista, funcion(a, b) { retornar a - b })
+    sea n = longitud(ord)
+    si (n == 0) { retornar 0 }
+    si (n % 2 == 1) { retornar ord[piso(n / 2)] }
+    retornar (ord[n / 2 - 1] + ord[n / 2]) / 2
+}
+
+/// @doc Moda (valor más frecuente)
+funcion moda(lista) {
+    sea freq = {}
+    para v en lista {
+        sea k = numero_a_texto(v)
+        freq[k] = (freq[k] ?? 0) + 1
+    }
+    sea max_freq = 0
+    sea moda_val = lista[0]
+    para k en mapa_claves(freq) {
+        si (freq[k] > max_freq) {
+            max_freq = freq[k]
+            moda_val = texto_a_numero(k)
+        }
+    }
+    retornar moda_val
+}
+
+/// @doc Varianza
+funcion varianza(lista) {
+    sea m = media(lista)
+    sea diffs = mapear(lista, funcion(v) { sea d = v - m; retornar d * d })
+    retornar media(diffs)
+}
+
+/// @doc Desviación estándar
+funcion desviacion_estandar(lista) {
+    retornar raiz(varianza(lista))
+}
+
+/// @doc Percentil P de lista numérica (0-100)
+funcion percentil(lista, p) {
+    sea ord = ordenar(lista, funcion(a, b) { retornar a - b })
+    sea n = longitud(ord)
+    si (n == 0) { retornar 0 }
+    sea idx = (p / 100) * (n - 1)
+    sea bajo = piso(idx)
+    sea alto = techo(idx)
+    si (bajo == alto) { retornar ord[bajo] }
+    retornar ord[bajo] + (ord[alto] - ord[bajo]) * (idx - bajo)
+}
+
+// ── Conversiones numéricas ────────────────────────────────────────────────────
+
+/// @doc Convertir a entero (truncar)
+funcion a_entero(n) { retornar piso(n) }
+
+/// @doc Redondear a múltiplo más cercano
+funcion redondear_a(n, multiplo) {
+    retornar redondear(n / multiplo) * multiplo
+}
+
+/// @doc Limitar valor a rango [min, max]
+funcion limitar(n, min_val, max_val) {
+    retornar maximo(min_val, minimo(max_val, n))
+}
+
+/// @doc Mapear valor de un rango a otro (normalización)
+funcion mapear_rango(n, desde_min, desde_max, hasta_min, hasta_max) {
+    sea t = (n - desde_min) / (desde_max - desde_min)
+    retornar hasta_min + t * (hasta_max - hasta_min)
+}
+
+/// @doc Interpolación lineal
+funcion lerp(a, b, t) {
+    retornar a + (b - a) * t
+}
+
+/// @doc Verificar si es NaN (valor inválido)
+funcion es_nan(n) {
+    retornar n != n  // NaN no es igual a sí mismo
+}
+
+/// @doc Verificar si es número finito
+funcion es_finito(n) {
+    retornar n != INF y n != -INF y no es_nan(n)
+}
+
+// ── Números aleatorios ────────────────────────────────────────────────────────
+
+/// @doc Entero aleatorio en [min, max]
+funcion aleatorio_entero(min_val, max_val) {
+    retornar min_val + piso(aleatorio() * (max_val - min_val + 1))
+}
+
+/// @doc Número decimal aleatorio en [min, max]
+funcion aleatorio_decimal(min_val, max_val) {
+    retornar min_val + aleatorio() * (max_val - min_val)
+}
+
+/// @doc Elemento aleatorio de lista
+funcion aleatorio_de(lista) {
+    sea i = aleatorio_entero(0, longitud(lista) - 1)
+    retornar lista[i]
+}
+
+/// @doc Mezclar lista aleatoriamente (Fisher-Yates)
+funcion mezclar(lista) {
+    sea copia = lista + []
+    sea i = longitud(copia) - 1
+    mientras (i > 0) {
+        sea j = aleatorio_entero(0, i)
+        sea tmp = copia[i]
+        copia[i] = copia[j]
+        copia[j] = tmp
+        i = i - 1
+    }
+    retornar copia
+}
+
+// ── Base numérica ─────────────────────────────────────────────────────────────
+
+/// @doc Convertir entero a string en base (2-36)
+funcion numero_a_base(n, base) {
+    si (n == 0) { retornar "0" }
+    sea digitos = "0123456789abcdefghijklmnopqrstuvwxyz"
+    sea negativo = n < 0
+    sea abs_n = absoluto(n)
+    sea resultado = ""
+    mientras (abs_n > 0) {
+        sea rem = abs_n % base
+        resultado = digitos[rem] + resultado
+        abs_n = piso(abs_n / base)
+    }
+    si (negativo) { resultado = "-" + resultado }
+    retornar resultado
+}
+
+/// @doc Número en binario
+funcion a_binario(n)   { retornar "0b" + numero_a_base(n, 2) }
+/// @doc Número en octal
+funcion a_octal(n)     { retornar "0o" + numero_a_base(n, 8) }
+/// @doc Número en hexadecimal
+funcion a_hex(n)       { retornar "0x" + numero_a_base(n, 16) }

@@ -1,0 +1,43 @@
+// 09_stdlib_algoritmos.cfv — Stdlib de algoritmos en C-Forge
+importar "algoritmos"
+
+sea comp = funcion(a, b) { retornar a - b }
+
+// Ordenamiento
+sea datos = [64, 34, 25, 12, 22, 11, 90]
+mostrar("Original:  " + a_texto(datos))
+mostrar("QuickSort: " + a_texto(quicksort(mapear(datos, funcion(x) { retornar x }), comp)))
+mostrar("MergeSort: " + a_texto(mergesort(datos, comp)))
+
+// Búsqueda binaria
+sea ordenada = ordenar(datos, comp)
+sea idx = busqueda_binaria(ordenada, 25)
+mostrar("Búsqueda binaria de 25: índice " + numero_a_texto(idx))
+
+// Operaciones de colección
+sea personas = [
+    { "nombre": "Ana",   "edad": 30 },
+    { "nombre": "Bob",   "edad": 25 },
+    { "nombre": "Carol", "edad": 35 },
+    { "nombre": "Dan",   "edad": 25 }
+]
+
+sea por_edad = agrupar_por(personas, funcion(p) { retornar numero_a_texto(p["edad"]) })
+mostrar("Agrupados por edad:")
+para grupo en mapa_claves(por_edad) {
+    sea nombres = mapear(por_edad[grupo], funcion(p) { retornar p["nombre"] })
+    mostrar("  " + grupo + ": " + a_texto(nombres))
+}
+
+// Grafo BFS/DFS
+sea grafo = grafo_crear()
+grafo_agregar_nodo(grafo, "A")
+grafo_agregar_nodo(grafo, "B")
+grafo_agregar_nodo(grafo, "C")
+grafo_agregar_nodo(grafo, "D")
+grafo_agregar_arista(grafo, "A", "B")
+grafo_agregar_arista(grafo, "A", "C")
+grafo_agregar_arista(grafo, "B", "D")
+grafo_agregar_arista(grafo, "C", "D")
+mostrar("BFS desde A: " + a_texto(grafo_bfs(grafo, "A")))
+mostrar("DFS desde A: " + a_texto(grafo_dfs(grafo, "A")))

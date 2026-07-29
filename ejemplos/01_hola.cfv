@@ -1,0 +1,13 @@
+// 01_hola.cfv — Hola Mundo en C-Forge
+// Ejecutar: CFORGE_STDLIB=./stdlib ./cforgev ejemplos/01_hola.cfv
+
+mostrar("¡Hola, C-Forge 2.5!")
+mostrar("Lenguaje de programación completo y moderno")
+
+// Variables y tipos básicos
+sea nombre = "C-Forge"
+sea version = 2.5
+sea activo = verdadero
+
+mostrar("Nombre: " + nombre + " v" + numero_a_texto(version))
+mostrar("Activo: " + a_texto(activo))

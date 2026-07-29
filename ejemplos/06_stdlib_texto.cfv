@@ -1,0 +1,18 @@
+// 06_stdlib_texto.cfv — Operaciones de texto en C-Forge
+
+sea s = "  Hola, Mundo C-Forge!  "
+
+mostrar(texto_recortar(s))
+mostrar(texto_mayusculas("hola"))
+mostrar(texto_minusculas("ADIOS"))
+mostrar(texto_contiene(s, "Mundo"))
+mostrar(texto_reemplazar(s, "Mundo", "Universo"))
+mostrar(texto_dividir("a,b,c,d", ","))
+mostrar(texto_unir(["uno", "dos", "tres"], " - "))
+mostrar(subcadena("C-Forge 2.5", 0, 7))
+mostrar(texto_empieza_con("hola mundo", "hola"))
+mostrar(texto_termina_con("archivo.cfv", ".cfv"))
+mostrar(texto_repetir("=-", 10))
+mostrar(texto_indice("buscar aquí", "aquí"))
+mostrar(texto_invertir("C-Forge"))
+mostrar(longitud("C-Forge 2.5"))

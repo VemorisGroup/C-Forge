@@ -7,728 +7,590 @@
   <img src="assets/cforgev-logo.svg" width="128" height="128" alt="Logo de C-Forge">
 </p>
 
-> Lenguaje de programacion de Vemoris Group con sintaxis propia, tipado gradual,
-> interprete nativo en C++ y biblioteca estandar completa.
-> Diseñado para todo — desde scripts personales hasta bancos, estudios de videojuegos y empresas gigantes.
+> Lenguaje de programación experimental de Vemoris Group con sintaxis propia,
+> ejecución interactiva, compilación a C++17 e interoperabilidad políglota.
 
-**Version actual:** `2.2.0`
-**Extension oficial:** `.cfv`
-**Estado:** produccion — JSON nativo, SQLite, HTTP client/server, Regex, Canales, Android/iOS, SDL2/OpenGL, criptografia AES-256.
+**Versión actual:** `1.6.0-developer-preview`<br>
+**Extensión oficial:** `.cfv`<br>
+**Estado:** experimental; apto para aprendizaje, demostraciones y desarrollo del motor.
 
----
+C-Forge combina una sintaxis legible, tipado gradual, compilación nativa y un
+sistema de valores común llamado `ForgeValue`. El proyecto permite ejecutar un
+programa durante el desarrollo o traducirlo a un ejecutable C++ nativo.
 
-## Inicio rapido
+Cuando una función necesita un componente conocido del sistema, la VM lo
+presenta mediante un alias propio, como `.cfv-gui`, solicita autorización y
+captura la salida del instalador. C-Forge muestra el paquete real antes de
+ejecutarlo y nunca instala dependencias sin consentimiento explícito.
 
-### Instalacion automatica (macOS y Linux)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/VemorisGroup/C-Forge/main/install.sh | bash
-```
-
-### Compilar manualmente
-
-```bash
-git clone https://github.com/VemorisGroup/C-Forge.git
-cd C-Forge
-
-# Basico (sin dependencias extra)
-g++ -std=c++20 -O2 -o cforgev cforgev.cpp
-
-# Con OpenSSL + SQLite (recomendado para produccion)
-g++ -std=c++20 -O2 -o cforgev cforgev.cpp \
-    -DCFV_WITH_OPENSSL -DCFV_WITH_SQLITE \
-    -lsqlite3 -lcrypto -lpthread
-```
-
-### Ejecutar un programa
-
-```bash
-./cforgev mi_programa.cfv
-```
-
-### REPL interactivo
-
-```bash
-./cforgev
-```
-
----
-
-## El lenguaje
+El catálogo de fusión ofrece conectores con sintaxis nativa que intercambian
+`ForgeValue` sin conversiones manuales:
 
 ```cfv
-// Variables con tipado gradual
-sea nombre: texto = "Javier"
-sea edad: numero = 20
-sea activo: booleano = verdadero
+datos = json_parse("{\"valor\":21}")
+huella = forge_hash(datos)
+respuesta = sys_fetch("https://example.com/data.json")
+medicion = forge_bench("procesar", 1000, [datos.valor])
+```
 
-// Clases con herencia
-clase Animal {
-    campo nombre: texto
-    funcion hablar(): texto {
-        retornar "..."
+`sys_fetch` acepta únicamente HTTP/HTTPS, limita cada respuesta a 16 MiB y usa
+un tiempo de espera para evitar que una descarga bloquee indefinidamente la VM.
+
+> **Migración de marca:** C-Forge fue publicado inicialmente como C-Forgev.
+> El comando `cforge`, la extensión `.cfv` y los identificadores técnicos
+> `cforgev` se conservan para no romper instalaciones ni proyectos existentes.
+
+```cfv
+cluster proyecto = "C-Forge";
+
+funcion cuadrado(numero) {
+    retornar numero * numero;
+}
+
+sea creador: texto = "Javier";
+resultado = cuadrado(7);
+
+mostrar("Hola, " + creador);
+mostrar(resultado);
+```
+
+También puede usarse sintaxis de impresión y colecciones conocida de otros
+lenguajes; todas las variantes se normalizan internamente a `ForgeValue`:
+
+```cfv
+print("Python")
+console.log("JavaScript")
+System.out.println("Java")
+std::cout << "C++" << std::endl
+
+datos = [1, 2]
+datos.append(3)
+datos.push(4)
+print(datos.length)
+print(datos.length())
+print(datos.len())
+```
+
+## Características
+
+- **[Verificado en Developer Preview]** Variables inferidas, tipos explícitos,
+  valores escalares, colecciones, estructuras, clases y control de flujo.
+- **[Verificado en Developer Preview]** REPL, intérprete, bytecode y VM para el
+  subconjunto cubierto por la suite automatizada.
+- **[Experimental]** Compilación de `.cfv` a C++17 y posteriormente a ejecutable.
+- **[Parcial]** Backend LLVM nativo para las capacidades enumeradas en
+  [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md).
+- **[Experimental]** Módulos locales y acceso mediante `objeto.miembro`.
+- **[Parcial]** Adaptadores para Python, C/C++, C# Native AOT, Java,
+  JavaScript y TypeScript; no existe todavía paridad completa en tres sistemas.
+- **[Experimental]** Bloques literales `extern("lenguaje") { ... }`, siempre
+  sujetos a autorización de seguridad.
+- **[Parcial]** FFI LLVM tipado mediante `extern_c funcion` y `--vincular`, con escalares y
+  vistas zero-copy prestadas para parámetros `lista<numero>`.
+- **[Experimental]** `ForgeValue`, Forge Shared Arena y símbolos `cluster`.
+- **[Parcial]** Tareas paralelas y `async/await`; `gpu` ejecuta actualmente en
+  CPU y el JIT solamente perfila rutas calientes.
+- **[Experimental]** Archivos, procesos, hardware, sockets TCP, `array_fast`
+  y matrices en los backends documentados.
+- **[Experimental]** Formateador, pruebas, hot reload, reparación conservadora,
+  LSP, DAP y extensión de Visual Studio Code.
+- **[Parcial]** WebAssembly emite WAT para un subconjunto, no para todo C-Forge.
+- **[Parcial]** Empaquetado para macOS, Linux y Windows; la validación física y
+  los catálogos públicos aún no están completos.
+- **[Parcial]** Compilador autoalojado y núcleo autónomo. B5 verifica que el
+  compilador C-Forge Core 0.5 produce Stage 2/3 idénticos byte por byte sin
+  Python. La paridad con todo C-Forge 2.0 y el runtime completamente
+  independiente siguen pendientes; consulta
+  [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md).
+- **[No certificado]** Uso bancario o crítico; requiere auditoría profesional,
+  LTS, cumplimiento y evidencia externa.
+
+La fuente de verdad legible por máquinas es
+[`capabilities.json`](capabilities.json). La
+[`política de completitud`](docs/COMPLETENESS-POLICY.md) prohíbe presentar una
+capacidad parcial o planeada como terminada.
+
+## C-Forge Core Bootstrap
+
+El desarrollo de funciones nuevas queda congelado mientras se construye el
+compilador autoalojado. Stage 0 es un compilador mínimo C++17 que no carga
+Python ni runtimes extranjeros:
+
+```bash
+clang++ -std=c++17 -O2 bootstrap/stage0/cforge_bootstrap.cpp \
+  -o build/cforge-bootstrap
+./build/cforge-bootstrap bootstrap/fixtures/minimal.cfv -o build/minimal
+./build/minimal
+
+cforge test bootstrap/core_lexer.cfv
+cforge vm bootstrap/core_lexer.cfv
+```
+
+El primer bloque verifica que Stage 0 produzca código máquina; los dos últimos
+comprueban el lexer de Stage 1. B5 verifica que Stage 2 y Stage 3 recompilen
+las mismas fuentes `.cfv` y produzcan artefactos reproducibles equivalentes.
+Esto autoaloja C-Forge Core 0.5; la dirección nativa completa está en
+[`docs/CORE-DIRECTION.md`](docs/CORE-DIRECTION.md).
+
+Los hitos B1/B2 añaden [`core_ast.cfv`](bootstrap/core_ast.cfv),
+[`core_parser.cfv`](bootstrap/core_parser.cfv),
+[`core_semantics.cfv`](bootstrap/core_semantics.cfv) y la
+[`gramática Core 0.5`](docs/CORE-GRAMMAR-0.5.ebnf). B3 agrega
+[`core_emitter.cfv`](bootstrap/core_emitter.cfv). B4 agrega
+[`core_driver.cfv`](bootstrap/core_driver.cfv) y la unidad autocontenida
+[`cforge_stage1.cfv`](bootstrap/stage1/cforge_stage1.cfv). Sus pruebas ensamblan esas
+fuentes con el lexer, las compilan mediante Stage 0, comparan AST, diagnósticos
+y C++ generado contra el intérprete y la VM, y ejecutan el binario final.
+
+## Herramientas profesionales (base 1.0)
+
+```bash
+cforge check programa.cfv          # análisis estático con códigos CFxxxx
+cforge bytecode programa.cfv       # inspeccionar bytecode propio
+cforge parity programa.cfv         # comparar intérprete, VM y LLVM
+cforge vm programa.cfv             # ejecutar en la VM de pila
+cforge --llvm programa.cfv         # emitir LLVM IR real para el núcleo compatible
+cforge --compilar-llvm programa.cfv -o programa # LLVM IR + Clang
+cforge debug programa.cfv          # trazar instrucciones y variables
+cforge debug programa.cfv --break 20 # detenerse en un offset de bytecode
+cforge lsp                          # servidor LSP 3.17 por stdio
+cforge pkg init mi-proyecto        # crear cforge.json y cforge.lock
+cforge pkg build                   # crear paquete y SHA-256
+cforge pkg keygen                  # crear identidad Ed25519 del publicador
+cforge pkg sign archivo clave nombre versión
+cforge pkg search consulta         # consultar el índice público
+cforge pkg install paquete         # verificar HTTPS, SHA-256, firma, cuenta y revocación
+cforge dap                         # servidor de depuración DAP para editores
+cforge --compilar-llvm ejemplos/llvm_objetos_16.cfv -o contador
+cforge programa_confiable.cfv --allow-extern # autorizar código extranjero explícitamente
+```
+
+La matriz honesta de capacidades y trabajo pendiente está en
+[`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md), con
+[`validación por plataforma`](docs/PLATFORM-VALIDATION.md) y
+[`alcance de auditoría externa`](docs/EXTERNAL-AUDIT-SCOPE.md). Una auditoría de
+seguridad independiente y resultados de rendimiento no se sustituyen con afirmaciones:
+deben publicarse como evidencia reproducible antes de declarar el motor apto para producción.
+
+La definición independiente de la implementación está en la
+[`gramática EBNF`](docs/GRAMMAR-1.6.ebnf), el
+[`sistema de tipos`](docs/TYPE-SYSTEM-1.6.md) y el
+[`contrato de backends`](docs/BACKEND-SEMANTICS-1.6.md).
+
+La dirección del lenguaje autónomo está definida en
+[`C-Forge 2.0 Draft`](docs/C-FORGE-2.0-DRAFT.md) y su
+[`gramática candidata completa`](docs/GRAMMAR-2.0-DRAFT.ebnf). Estos documentos
+son una especificación de diseño: **no afirman que el motor 1.6 implemente aún
+todas esas construcciones**. El avance real continúa gobernado por
+`capabilities.json` y la política de completitud.
+
+## Inicio rápido
+
+### 1. Comprobar el entorno
+
+Desde la raíz del proyecto:
+
+```bash
+./outputs/cforge-master --setup
+```
+
+En el Mac utilizado para desarrollar C-Forge están activos Apple Clang,
+Python 3, Node.js y Eclipse Temurin JDK.
+
+### 2. Ejecutar un programa
+
+```bash
+./outputs/cforge-master ejemplos/hola.cfv
+```
+
+También puedes usar el frontend del repositorio:
+
+```bash
+./cforge ejemplos/hola.cfv
+```
+
+### 3. Compilar un ejecutable nativo
+
+```bash
+./outputs/cforge-master --compilar ejemplos/nucleo_sistema_13.cfv -o build/nucleo
+./build/nucleo
+```
+
+### 4. Instalar el comando global en macOS
+
+```bash
+sudo ./outputs/cforge-master --install
+cforge --version
+```
+
+El instalador copia la distribución monolítica a `/usr/local/bin/cforge`.
+
+## Instalación multiplataforma
+
+El workflow de lanzamientos está preparado para generar paquetes en los tres
+sistemas. Cada artefacto solo se considera publicado y soportado cuando aparece
+como evidencia en [GitHub Releases](https://github.com/VemorisGroup/C-Forge/releases)
+y en la matriz de validación.
+
+macOS, cuando se publique el tap de Vemoris Group:
+
+```bash
+brew install VemorisGroup/cforgev/cforge
+```
+
+Windows, después de la aceptación del manifiesto en WinGet:
+
+```powershell
+winget install VemorisGroup.CForgev
+```
+
+Debian/Ubuntu usando el paquete descargado del lanzamiento:
+
+```bash
+sudo apt install ./cforgev_1.4.1_all.deb
+```
+
+La preparación y las condiciones necesarias para ofrecer los comandos cortos
+están documentadas en [`DISTRIBUCION.md`](DISTRIBUCION.md).
+
+## Prueba maestra
+
+El archivo experimental [`main.cfv`](main.cfv) demuestra tipado, clases, Python, JavaScript,
+TypeScript, Java, C#, C++, ForgeValue, archivos, hardware, procesos, matrices,
+paralelismo, GPU/CPU, JIT, `cluster`, networking y manejo de errores.
+
+```bash
+cforge test main.cfv --allow-extern
+```
+
+Resultado esperado:
+
+```text
+C-Forge Test: 10 aprobados, 0 fallidos
+```
+
+`main.cfv` contiene bloques extranjeros deliberados; `--allow-extern` confirma
+que se confía en el archivo. Las pruebas normales no deben usar esa opción.
+
+Para comprobar también el backend nativo:
+
+```bash
+cforge --compilar main.cfv -o build/main-final
+./build/main-final
+```
+
+La suite interna contiene más de 100 pruebas automatizadas:
+
+```bash
+PYTHONPYCACHEPREFIX=/tmp/cforgev-pycache \
+python3 -m unittest discover -s tests -v
+```
+
+El gate oficial de fuzzing ejecuta exactamente 20.000 casos deterministas:
+
+```bash
+python3 tests/fuzz_smoke.py --cases 10000
+```
+
+`--cases 10000` ejecuta 10.000 entradas sobre cada una de las dos pasadas del
+fuzzer (lexer/parser y formato/ejecución), para un total verificable de 20.000.
+La misma orden se exige en CI y en [`capabilities.json`](capabilities.json).
+
+## Sintaxis esencial
+
+### Tipado gradual
+
+```cfv
+nombre = "Javier";
+sea edad = 20;
+sea saldo: numero = 1500;
+sea activo: booleano = verdadero;
+```
+
+Una variable inferida conserva su tipo después de la primera asignación. El
+analizador estático también rechaza contradicciones evidentes antes de compilar.
+
+### Control de flujo
+
+```cfv
+si (edad >= 18) {
+    mostrar("Mayor de edad");
+} sino {
+    mostrar("Menor de edad");
+}
+
+contador = 0;
+mientras (contador < 3) {
+    contador = contador + 1;
+}
+```
+
+### Estructuras y clases
+
+```cfv
+estructura Persona {
+    nombre: texto;
+    edad: numero;
+}
+
+clase Cuenta {
+    campo saldo: numero;
+
+    metodo depositar(cantidad) {
+        este.saldo = este.saldo + cantidad;
+        retornar este.saldo;
     }
 }
 
-clase Perro extiende Animal {
-    funcion hablar(): texto {
-        retornar "Guau! Soy {este.nombre}"
-    }
-}
+persona = Persona("Javier", 20);
+cuenta = Cuenta(100);
+mostrar(cuenta.depositar(50));
+```
 
-sea p = Perro()
-p.nombre = "Rex"
-mostrar(p.hablar())   // Guau! Soy Rex
-mostrar(p es Animal)  // verdadero
+### Excepciones y pruebas
 
-// Funciones con defaults y variadicos
-funcion saludar(nombre: texto, saludo: texto = "Hola"): texto {
-    retornar "{saludo}, {nombre}!"
-}
-
-funcion sumar(...nums): numero {
-    sea total: numero = 0
-    para n en nums { total += n }
-    retornar total
-}
-
-mostrar(saludar("Ana"))          // Hola, Ana!
-mostrar(sumar(1, 2, 3, 4, 5))   // 15
-
-// Operador ternario
-sea msg: texto = edad >= 18 ? "adulto" : "menor"
-
-// Desestructuracion
-sea [a, b, c] = [10, 20, 30]
-sea {nombre, edad} = {nombre: "Luis", edad: 25}
-
-// Spread
-sea lista1 = [1, 2, 3]
-sea lista2 = [...lista1, 4, 5, 6]
-
-// Closures / lambdas
-sea doble = funcion(n: numero): numero { retornar n * 2 }
-mostrar(doble(7))   // 14
-
-// Operadores de seguridad
-sea config: cualquiera = nulo
-sea timeout: numero = config?.timeout ?? 5000
-
-// Manejo de errores
+```cfv
 intentar {
-    lanzar("algo salio mal")
-} capturar (e) {
-    mostrar("Error: {e}")
-} finalmente {
-    mostrar("siempre se ejecuta")
+    mostrar(10 / 0);
+} capturar(error) {
+    mostrar(error);
 }
 
-// switch/match
-sea dia: numero = 1
-segun (dia) {
-    caso 1: mostrar("Lunes")
-    caso 2: mostrar("Martes")
-    otro:   mostrar("Otro dia")
+test "suma" {
+    afirmar(20 + 22 == 42, "resultado incorrecto");
 }
 ```
 
----
+La referencia ampliada está en
+[`outputs/C-FORGE-CHEATSHEET.md`](outputs/C-FORGE-CHEATSHEET.md).
 
-## Caracteristicas del lenguaje
+## Núcleo nativo
 
-| Caracteristica | Estado |
+```cfv
+info = sys_info();
+mostrar(info.cpu);
+mostrar(info.nucleos);
+mostrar(info.ram_bytes);
+
+proceso = sys_run("printf C-Forge");
+mostrar(proceso.estado);
+mostrar(proceso.salida);
+
+file_write("datos.txt", "Forge");
+file_append("datos.txt", "v");
+mostrar(file_read("datos.txt"));
+
+vector = array_fast([1, 2, 3, 4]);
+matriz = matrix(2, 3, 7);
+```
+
+Networking TCP:
+
+```cfv
+// Servidor local de una conexión, con timeout de 5 segundos.
+paquete = net_listen(8080, 5000);
+mostrar(paquete.datos);
+
+// Desde otro programa o proceso:
+bytes = net_send("127.0.0.1", 8080, "Hola por TCP");
+```
+
+`net_listen` escucha actualmente en loopback y no implementa un servidor HTTP.
+
+## Paralelismo, GPU, JIT y cluster
+
+```cfv
+cluster version = "1.3";
+
+cluster funcion cuadrado(n) {
+    retornar n * n;
+}
+
+gpu {
+    resultados = paralelo("cuadrado", [2, 3, 4, 5]);
+    mostrar(resultados);
+}
+
+mostrar(jit_estado("cuadrado"));
+mostrar(jit_caliente("cuadrado"));
+mostrar(cluster_estado());
+```
+
+El backend `gpu` de la versión 1.3 ejecuta tareas paralelas en CPU. La integración
+física con Metal/CUDA continúa siendo un punto de extensión. El JIT actual perfila
+rutas calientes, pero todavía no reemplaza bytecode por código máquina optimizado.
+
+## Interoperabilidad
+
+### Importación universal
+
+```cfv
+import pip:math;
+import npm:path;
+import nuget:CSharpNative;
+import maven:paquete;
+
+mostrar(math.sqrt(81));
+mostrar(path.extname("programa.ts"));
+```
+
+### Puentes explícitos
+
+```cfv
+mostrar(use_python("math", "pow", [2, 10]));
+mostrar(use_javascript("path", "basename", ["/tmp/app.js"]));
+mostrar(use_csharp("biblioteca.dylib", "sumar", [20, 22]));
+mostrar(use_cpp("funcion_registrada", [20, 22]));
+mostrar(use_java("app.jar", "MiClase", "metodo", [42]));
+```
+
+El compilador detecta llamadas literales `use_cpp` y busca implementaciones
+registradas en `interop/`, `native/`, `cpp/` y `ejemplos/interop/`. Para una
+ubicación personalizada sigue disponible `--vincular archivo.cpp`.
+
+### Bloques extranjeros
+
+```cfv
+extern("python") {
+    print("Python real")
+}
+
+extern("javascript") {
+    console.log("JavaScript real");
+}
+
+extern("typescript") {
+    const respuesta: number = 42;
+    console.log(respuesta);
+}
+
+extern("java") {
+    System.out.println("Java real");
+}
+
+extern("cpp") {
+    std::cout << "C++ real" << std::endl;
+}
+```
+
+Los valores universales —nulo, booleanos, números, textos, listas y mapas— se
+transportan mediante `ForgeValue`. Los objetos opacos permanecen dentro de su
+runtime para evitar intercambiar punteros inválidos.
+
+Consulta [`INTEROPERABILIDAD.md`](INTEROPERABILIDAD.md) para conocer el ABI y el
+contrato de propiedad de memoria.
+
+## Herramientas del CLI
+
+| Comando | Descripción |
 |---|---|
-| Variables y tipado gradual | ✅ |
-| Funciones y closures | ✅ |
-| Clases con `este` | ✅ |
-| Herencia (`extiende` / `super`) | ✅ |
-| Modificadores `privado` / `publico` / `estatico` | ✅ |
-| Parametros con valor por defecto | ✅ |
-| Variadicos (`...args`) | ✅ |
-| Desestructuracion de lista y mapa | ✅ |
-| Spread (`[...lista, x]`) | ✅ |
-| Operador ternario (`cond ? a : b`) | ✅ |
-| `es` (instanceof con cadena de herencia) | ✅ |
-| `en` (membresia en lista, mapa, texto) | ✅ |
-| Asignacion compuesta (`+=`, `-=`, `*=`, `/=`, `%=`) | ✅ |
-| `intentar` / `capturar` / `finalmente` / `lanzar` | ✅ |
-| `segun` / `caso` / `otro` (switch/match) | ✅ |
-| `??` (null coalescing) | ✅ |
-| `?.` (safe navigation) | ✅ |
-| Interpolacion de strings `"{variable}"` | ✅ |
-| `para` con rango lazy | ✅ |
-| `enum` | ✅ |
-| REPL interactivo | ✅ |
-| Stack traces con contexto | ✅ |
-| `importar` modulos | ✅ |
-| Servidor HTTP nativo | ✅ |
-| Cliente HTTP (GET/POST/PUT/DELETE) | ✅ |
-| JSON nativo (sin dependencias) | ✅ |
-| SQLite integrado | ✅ |
-| Regex nativo (`std::regex`) | ✅ |
-| Canales (concurrencia tipo Go) | ✅ |
-| SHA-256 + AES-256-CBC (OpenSSL) | ✅ |
-| JWT HS256 | ✅ |
-| Fecha y hora nativa | ✅ |
-| Colecciones avanzadas | ✅ |
-| Android (JNI + NDK) | ✅ |
-| iOS (Swift + ObjC++) | ✅ |
-| SDL2 (juegos 2D) | ✅ |
-| OpenGL (juegos 3D) | ✅ |
-
----
-
-## v2.2 — Nuevas funciones nativas
-
-### JSON nativo (sin dependencias)
-
-```cfv
-// Serializar cualquier valor
-sea j = json_texto({"nombre": "Ana", "edad": 25})   // {"nombre":"Ana","edad":25}
-sea jb = json_bonito({"a": 1, "b": [1, 2, 3]})     // indentado 2 espacios
-
-// Parsear desde archivo (recomendado — evita conflicto con { en strings)
-sea config = json_parsear(leer_archivo("config.json"))
-mostrar(config["puerto"])
-
-// Tipos soportados
-json_texto(nulo)     // "null"
-json_texto(verdadero) // "true"
-json_texto(42)       // "42"
-json_texto([1,2,3])  // "[1,2,3]"
-```
-
-### SQLite nativo
-
-```cfv
-// Compilar con: -DCFV_WITH_SQLITE -lsqlite3
-sea db = db_abrir("mi_app.db")   // ":memory:" para RAM
-
-db_ejecutar(db, "CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre TEXT, email TEXT)")
-
-db_consulta_p(db, "INSERT INTO usuarios (nombre, email) VALUES (?, ?)", ["Ana", "ana@ej.com"])
-sea id = db_ultimo_id(db)
-
-sea usuarios = db_consulta(db, "SELECT * FROM usuarios")
-mostrar(usuarios[0]["nombre"])   // Ana
-
-// Transacciones
-db_transaccion(db)
-intentar {
-    db_consulta_p(db, "UPDATE cuentas SET saldo = saldo - ? WHERE id = ?", [500, 1])
-    db_consulta_p(db, "UPDATE cuentas SET saldo = saldo + ? WHERE id = ?", [500, 2])
-    db_confirmar(db)
-} capturar (e) {
-    db_revertir(db)
-}
-
-db_cerrar(db)
-```
-
-### Cliente HTTP completo
-
-```cfv
-// GET
-sea resp = http_get("https://api.github.com/users/octocat")
-sea datos = json_parsear(resp)
-
-// POST con JSON
-sea respuesta = http_post("https://api.ejemplo.com/usuarios",
-    json_texto({"nombre": "Ana"}),
-    "application/json")
-
-// PUT, DELETE
-http_put("https://api.ej.com/item/1", json_texto({"nombre": "Ana v2"}))
-http_delete("https://api.ej.com/item/1")
-
-// Solicitud completa con cabeceras
-sea res = http_solicitud("GET", "https://api.privada.com/datos", {
-    "cabeceras": {"Authorization": "Bearer mi_token"},
-    "timeout":   10000
-})
-```
-
-### Regex nativo
-
-```cfv
-// Coincidir (verdadero/falso)
-mostrar(regex_coincidir("usuario@email.com", "^[\\w.+]+@[\\w]+\\.[a-z]{2,}$"))  // verdadero
-
-// Buscar todos los matches
-sea nums = regex_buscar("precio: 42 pesos, 100 extras", "[0-9]+")  // ["42", "100"]
-
-// Primer match
-sea primero = regex_buscar_primero("texto 123", "[0-9]+")  // "123"
-
-// Reemplazar
-sea limpio = regex_reemplazar("Hola   Mundo", "\\s+", " ")  // "Hola Mundo"
-
-// Grupos de captura
-sea grupos = regex_grupos("2026-07-28", "(\\d{4})-(\\d{2})-(\\d{2})")
-// ["2026", "07", "28"]
-```
-
-### Canales (concurrencia tipo Go)
-
-```cfv
-importar "stdlib/concurrencia.cfv"
-
-// Canal con buffer
-sea c = canal_nuevo(10)
-
-// Productor
-canal_enviar(c, "mensaje 1")
-canal_enviar(c, "mensaje 2")
-
-// Consumidor
-sea msg = canal_recibir(c)  // "mensaje 1" (bloquea si vacio)
-mostrar(canal_tam(c))       // 1
-
-// Dormir (en hilos)
-hilo_dormir(100)   // 100 ms
-
-canal_cerrar(c)
-```
-
-### Sistema y Procesos
-
-```cfv
-// Variables de entorno
-sea path = env_obtener("PATH")
-env_establecer("MI_VAR", "valor")
-
-// Ejecutar procesos externos
-sea salida = proceso_ejecutar("ls -la")
-mostrar(salida)
-
-// Tiempo
-mostrar(tiempo_ms())       // timestamp en milisegundos
-mostrar(tiempo_segundos()) // timestamp en segundos
-
-// Control
-pausa(500)         // esperar 500ms
-limpiar_pantalla() // limpiar terminal
-salir(0)           // salir con codigo
-```
-
-### Fecha y hora
-
-```cfv
-sea f = fecha_ahora()
-mostrar(f["anio"])   // 2026
-mostrar(f["mes"])    // 7
-mostrar(f["dia"])    // 28
-mostrar(f["hora"])   // 14
-mostrar(f["iso"])    // "2026-07-28 14:30:00"
-
-// Formatear
-mostrar(fecha_formatear(f, "%d/%m/%Y"))  // "28/07/2026"
-mostrar(fecha_formatear(f, "%H:%M:%S"))  // "14:30:00"
-```
-
-### Colecciones avanzadas
-
-```cfv
-// Lista unica (eliminar duplicados)
-sea u = lista_unica([1, 2, 2, 3, 3, 3])   // [1, 2, 3]
-
-// Aplanar lista anidada
-sea a = lista_aplanar([[1, 2], [3, 4], [5]])  // [1, 2, 3, 4, 5]
-
-// Zip de listas
-sea z = lista_zip([1, 2, 3], ["a", "b", "c"])
-// [[1,"a"], [2,"b"], [3,"c"]]
-
-// Operaciones de mapa
-sea claves = mapa_claves({"a": 1, "b": 2})    // ["a", "b"]
-sea vals = mapa_valores({"a": 1, "b": 2})      // [1, 2]
-sea entradas = mapa_entradas({"a": 1})         // [["a", 1]]
-sea fusion = mapa_fusionar({"a": 1}, {"b": 2}) // {"a":1, "b":2}
-```
-
-### Texto avanzado
-
-```cfv
-// Relleno izquierda
-mostrar(texto_relleno("42", 6, "0"))    // "000042"
-mostrar(texto_relleno("hi", 5))         // "   hi"  (espacio por defecto)
-
-// Relleno derecha
-mostrar(texto_relleno_der("hi", 5, "-")) // "hi---"
-
-// Formato printf-like
-mostrar(texto_formato("Hola {0}, tienes {1} años", "Ana", 25))
-// "Hola Ana, tienes 25 años"
-```
-
----
-
-## Base de datos (SQLite)
-
-```cfv
-importar "stdlib/db.cfv"
-
-// Conectar y migrar automaticamente
-sea db = db_conectar("app.db")
-db_migrar(db, "usuarios", {
-    "nombre": "TEXT NOT NULL",
-    "email":  "TEXT UNIQUE NOT NULL",
-    "activo": "INTEGER DEFAULT 1"
-})
-
-// CRUD completo
-sea id = db_insertar(db, "usuarios", {"nombre": "Ana", "email": "ana@ej.com"})
-sea todos = db_todos(db, "usuarios")
-sea ana = db_por_id(db, "usuarios", id)
-sea activos = db_donde(db, "usuarios", "activo = 1")
-db_actualizar(db, "usuarios", id, {"nombre": "Ana M."})
-sea total = db_contar(db, "usuarios")
-
-// Paginacion
-sea pagina = db_paginar(db, "usuarios", 1, 10)  // pagina 1, 10 por pagina
-
-// Transacciones
-db_en_transaccion(db, funcion(): nulo {
-    db_insertar(db, "cuentas", {"saldo": 1000})
-    db_insertar(db, "movimientos", {"tipo": "apertura", "monto": 1000})
-})
-```
-
----
-
-## HTTP Server y API REST
-
-```cfv
-importar "stdlib/web.cfv"
-importar "stdlib/log.cfv"
-importar "stdlib/validar.cfv"
-
-sea srv = web_escuchar(8080)
-log_info("API en http://localhost:8080")
-
-mientras (verdadero) {
-    sea req = web_solicitud(srv)
-    sea ruta = req["ruta"]
-    sea met = req["metodo"]
-
-    si (met == "GET" y ruta == "/") {
-        web_responder(srv, 200, json_texto({"api": "C-Forge", "v": "2.2"}), "application/json")
-    } sino si (met == "POST" y ruta == "/usuarios") {
-        sea datos = json_parsear(req["cuerpo"])
-        sea v = validar_esquema(datos, {
-            "nombre": {"requerido": verdadero, "tipo": "texto"},
-            "email":  {"requerido": verdadero, "email": verdadero}
-        })
-        si (v["valido"]) {
-            web_responder(srv, 201, json_texto({"ok": verdadero}), "application/json")
-        } sino {
-            web_responder(srv, 400, json_texto({"error": v["errores"][0]}), "application/json")
-        }
-    }
-}
-```
-
----
-
-## Logging y validacion
-
-```cfv
-importar "stdlib/log.cfv"
-importar "stdlib/validar.cfv"
-
-// Configurar log
-log_configurar({"nivel": "debug", "color": verdadero, "timestamp": verdadero})
-
-log_debug("iniciando...")
-log_info("servidor arriba")
-log_advertencia("memoria baja")
-log_error("conexion fallida")
-
-// Medir tiempo de ejecucion
-sea resultado = log_tiempo("operacion pesada", funcion(): nulo {
-    pausa(100)
-})
-
-// Validar datos
-mostrar(es_email("ana@ej.com"))      // verdadero
-mostrar(es_url("https://ej.com"))    // verdadero
-mostrar(es_telefono("+1-555-0100"))  // verdadero
-
-sea v = validar_esquema({"nombre": "A"}, {
-    "nombre": {"requerido": verdadero, "min": 3, "max": 50}
-})
-mostrar(v["valido"])     // falso
-mostrar(v["errores"])    // ["nombre: minimo 3 caracteres"]
-```
-
----
-
-## Pruebas unitarias
-
-```cfv
-importar "stdlib/pruebas.cfv"
-
-suite("Matematicas", [
-    prueba("suma", funcion(): nulo {
-        esperar_igual(2 + 2, 4)
-    }),
-    prueba("division exacta", funcion(): nulo {
-        esperar_igual(10 / 4, 2.5)
-    }),
-    prueba("lanza error", funcion(): nulo {
-        esperar_lanza(funcion(): nulo {
-            lanzar "division por cero"
-        })
-    })
-])
-
-sea r = ejecutar_pruebas()
-// [PASS] Matematicas: suma
-// [PASS] Matematicas: division exacta
-// [PASS] Matematicas: lanza error
-// Resultado: 3/3 pasadas
-```
-
----
-
-## Juegos 2D con SDL2
-
-```cfv
-importar "stdlib/sdl.cfv"
-
-// Compilar: g++ cforgev.cpp -DCFV_WITH_SDL2 -lSDL2 -o cforgev
-
-sea ventana = juego_iniciar("Mi Juego", 800, 600)
-sea corriendo = verdadero
-
-mientras (juego_corriendo(ventana) y corriendo) {
-    sea eventos = juego_eventos(ventana)
-    para ev en eventos {
-        si (ev["tipo"] == "quit") { corriendo = falso }
-        si (ev["tipo"] == "keydown" y ev["tecla"] == "ESCAPE") {
-            corriendo = falso
-        }
-    }
-
-    juego_limpiar(ventana, 20, 20, 40)
-
-    // Dibujar rectangulo verde
-    sdl_dibujar_rect(ventana, 100, 100, 200, 150, 0, 200, 100, 255)
-
-    juego_mostrar(ventana)
-    sdl_delay(16)   // ~60 FPS
-}
-
-juego_terminar(ventana)
-```
-
-Ver ejemplo completo: [`ejemplos/juego_2d.cfv`](ejemplos/juego_2d.cfv) (Snake con colisiones y puntaje)
-
----
-
-## Juegos 3D con OpenGL
-
-```cfv
-importar "stdlib/sdl.cfv"
-importar "stdlib/gl.cfv"
-
-// Compilar: g++ cforgev.cpp -DCFV_WITH_SDL2 -DCFV_WITH_OPENGL -lSDL2 -lGL -o cforgev
-
-sea ventana = juego_iniciar("3D C-Forge", 800, 600)
-sea gl = gl_iniciar(ventana)
-sea prog = gl_programa_basico()
-sea cubo = gl_malla_cubo(1.0, 0.3, 0.1)
-sea angulo = 0.0
-
-mientras (juego_corriendo(ventana)) {
-    angulo = angulo + 0.02
-    gl_limpiar(0.05, 0.05, 0.1)
-    sea mvp = mat4_rotar_y(mat4_trasladar(mat4_identidad(), 0, 0, -4.0), angulo)
-    gl_dibujar_malla(prog, cubo, mvp)
-    gl_mostrar(ventana)
-    sdl_delay(16)
-}
-
-gl_cerrar(gl)
-juego_terminar(ventana)
-```
-
-Ver ejemplo completo: [`ejemplos/juego_3d.cfv`](ejemplos/juego_3d.cfv) (cubo 3D con MVP matrix)
-
----
-
-## Android e iOS
-
-### Android (Android Studio)
-
-1. Abre `herramientas/android-cforgev/` en Android Studio
-2. Copia `cforgev.cpp` a `app/src/main/cpp/`
-3. Build — el NDK compila `libcforgev_jni.so` para arm64-v8a y x86_64
-
-```java
-// Java: CForgeRuntime.java
-CForgeRuntime.runFile("scripts/main.cfv");
-String resultado = CForgeRuntime.runCode("mostrar(1 + 2)");
-```
-
-Escribe tu logica en `app/src/main/assets/scripts/main.cfv` — es C-Forge puro.
-
-### iOS (Xcode)
-
-1. Abre `herramientas/ios-cforgev/CForgeApp/` en Xcode
-2. Configura Bridging Header: `CForgeApp-Bridging-Header.h`
-3. Compila — Swift llama a ObjC++ que llama a C-Forge
-
-```swift
-// Swift
-let resultado = CForgeRuntime.runCode("mostrar(fecha_ahora())")
-```
-
----
-
-## Banco, API REST y apps completas
-
-Ver ejemplos en [`ejemplos/`](ejemplos/):
-
-| Ejemplo | Descripcion |
-|---|---|
-| [`app_banco.cfv`](ejemplos/app_banco.cfv) | App bancaria: clientes, cuentas, transferencias, prestamos |
-| [`api_rest.cfv`](ejemplos/api_rest.cfv) | API REST con CRUD, validacion, SQLite |
-| [`juego_2d.cfv`](ejemplos/juego_2d.cfv) | Snake con SDL2 |
-| [`juego_3d.cfv`](ejemplos/juego_3d.cfv) | Cubo 3D rotando con OpenGL |
-| [`test_suite.cfv`](ejemplos/test_suite.cfv) | Suite completa de pruebas unitarias |
-
----
-
-## Compilar el interprete
-
-```bash
-# Basico (sin dependencias extra)
-g++ -std=c++20 -O2 -o cforgev cforgev.cpp
-
-# Con OpenSSL (AES-256-CBC + SHA-256 — para criptografia)
-# macOS (Homebrew):
-g++ -std=c++20 -O2 -o cforgev cforgev.cpp \
-    -DCFV_WITH_OPENSSL \
-    -I$(brew --prefix openssl)/include \
-    -L$(brew --prefix openssl)/lib \
-    -lcrypto
-
-# Linux (Ubuntu/Debian):
-g++ -std=c++20 -O2 -o cforgev cforgev.cpp \
-    -DCFV_WITH_OPENSSL \
-    /usr/lib/x86_64-linux-gnu/libcrypto.so.3 \
-    -lpthread
-
-# Con SQLite (db_abrir, db_consulta, etc.)
-g++ -std=c++20 -O2 -o cforgev cforgev.cpp \
-    -DCFV_WITH_SQLITE \
-    -lsqlite3 -lpthread
-
-# Completo (OpenSSL + SQLite — recomendado para produccion)
-g++ -std=c++20 -O2 -o cforgev cforgev.cpp \
-    -DCFV_WITH_OPENSSL -DCFV_WITH_SQLITE \
-    /usr/lib/x86_64-linux-gnu/libcrypto.so.3 \
-    -lsqlite3 -lpthread
-
-# Con SDL2 (juegos 2D)
-g++ -std=c++20 -O2 -o cforgev cforgev.cpp \
-    -DCFV_WITH_SDL2 -lSDL2 -lpthread
-
-# Con SDL2 + OpenGL (juegos 3D)
-g++ -std=c++20 -O2 -o cforgev cforgev.cpp \
-    -DCFV_WITH_SDL2 -DCFV_WITH_OPENGL \
-    -lSDL2 -lGL -lpthread
-```
-
----
-
-## Biblioteca estandar
-
-| Modulo | Descripcion |
-|---|---|
-| `stdlib/colecciones.cfv` | Cola, Pila, Conjunto, Heap |
-| `stdlib/aleatorio.cfv` | Numeros aleatorios, mezcla |
-| `stdlib/fecha.cfv` | Fecha, hora, formatos |
-| `stdlib/json.cfv` | json_serializar, json_bonito |
-| `stdlib/regex.cfv` | coincidir, buscar, reemplazar |
-| `stdlib/base64.cfv` | base64, sha256, url_encode |
-| `stdlib/io.cfv` | leer_lineas, escribir_csv |
-| `stdlib/texto.cfv` | Texto avanzado |
-| `stdlib/lista.cfv` | Operaciones de lista |
-| `stdlib/mapa.cfv` | Operaciones de mapa |
-| `stdlib/matematica.cfv` | Funciones matematicas |
-| `stdlib/errores.cfv` | Sistema de errores |
-| `stdlib/tipos.cfv` | Conversion de tipos |
-| `stdlib/web.cfv` | Servidor HTTP nativo |
-| `stdlib/crypto.cfv` | AES-256, SHA-256, JWT |
-| `stdlib/sdl.cfv` | Juegos 2D con SDL2 |
-| `stdlib/gl.cfv` | Graficos 3D con OpenGL |
-| `stdlib/db.cfv` | SQLite ORM completo |
-| `stdlib/pruebas.cfv` | Testing framework |
-| `stdlib/log.cfv` | Logging con colores |
-| `stdlib/validar.cfv` | Validacion de datos |
-| `stdlib/http_cliente.cfv` | Cliente HTTP REST |
-| `stdlib/concurrencia.cfv` | Canales, mutex, hilos |
-
----
-
-## Package Manager (`cfpkg`)
-
-```bash
-./cfpkg install usuario/repositorio
-./cfpkg install usuario/repositorio@v1.2.0
-./cfpkg list
-./cfpkg remove nombre-paquete
-./cfpkg init mi-lib 1.0.0 "Mi libreria"
-```
-
----
-
-## CLI
-
-| Comando | Descripcion |
-|---|---|
-| `./cforgev archivo.cfv` | Ejecutar un programa |
-| `./cforgev` | REPL interactivo |
-| `./cforgev --version` | Ver version |
-| `./cfpkg install u/repo` | Instalar paquete |
-| `./cfpkg list` | Listar paquetes |
-| `./cfpkg remove nombre` | Desinstalar |
-
----
+| `cforge archivo.cfv` | Ejecuta un programa. |
+| `cforge` | Abre el REPL. |
+| `cforge --compilar archivo.cfv -o salida` | Genera un ejecutable nativo. |
+| `cforge fmt archivo.cfv` | Formatea el código. |
+| `cforge test archivo.cfv` | Ejecuta bloques `test`. |
+| `cforge --vigilar archivo.cfv` | Recarga al detectar cambios. |
+| `cforge --reparar archivo.cfv` | Aplica reparaciones conservadoras y crea respaldo. |
+| `cforge --wasm archivo.cfv -o salida.wat` | Exporta el subconjunto Wasm/WAT. |
+| `cforge --setup` | Comprueba dependencias. |
+| `cforge --install` | Instala globalmente en macOS/Linux con permisos adecuados. |
+| `cforge --version` | Muestra la versión. |
 
 ## Arquitectura
 
+```text
+programa.cfv
+    │
+    ├── Lexer + Parser + análisis estático
+    │       └── Intérprete / REPL / hot reload
+    │
+    └── Backend C++17
+            ├── ForgeValue + runtime RAII
+            ├── puentes políglotas
+            └── clang++ → ejecutable nativo
 ```
-cforgev.cpp           -- Interprete nativo (C++20, ~5400 lineas)
-stdlib/               -- Biblioteca estandar en C-Forge puro (24 modulos)
-ejemplos/             -- Ejemplos: juegos, banco, API, 3D
-herramientas/
-  android-cforgev/    -- Template Android Studio (JNI + NDK)
-  ios-cforgev/        -- Template iOS (Swift + ObjC++)
-cfpkg                 -- Package manager (shell script)
+
+La distribución `outputs/cforge-master` es un ejecutable C++ monolítico que
+inicializa CPython embebido y despliega el frontend y los backends incluidos en
+un directorio temporal administrado mediante RAII. El frontend aún no ha sido
+reescrito completamente en C++ puro.
+
+Archivos principales:
+
+| Ruta | Función |
+|---|---|
+| `cforgev.py` | Lexer, intérprete, REPL y CLI principal. |
+| `compilador_nativo.py` | Parser, análisis y generador C++17. |
+| `compilador_wasm.py` | Backend experimental WAT. |
+| `include/cforgev_ffi.h` | ABI para bibliotecas nativas. |
+| `include/cforge_shared_arena.h` | ABI Forge Shared Arena 1.0 con offsets de 64 bits. |
+| `herramientas/generar_amalgama.py` | Generador del superarchivo C++. |
+| `herramientas/vscode-cforgev/` | Gramática y configuración de VS Code. |
+| `tests/test_cforgev.py` | Suite de regresión. |
+| `ejemplos/` | Programas y demostraciones. |
+
+La especificación de memoria compartida y del catálogo `ia_`/`ui_`/`web_` está
+en [docs/FORGE-SHARED-ARENA.md](docs/FORGE-SHARED-ARENA.md). La demostración
+nativa está en `ejemplos/arena_catalogo_16.cfv`.
+
+## Reconstruir la distribución monolítica
+
+En macOS con las Command Line Tools de Apple:
+
+```bash
+python3 herramientas/generar_amalgama.py
+
+clang++ -std=c++17 -O2 outputs/cforge_master.cpp \
+  -I /Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Headers \
+  -F /Library/Developer/CommandLineTools/Library/Frameworks \
+  -framework Python3 \
+  -Wl,-rpath,/Library/Developer/CommandLineTools/Library/Frameworks \
+  -o outputs/cforge-master
 ```
 
----
+## Visual Studio Code
 
-## Seguridad
+La extensión experimental está en `herramientas/vscode-cforgev`. Incluye:
 
-- `proceso_ejecutar` ejecuta comandos reales. No construyas comandos con entradas externas.
-- `http_get` / `http_solicitud` aceptan solo URLs `http`/`https`.
-- Los paquetes instalados con `cfpkg` se ejecutan con tus permisos — instala solo de fuentes confiables.
-- Para produccion bancaria o critica, se requiere auditoria profesional.
+- Resaltado para archivos `.cfv`.
+- Comentarios `//`.
+- Pares de llaves, corchetes, paréntesis y comillas.
+- Palabras clave del lenguaje y funciones nativas.
 
----
+Consulta [`herramientas/vscode-cforgev/README.md`](herramientas/vscode-cforgev/README.md)
+para instalarla localmente.
+
+## Seguridad y limitaciones
+
+- `sys_run` ejecuta comandos reales del sistema. No construyas comandos con
+  entradas externas que no sean confiables.
+- `extern`, bibliotecas C/C++ y DLL Native AOT pueden ejecutar código nativo. La
+  seguridad depende también de esas bibliotecas.
+- El analizador de memoria rechaza construcciones peligrosas conocidas dentro de
+  `extern("cpp")`, pero no puede garantizar seguridad absoluta de memoria.
+- El exportador Wasm cubre actualmente un subconjunto numérico del lenguaje.
+- `net_listen` es TCP local de una conexión; no sustituye un framework web.
+- Los perfiles JIT y los bloques GPU son infraestructura funcional con backend
+  CPU, no un compilador JIT de producción ni un backend Metal/CUDA terminado.
+- No se afirma que C-Forge supere en rendimiento o estabilidad a lenguajes
+  maduros sin benchmarks independientes y reproducibles.
+- No se recomienda todavía para banca, infraestructura crítica o producción.
+
+## Documentación
+
+- [`ESPECIFICACION.md`](ESPECIFICACION.md): sintaxis y comportamiento implementado.
+- [`INTEROPERABILIDAD.md`](INTEROPERABILIDAD.md): ABI y puentes externos.
+- [`CHANGELOG.md`](CHANGELOG.md): historial de versiones.
+- [`outputs/C-FORGE-CHEATSHEET.md`](outputs/C-FORGE-CHEATSHEET.md): referencia rápida.
 
 ## Proyecto
 
-C-Forge es una iniciativa de **Vemoris Group**, creada por **Javier**.
+C-Forge es una iniciativa de **Vemoris Group**, creada por **Javier**. El motor
+se publica como proyecto experimental para continuar investigando diseño de
+lenguajes, compilación e interoperabilidad.
 
-El repositorio incluye una licencia propietaria con derechos reservados.
-Consulta [`LICENSE`](LICENSE) antes de usar el codigo en proyectos externos.
-
-Documentacion adicional:
-- [`ESPECIFICACION.md`](ESPECIFICACION.md) — sintaxis completa
-- [`INTEROPERABILIDAD.md`](INTEROPERABILIDAD.md) — interop con C++, Python, Java
-- [`CHANGELOG.md`](CHANGELOG.md) — historial de versiones
+El repositorio incluye una licencia propietaria con derechos reservados. Antes
+de aceptar contribuciones externas, Vemoris Group debe definir una guía
+`CONTRIBUTING.md` y sus políticas de seguridad y conducta. Si el proyecto se
+convierte en código abierto, reemplaza `LICENSE` por la licencia elegida antes
+de aceptar aportes.

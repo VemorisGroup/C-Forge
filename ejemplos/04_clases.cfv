@@ -1,0 +1,58 @@
+// 04_clases.cfv — Programación orientada a objetos en C-Forge
+
+clase Animal {
+    sea nombre = ""
+    sea especie = ""
+    sea hambre = 50
+
+    funcion constructor(nom, esp) {
+        esto.nombre = nom
+        esto.especie = esp
+    }
+
+    funcion comer(cantidad) {
+        esto.hambre = maximo(0, esto.hambre - cantidad)
+        mostrar(esto.nombre + " come " + numero_a_texto(cantidad) + " unidades")
+    }
+
+    funcion descripcion() {
+        retornar esto.especie + " llamado " + esto.nombre +
+               " (hambre: " + numero_a_texto(esto.hambre) + ")"
+    }
+}
+
+clase Perro extiende Animal {
+    sea trucos = []
+
+    funcion constructor(nom) {
+        esto.nombre = nom
+        esto.especie = "Perro"
+    }
+
+    funcion aprender(truco) {
+        agregar(esto.trucos, truco)
+        mostrar(esto.nombre + " aprendió: " + truco)
+    }
+
+    funcion hacer_trucos() {
+        si (longitud(esto.trucos) == 0) {
+            mostrar(esto.nombre + " no sabe trucos aún")
+        } sino {
+            mostrar(esto.nombre + " sabe: " + a_texto(esto.trucos))
+        }
+    }
+}
+
+// Instanciar objetos
+sea gato = Animal("Misi", "Gato")
+mostrar(gato.descripcion())
+gato.comer(20)
+mostrar(gato.descripcion())
+
+sea rex = Perro("Rex")
+mostrar(rex.descripcion())
+rex.aprender("sentarse")
+rex.aprender("rodar")
+rex.hacer_trucos()
+rex.comer(30)
+mostrar(rex.descripcion())

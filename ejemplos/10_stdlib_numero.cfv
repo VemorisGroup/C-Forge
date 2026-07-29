@@ -1,0 +1,38 @@
+// 10_stdlib_numero.cfv — Stdlib numérica en C-Forge
+importar "numero"
+
+// Constantes matemáticas
+mostrar("PI  = " + numero_a_texto(PI))
+mostrar("E   = " + numero_a_texto(E))
+mostrar("PHI = " + numero_a_texto(PHI))
+
+// Formateo
+mostrar(numero_decimales(3.14159265, 4))
+mostrar(numero_formato_miles(1234567.89, ",", "."))
+mostrar(numero_moneda(9999.5, "USD"))
+mostrar(numero_porcentaje(0.1575, 1))
+
+// Trigonometría
+sea angulo = grados_a_rad(45)
+mostrar("sin(45°) = " + numero_decimales(seno(angulo), 4))
+mostrar("cos(45°) = " + numero_decimales(coseno(angulo), 4))
+
+// Logaritmos
+mostrar("log10(1000) = " + numero_decimales(log10_aprox(1000), 4))
+mostrar("ln(E)       = " + numero_decimales(log_natural(E), 4))
+
+// Estadística
+sea datos = [4, 8, 15, 16, 23, 42]
+mostrar("datos: " + a_texto(datos))
+mostrar("media:    " + numero_decimales(media(datos), 2))
+mostrar("mediana:  " + numero_decimales(mediana(datos), 2))
+mostrar("desv_est: " + numero_decimales(desviacion_estandar(datos), 2))
+mostrar("percentil(75): " + numero_decimales(percentil(datos, 75), 2))
+
+// Conversión de base
+mostrar("255 en binario: " + a_binario(255))
+mostrar("255 en octal:   " + a_octal(255))
+mostrar("255 en hex:     " + a_hex(255))
+
+// Números aleatorios
+mostrar("entero random [1,10]: " + numero_a_texto(aleatorio_entero(1, 10)))

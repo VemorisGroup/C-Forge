@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "cforge-tools"
+version = "2.5.1"
+description = "C-Forge language tools — formatter, linter, transpiler, test runner, doc generator, hot-reload, package manager"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+keywords = ["cforge", "programming-language", "compiler", "lsp", "formatter"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Software Development :: Code Generators",
+]
+
+[project.scripts]
+cfmt      = "tools.cfmt:main"
+cflint    = "tools.cflint:main"
+cftest    = "tools.cftest:main"
+cfdoc     = "tools.cfdoc:main"
+cfwatch   = "tools.cfwatch:main"
+cforgec   = "tools.cforgec:main"
+cforge    = "tools.cforge_cli:main"
+
+[project.urls]
+Homepage   = "https://github.com/VemorisGroup/C-Forge"
+Repository = "https://github.com/VemorisGroup/C-Forge"
+Issues     = "https://github.com/VemorisGroup/C-Forge/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tools*"]
+
+[tool.setuptools.package-data]
+tools = ["*.py"]

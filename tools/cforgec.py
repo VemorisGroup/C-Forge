@@ -35,7 +35,7 @@ KEYWORDS = {
     "sea", "funcion", "retornar", "si", "sino", "esi", "para", "en",
     "mientras", "segun", "caso", "romper", "continuar", "clase", "nuevo",
     "importar", "exportar", "lanzar", "intentar", "capturar", "finalmente",
-    "verdadero", "falso", "nulo", "rango", "y", "o", "no"
+    "verdadero", "falso", "nulo", "y", "o", "no"
 }
 
 TOKEN_RE = re.compile(
@@ -758,8 +758,8 @@ Ejemplos:
     parser.add_argument("--run", action="store_true", help="Compilar y ejecutar")
     parser.add_argument("--ir", action="store_true", help="Mostrar AST (representación intermedia)")
     parser.add_argument("--opt", choices=["0","1","2","3"], default="2", help="Nivel de optimización gcc")
-    parser.add_argument("--target", choices=["c", "wasm", "wasm-js"], default="c",
-                        help="Target de compilación: c (default), wasm (WebAssembly via emcc), wasm-js (WASM + wrapper JS)")
+    parser.add_argument("--target", choices=["c", "wasm", "wasm-js", "js", "js-html"], default="c",
+                        help="Target de compilación: c, wasm, wasm-js, js (JavaScript puro), js-html (JS + página HTML)")
     parser.add_argument("--version", action="version", version="cforgec 2.5.0")
     args = parser.parse_args()
 
@@ -807,7 +807,9 @@ Ejemplos:
     salida.write_text(c_code, encoding="utf-8")
     print(f"cforgec: generado {salida}")
 
-    if args.target in ("wasm", "wasm-js"):
+    if args.target in ("js", "js-html"):
+        compilar_js(ast, ruta, args)
+    elif args.target in ("wasm", "wasm-js"):
         compilar_wasm(salida, ruta, args)
     elif args.compile or args.run:
         ejecutable = salida.with_suffix("")
@@ -823,6 +825,350 @@ Ejemplos:
             print(f"cforgec: ejecutando {ejecutable}...")
             print("─" * 40)
             subprocess.run([str(ejecutable)])
+
+
+# ── Target JavaScript ─────────────────────────────────────────────────────────
+JS_RUNTIME = """\
+// ── C-Forge JavaScript Runtime ────────────────────────────────────────────────
+// Auto-generado por cforgec --target js
+'use strict';
+const __cfv = {
+  mostrar:          (...a) => console.log(...a.map(__cfv.texto)),
+  tipo_de:          v => { const t=typeof v; if(v===null)return"nulo"; if(Array.isArray(v))return"lista"; if(t==="object")return"mapa"; return t==="number"?"numero":t==="boolean"?"booleano":"texto"; },
+  longitud:         v => Array.isArray(v)?v.length:(typeof v==="string"?v.length:Object.keys(v).length),
+  agregar:          (l,e) => { l.push(e); return l; },
+  eliminar:         (l,i) => l.splice(i,1),
+  invertir:         l => [...l].reverse(),
+  ordenar:          (l,fn) => [...l].sort(fn),
+  filtrar:          (l,fn) => l.filter(fn),
+  mapear:           (l,fn) => l.map(fn),
+  reducir:          (l,fn,ini) => l.reduce(fn,ini),
+  piso:             Math.floor,
+  techo:            Math.ceil,
+  redondear:        Math.round,
+  absoluto:         Math.abs,
+  potencia:         Math.pow,
+  raiz:             Math.sqrt,
+  maximo:           Math.max,
+  minimo:           Math.min,
+  aleatorio:        () => Math.random(),
+  texto:            v => v===null||v===undefined?"nulo":typeof v==="boolean"?v?"verdadero":"falso":String(v),
+  numero:           v => Number(v),
+  booleano:         v => Boolean(v),
+  texto_a_numero:   v => Number(v),
+  numero_a_texto:   v => String(v),
+  texto_dividir:    (s,sep) => s.split(sep),
+  texto_unir:       (l,sep) => l.join(sep),
+  texto_contiene:   (s,sub) => s.includes(sub),
+  texto_mayusculas: s => s.toUpperCase(),
+  texto_minusculas: s => s.toLowerCase(),
+  texto_trim:       s => s.trim(),
+  texto_reemplazar: (s,old,nw) => s.replaceAll(old,nw),
+  texto_empieza_con:(s,p) => s.startsWith(p),
+  texto_termina_con:(s,p) => s.endsWith(p),
+  texto_formato:    (s,...a) => s.replace(/\\{(\\d+)\\}/g, (_,i) => a[i]),
+  json_parsear:     s => JSON.parse(s),
+  json_texto:       v => JSON.stringify(v),
+  mapa_claves:      m => Object.keys(m),
+  mapa_valores:     m => Object.values(m),
+  mapa_entradas:    m => Object.entries(m).map(([k,v])=>({clave:k,valor:v})),
+  tiene_clave:      (m,k) => k in m,
+  mapa_fusionar:    (...ms) => Object.assign({},...ms),
+  rango:            (a,b,paso=1) => { const r=[]; for(let i=a;i<b;i+=paso)r.push(i); return r; },
+  tiempo_ms:        () => Date.now(),
+  lanzar:           msg => { throw new Error(msg); },
+  verdadero: true, falso: false, nulo: null,
+};
+// Operadores C-Forge
+const __cfv_add = (a,b) => (typeof a==="string"||typeof b==="string")?String(a)+String(b):a+b;
+const __cfv_eq  = (a,b) => JSON.stringify(a)===JSON.stringify(b);
+const __cfv_nc  = (a,b) => a??b;          // ??
+const __cfv_ns  = (a,k) => a?.[k];        // ?.
+"""
+
+JS_HTML_TEMPLATE = """\
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>C-Forge — {module_name}</title>
+  <style>
+    body{{font-family:monospace;background:#1e1e2e;color:#cdd6f4;padding:2rem;max-width:900px;margin:0 auto}}
+    h1{{color:#89b4fa}}
+    #output{{background:#181825;padding:1rem;border-radius:8px;min-height:120px;white-space:pre-wrap}}
+    button{{background:#89b4fa;color:#1e1e2e;border:none;padding:.5rem 1.2rem;border-radius:4px;
+            cursor:pointer;font-family:monospace;font-size:1rem;margin:.25rem}}
+    button:hover{{background:#74c7ec}}
+  </style>
+</head>
+<body>
+  <h1>C-Forge — {module_name}</h1>
+  <button onclick="runProgram()">▶ Ejecutar</button>
+  <button onclick="document.getElementById('output').textContent=''">Limpiar</button>
+  <pre id="output">(haz clic en Ejecutar)</pre>
+  <script>
+    const _out = document.getElementById('output');
+    const _orig = console.log;
+    console.log = (...a) => {{ _out.textContent += a.join(' ') + '\\n'; _orig(...a); }};
+    function runProgram() {{
+      _out.textContent = '';
+      try {{ main_{safe_name}(); }}
+      catch(e) {{ _out.textContent += '\\n[Error] ' + e.message; }}
+    }}
+  </script>
+  <script src="{module_name}.js"></script>
+</body>
+</html>
+"""
+
+
+class GeneradorJS:
+    """Transpila AST de C-Forge a JavaScript ES2020."""
+
+    def __init__(self):
+        self.out: List[str] = []
+        self.indent = 0
+        self.tmp_counter = 0
+        self.hoisted_fns: List[str] = []  # functions hoisted to top
+
+    def emit(self, line: str):
+        self.out.append("  " * self.indent + line)
+
+    def tmp(self) -> str:
+        self.tmp_counter += 1
+        return f"_t{self.tmp_counter}"
+
+    def generar(self, nodo: Node, module_name: str) -> str:
+        body_lines: List[str] = []
+        self.out = []
+        self.indent = 1
+        for hijo in nodo.hijos:
+            self.gen_stmt(hijo)
+        body = list(self.out)
+
+        lines = [JS_RUNTIME, ""]
+        # Wrap everything in a module function
+        safe = module_name.replace("-","_").replace(".","_")
+        lines.append(f"function main_{safe}() {{")
+        lines.extend(body)
+        lines.append("}")
+        lines.append("")
+        lines.append(f"// Auto-ejecutar")
+        lines.append(f"if (typeof require !== 'undefined' && require.main === module) main_{safe}();")
+        lines.append(f"else if (typeof module !== 'undefined') module.exports = {{ main: main_{safe} }};")
+        lines.append(f"else main_{safe}(); // browser")
+        return "\n".join(lines)
+
+    def gen_stmt(self, n: Node):
+        t = n.tipo
+        if t == "declaracion":
+            nombre = n.nombre
+            val = self.gen_expr(n.hijos[0]) if n.hijos else "null"
+            self.emit(f"let {nombre} = {val};")
+        elif t == "funcion":
+            params = ", ".join(h.nombre for h in n.hijos[:-1] if h.tipo == "param")
+            self.emit(f"function {n.nombre}({params}) {{")
+            self.indent += 1
+            if n.hijos:
+                self.gen_stmt(n.hijos[-1])
+            self.indent -= 1
+            self.emit("}")
+        elif t == "retornar":
+            val = self.gen_expr(n.hijos[0]) if n.hijos else "undefined"
+            self.emit(f"return {val};")
+        elif t == "si":
+            cond = self.gen_expr(n.hijos[0])
+            self.emit(f"if ({cond}) {{")
+            self.indent += 1
+            if len(n.hijos) > 1: self.gen_stmt(n.hijos[1])
+            self.indent -= 1
+            if len(n.hijos) > 2:
+                self.emit("} else {")
+                self.indent += 1
+                self.gen_stmt(n.hijos[2])
+                self.indent -= 1
+            self.emit("}")
+        elif t == "para":
+            iter_name = n.nombre or "_item"
+            coleccion = self.gen_expr(n.hijos[0]) if n.hijos else "[]"
+            self.emit(f"for (const {iter_name} of {coleccion}) {{")
+            self.indent += 1
+            if len(n.hijos) > 1: self.gen_stmt(n.hijos[1])
+            self.indent -= 1
+            self.emit("}")
+        elif t == "mientras":
+            cond = self.gen_expr(n.hijos[0]) if n.hijos else "false"
+            self.emit(f"while ({cond}) {{")
+            self.indent += 1
+            if len(n.hijos) > 1: self.gen_stmt(n.hijos[1])
+            self.indent -= 1
+            self.emit("}")
+        elif t == "segun":
+            val = self.gen_expr(n.hijos[0]) if n.hijos else "null"
+            self.emit(f"switch ({val}) {{")
+            self.indent += 1
+            for caso in n.hijos[1:]:
+                if caso.tipo == "caso":
+                    label = self.gen_expr(caso.hijos[0]) if caso.hijos else "null"
+                    self.emit(f"case {label}:")
+                    self.indent += 1
+                    if len(caso.hijos) > 1: self.gen_stmt(caso.hijos[1])
+                    self.emit("break;")
+                    self.indent -= 1
+            self.indent -= 1
+            self.emit("}")
+        elif t == "bloque":
+            for hijo in n.hijos:
+                self.gen_stmt(hijo)
+        elif t == "expr_stmt":
+            self.emit(self.gen_expr(n.hijos[0]) + ";")
+        elif t == "romper":
+            self.emit("break;")
+        elif t == "continuar":
+            self.emit("continue;")
+        elif t == "lanzar":
+            msg = self.gen_expr(n.hijos[0]) if n.hijos else '"error"'
+            self.emit(f"throw new Error({msg});")
+        elif t == "intentar":
+            self.emit("try {")
+            self.indent += 1
+            if n.hijos: self.gen_stmt(n.hijos[0])
+            self.indent -= 1
+            catch_var = n.valor or "e"
+            self.emit(f"}} catch ({catch_var}) {{")
+            self.indent += 1
+            if len(n.hijos) > 1: self.gen_stmt(n.hijos[1])
+            self.indent -= 1
+            if len(n.hijos) > 2:
+                self.emit("} finally {")
+                self.indent += 1
+                self.gen_stmt(n.hijos[2])
+                self.indent -= 1
+            self.emit("}")
+        elif t == "importar":
+            modulo = (n.valor or "").strip('"\'')
+            safe = modulo.replace("/","_").replace("-","_").replace(".","_")
+            self.emit(f"// importar '{modulo}' — requires {safe}.js")
+        elif t == "clase":
+            self.emit(f"class {n.nombre} {{")
+            self.indent += 1
+            for m in n.hijos:
+                if m.tipo == "funcion":
+                    params = ", ".join(h.nombre for h in m.hijos[:-1] if h.tipo == "param")
+                    mn = "constructor" if m.nombre in ("constructor","init","inicializar") else m.nombre
+                    self.emit(f"{mn}({params}) {{")
+                    self.indent += 1
+                    if m.hijos: self.gen_stmt(m.hijos[-1])
+                    self.indent -= 1
+                    self.emit("}")
+            self.indent -= 1
+            self.emit("}")
+        else:
+            self.emit(f"/* stmt {t} */")
+
+    def gen_expr(self, n: Node) -> str:
+        t = n.tipo
+        if t == "numero":   return repr(n.valor) if isinstance(n.valor, float) and n.valor != int(n.valor) else str(int(n.valor)) if isinstance(n.valor, float) else str(n.valor)
+        if t == "texto":    return f'"{n.valor}"'
+        if t == "booleano": return "true" if n.valor else "false"
+        if t == "nulo":     return "null"
+        if t == "ident":    return n.nombre
+        if t == "lista_lit":
+            items = ", ".join(self.gen_expr(h) for h in n.hijos)
+            return f"[{items}]"
+        if t == "mapa_lit":
+            pairs = ", ".join(
+                f'"{h.nombre}": {self.gen_expr(h.hijos[0])}' for h in n.hijos if h.hijos
+            )
+            return "{" + pairs + "}"
+        if t in ("binario", "binop"):
+            l = self.gen_expr(n.hijos[0])
+            r = self.gen_expr(n.hijos[1])
+            op = n.valor
+            js_op = {"y":"&&","o":"||","no":"!","==":"===","!=":"!=="}.get(op, op)
+            if op == "+":  return f"__cfv_add({l}, {r})"
+            if op == "==": return f"__cfv_eq({l}, {r})"
+            if op == "!=": return f"!__cfv_eq({l}, {r})"
+            if op == "??": return f"__cfv_nc({l}, {r})"
+            return f"({l} {js_op} {r})"
+        if t == "unario":
+            e = self.gen_expr(n.hijos[0])
+            op = {"no":"!", "-":"-"}.get(n.valor, n.valor)
+            return f"({op}{e})"
+        if t == "llamada":
+            fn_node = n.hijos[0] if n.hijos else Node("ident", nombre="?")
+            args = ", ".join(self.gen_expr(a) for a in n.hijos[1:])
+            fn_name = fn_node.nombre if fn_node.tipo == "ident" else self.gen_expr(fn_node)
+            # Map C-Forge builtins to __cfv.X
+            builtins = {"mostrar","tipo_de","longitud","agregar","eliminar","invertir","ordenar",
+                "filtrar","mapear","reducir","piso","techo","redondear","absoluto","potencia","raiz",
+                "maximo","minimo","aleatorio","texto","numero","booleano","texto_a_numero",
+                "numero_a_texto","texto_dividir","texto_unir","texto_contiene","texto_mayusculas",
+                "texto_minusculas","texto_trim","texto_reemplazar","texto_empieza_con",
+                "texto_termina_con","json_parsear","json_texto","mapa_claves","mapa_valores",
+                "mapa_entradas","tiene_clave","mapa_fusionar","rango","tiempo_ms"}
+            if fn_name in builtins:
+                return f"__cfv.{fn_name}({args})"
+            return f"{fn_name}({args})"
+        if t == "acceso":  # obj.prop
+            obj = self.gen_expr(n.hijos[0]) if n.hijos else "null"
+            return f"{obj}.{n.nombre}"
+        if t == "acceso_null":  # obj?.prop
+            obj = self.gen_expr(n.hijos[0]) if n.hijos else "null"
+            return f"__cfv_ns({obj}, '{n.nombre}')"
+        if t == "indice":
+            base = self.gen_expr(n.hijos[0])
+            idx  = self.gen_expr(n.hijos[1])
+            return f"{base}[{idx}]"
+        if t == "asignar":
+            lhs = n.hijos[0].nombre if n.hijos[0].tipo == "ident" else self.gen_expr(n.hijos[0])
+            rhs = self.gen_expr(n.hijos[1])
+            return f"({lhs} = {rhs})"
+        if t == "nuevo":
+            cls = n.nombre or "Object"
+            args = ", ".join(self.gen_expr(a) for a in n.hijos)
+            return f"new {cls}({args})"
+        if t == "funcion_anonima":
+            params = ", ".join(h.nombre for h in n.hijos[:-1] if h.tipo == "param")
+            body_lines_save = self.out
+            body_indent_save = self.indent
+            self.out = []
+            self.indent = 1
+            if n.hijos: self.gen_stmt(n.hijos[-1])
+            fn_body = "\n  ".join(self.out)
+            self.out = body_lines_save
+            self.indent = body_indent_save
+            return f"({params}) => {{\n  {fn_body}\n}}"
+        return f"null /* {t} */"
+
+
+def compilar_js(ast: Node, ruta_original: Path, args):
+    """Transpila a JavaScript ES2020."""
+    module_name = ruta_original.stem
+    safe_name   = module_name.replace("-","_").replace(".","_")
+    js_out      = ruta_original.with_suffix(".js")
+
+    gen = GeneradorJS()
+    js_code = gen.generar(ast, module_name)
+
+    js_out.write_text(js_code, encoding="utf-8")
+    print(f"cforgec: JavaScript generado: {js_out}")
+
+    if args.target == "js-html":
+        html_out = ruta_original.with_suffix(".html")
+        html_out.write_text(
+            JS_HTML_TEMPLATE.format(module_name=module_name, safe_name=safe_name),
+            encoding="utf-8")
+        print(f"cforgec: página HTML generada: {html_out}")
+        print(f"\n  Abre {html_out.name} en el browser (doble-click o servidor local)")
+
+    if args.run:
+        if shutil.which("node"):
+            print(f"cforgec: ejecutando con Node.js...")
+            print("─" * 40)
+            subprocess.run(["node", str(js_out)])
+        else:
+            print("cforgec: Node.js no encontrado — abre el .html en el browser")
 
 
 # ── Target WASM ────────────────────────────────────────────────────────────────

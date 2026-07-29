@@ -1,0 +1,22 @@
+# C-Forge .dockerignore
+cforgev
+cforgev_bootstrap
+cforgev_ci
+cforgev_new
+*.o
+*.exe
+build/
+dist/
+*.egg-info/
+__pycache__/
+.git/
+.github/
+benchmarks/
+assets/
+docs/
+*.md
+!README.md
+tests/
+.vscode/
+.idea/
+node_modules/

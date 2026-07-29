@@ -1,0 +1,43 @@
+// 05_manejo_errores.cfv — Manejo de errores en C-Forge
+
+// try/catch/finalmente
+intentar {
+    sea x = texto_dividir("hola,mundo", ",")
+    mostrar(x[0])
+    lanzar "error de prueba"
+} capturar (e) {
+    mostrar("Error capturado: " + e)
+} finalmente {
+    mostrar("Bloque finalmente siempre se ejecuta")
+}
+
+// Operador null-safe ?.
+sea usuario = nulo
+sea nombre_usuario = usuario?.nombre ?? "Anónimo"
+mostrar("Usuario: " + nombre_usuario)
+
+// Map access seguro con tiene_clave
+funcion buscar_config(clave) {
+    sea config = { "host": "localhost", "puerto": 8080 }
+    si (tiene_clave(config, clave)) {
+        retornar config[clave]
+    }
+    retornar "valor_por_defecto"
+}
+mostrar("host: " + buscar_config("host"))
+mostrar("timeout: " + a_texto(buscar_config("timeout")))
+
+// Función que puede fallar
+funcion dividir_seguro(a, b) {
+    si (b == 0) { lanzar "División por cero" }
+    retornar a / b
+}
+
+intentar {
+    mostrar("10/2 = " + numero_a_texto(dividir_seguro(10, 2)))
+    mostrar("10/0 = " + numero_a_texto(dividir_seguro(10, 0)))
+} capturar (e) {
+    mostrar("Error matemático: " + e)
+}
+
+mostrar("Programa continúa normalmente")

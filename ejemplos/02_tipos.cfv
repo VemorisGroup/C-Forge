@@ -1,0 +1,34 @@
+// 02_tipos.cfv — Tipos de datos en C-Forge
+
+// Texto
+sea saludo: texto = "Hola mundo"
+mostrar("texto:  " + saludo)
+
+// Número
+sea pi: numero = 3.14159
+sea entero = 42
+mostrar("numero: " + numero_a_texto(pi))
+mostrar("entero: " + numero_a_texto(entero))
+
+// Booleano
+sea ok: booleano = verdadero
+mostrar("bool:   " + a_texto(ok))
+
+// Lista
+sea frutas = ["manzana", "banana", "cereza"]
+mostrar("tipo_de lista: " + tipo_de(frutas))
+mostrar("frutas[1]: " + frutas[1])
+mostrar("longitud: " + numero_a_texto(longitud(frutas)))
+
+// Mapa
+sea persona = { "nombre": "Ana", "edad": 30 }
+mostrar("tipo_de mapa:  " + tipo_de(persona))
+mostrar("nombre: " + persona["nombre"])
+
+// Nulo
+sea vacio = nulo
+mostrar("nulo es nulo:  " + a_texto(vacio == nulo))
+
+// Comprobación de tipo
+mostrar("tipo de pi: " + tipo_de(pi))
+mostrar("tipo de frutas: " + tipo_de(frutas))

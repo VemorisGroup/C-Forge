@@ -1,0 +1,49 @@
+// 08_concurrencia.cfv — Canales y concurrencia en C-Forge
+
+// Canal básico: productor/consumidor
+sea canal = canal_nuevo(10)
+
+// Simular trabajo concurrente con hilos
+sea resultados = []
+
+// Función de trabajo
+funcion procesar(id, valor) {
+    sea resultado = valor * valor
+    retornar { "id": id, "resultado": resultado }
+}
+
+// Procesar elementos en secuencia (simulando trabajo paralelo)
+sea tareas = [1, 2, 3, 4, 5]
+para tarea en tareas {
+    sea r = procesar(tarea, tarea)
+    agregar(resultados, r)
+    canal_enviar(canal, r)
+}
+
+// Leer resultados del canal
+mostrar("Resultados del canal:")
+sea i = 0
+mientras (i < longitud(tareas)) {
+    sea msg = canal_recibir(canal)
+    mostrar("  id=" + numero_a_texto(msg["id"]) + " resultado=" + numero_a_texto(msg["resultado"]))
+    i = i + 1
+}
+
+canal_cerrar(canal)
+
+// Ejemplo de pipeline
+funcion pipeline(datos, ...pasos) {
+    sea resultado = datos
+    para paso en pasos {
+        resultado = mapear(resultado, paso)
+    }
+    retornar resultado
+}
+
+sea pipe = pipeline(
+    [1, 2, 3, 4, 5],
+    funcion(x) { retornar x * 2 },
+    funcion(x) { retornar x + 1 },
+    funcion(x) { retornar x * x }
+)
+mostrar("Pipeline: " + a_texto(pipe))

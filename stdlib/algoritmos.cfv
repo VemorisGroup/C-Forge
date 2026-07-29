@@ -1,0 +1,379 @@
+// stdlib/algoritmos.cfv — Algoritmos y estructuras de datos avanzadas
+// C-Forge Standard Library v2.5.0
+
+// ── Ordenamiento ───────────────────────────────────────────────────────────────
+
+/// @doc Quicksort en sitio
+/// @param lista Lista a ordenar (modificada en lugar)
+/// @param comparar Función de comparación: fn(a,b) → negativo/0/positivo
+funcion quicksort(lista, comparar) {
+    sea _qs = funcion(arr, bajo, alto) {
+        si (bajo < alto) {
+            sea pivote = arr[alto]
+            sea i = bajo - 1
+            sea j = bajo
+            mientras (j < alto) {
+                si (comparar(arr[j], pivote) <= 0) {
+                    i = i + 1
+                    sea tmp = arr[i]
+                    arr[i] = arr[j]
+                    arr[j] = tmp
+                }
+                j = j + 1
+            }
+            sea tmp2 = arr[i + 1]
+            arr[i + 1] = arr[alto]
+            arr[alto] = tmp2
+            sea p = i + 1
+            _qs(arr, bajo, p - 1)
+            _qs(arr, p + 1, alto)
+        }
+    }
+    _qs(lista, 0, longitud(lista) - 1)
+    retornar lista
+}
+
+/// @doc Mergesort estable — retorna nueva lista ordenada
+funcion mergesort(lista, comparar) {
+    sea n = longitud(lista)
+    si (n <= 1) { retornar lista }
+    sea medio = piso(n / 2)
+    // Slice left and right halves using index loops
+    sea _izq = []
+    sea _der = []
+    sea _k = 0
+    mientras (_k < n) {
+        si (_k < medio) { agregar(_izq, lista[_k]) } sino { agregar(_der, lista[_k]) }
+        _k = _k + 1
+    }
+    sea izq = mergesort(_izq, comparar)
+    sea der = mergesort(_der, comparar)
+    // merge
+    sea resultado = []
+    sea li = 0
+    sea di = 0
+    mientras (li < longitud(izq) y di < longitud(der)) {
+        si (comparar(izq[li], der[di]) <= 0) {
+            agregar(resultado, izq[li])
+            li = li + 1
+        } sino {
+            agregar(resultado, der[di])
+            di = di + 1
+        }
+    }
+    mientras (li < longitud(izq)) { agregar(resultado, izq[li]); li = li + 1 }
+    mientras (di < longitud(der)) { agregar(resultado, der[di]); di = di + 1 }
+    retornar resultado
+}
+
+/// @doc Heapsort — ordenamiento por montículo O(n log n)
+funcion heapsort(lista, comparar) {
+    sea n = longitud(lista)
+    sea _sift = funcion(arr, raiz, fin) {
+        sea padre = raiz
+        mientras (verdadero) {
+            sea hijo_izq = 2 * padre + 1
+            sea hijo_der = 2 * padre + 2
+            sea mayor = padre
+            si (hijo_izq < fin y comparar(arr[hijo_izq], arr[mayor]) > 0) {
+                mayor = hijo_izq
+            }
+            si (hijo_der < fin y comparar(arr[hijo_der], arr[mayor]) > 0) {
+                mayor = hijo_der
+            }
+            si (mayor == padre) { retornar }
+            sea tmp = arr[padre]
+            arr[padre] = arr[mayor]
+            arr[mayor] = tmp
+            padre = mayor
+        }
+    }
+    // Construir heap
+    sea i = piso(n / 2) - 1
+    mientras (i >= 0) {
+        _sift(lista, i, n)
+        i = i - 1
+    }
+    // Extraer elementos
+    sea j = n - 1
+    mientras (j > 0) {
+        sea tmp = lista[0]
+        lista[0] = lista[j]
+        lista[j] = tmp
+        _sift(lista, 0, j)
+        j = j - 1
+    }
+    retornar lista
+}
+
+/// @doc Ordenar con comparador por clave
+/// @ejemplo ordenar_por(personas, funcion(p) { retornar p["edad"] })
+funcion ordenar_por(lista, clave_fn) {
+    retornar mergesort(lista, funcion(a, b) {
+        sea ka = clave_fn(a)
+        sea kb = clave_fn(b)
+        si (ka < kb) { retornar -1 }
+        si (ka > kb) { retornar 1 }
+        retornar 0
+    })
+}
+
+funcion ordenar_desc(lista, clave_fn) {
+    retornar mergesort(lista, funcion(a, b) {
+        sea ka = clave_fn(a)
+        sea kb = clave_fn(b)
+        si (ka > kb) { retornar -1 }
+        si (ka < kb) { retornar 1 }
+        retornar 0
+    })
+}
+
+// ── Búsqueda ───────────────────────────────────────────────────────────────────
+
+/// @doc Búsqueda binaria en lista ordenada → índice o -1
+sea _cmp_default = funcion(a, b) { si (a < b) { retornar -1 } si (a > b) { retornar 1 } retornar 0 }
+
+funcion busqueda_binaria(lista, objetivo, comparar) {
+    sea _comp = comparar ?? _cmp_default
+    sea bajo = 0
+    sea alto = longitud(lista) - 1
+    mientras (bajo <= alto) {
+        sea medio = piso((bajo + alto) / 2)
+        sea cmp = _comp(lista[medio], objetivo)
+        si (cmp == 0) { retornar medio }
+        si (cmp < 0) { bajo = medio + 1 } sino { alto = medio - 1 }
+    }
+    retornar -1
+}
+
+/// @doc Búsqueda lineal → índice o -1
+funcion buscar(lista, predicate) {
+    sea i = 0
+    mientras (i < longitud(lista)) {
+        si (predicate(lista[i])) { retornar i }
+        i = i + 1
+    }
+    retornar -1
+}
+
+// ── Grafos ─────────────────────────────────────────────────────────────────────
+
+/// @doc Crear grafo vacío
+/// @param dirigido verdadero para grafo dirigido
+funcion grafo_crear(dirigido) {
+    retornar {
+        "nodos":   {},
+        "aristas": [],
+        "dirigido": dirigido ?? falso
+    }
+}
+
+funcion grafo_agregar_nodo(g, id, datos) {
+    g["nodos"][id] = datos ?? {}
+}
+
+funcion grafo_agregar_arista(g, desde, hasta, peso) {
+    agregar(g["aristas"], {"desde": desde, "hasta": hasta, "peso": peso ?? 1})
+    si (no g["dirigido"]) {
+        agregar(g["aristas"], {"desde": hasta, "hasta": desde, "peso": peso ?? 1})
+    }
+}
+
+funcion grafo_vecinos(g, nodo) {
+    retornar filtrar(g["aristas"], funcion(a) { retornar a["desde"] == nodo })
+}
+
+/// @doc BFS — Búsqueda en anchura → lista de nodos visitados
+funcion grafo_bfs(g, inicio) {
+    sea visitados = {}
+    sea cola = [inicio]
+    sea cabeza = 0
+    sea orden = []
+    visitados[inicio] = verdadero
+    mientras (cabeza < longitud(cola)) {
+        sea actual = cola[cabeza]
+        cabeza = cabeza + 1
+        agregar(orden, actual)
+        para arista en grafo_vecinos(g, actual) {
+            sea v = arista["hasta"]
+            si (no tiene_clave(visitados, v)) {
+                visitados[v] = verdadero
+                agregar(cola, v)
+            }
+        }
+    }
+    retornar orden
+}
+
+/// @doc DFS — Búsqueda en profundidad → lista de nodos visitados
+funcion grafo_dfs(g, inicio) {
+    sea visitados = {}
+    sea orden = []
+    sea _dfs = funcion(nodo) {
+        si (tiene_clave(visitados, nodo)) { retornar }
+        visitados[nodo] = verdadero
+        agregar(orden, nodo)
+        para arista en grafo_vecinos(g, nodo) {
+            _dfs(arista["hasta"])
+        }
+    }
+    _dfs(inicio)
+    retornar orden
+}
+
+/// @doc Dijkstra — camino más corto → {distancias, predecesores}
+funcion grafo_dijkstra(g, inicio) {
+    sea dist = {}
+    sea prev = {}
+    sea visitados = {}
+    // Inicializar distancias
+    para id en mapa_claves(g["nodos"]) {
+        dist[id] = 999999999
+    }
+    dist[inicio] = 0
+    sea cola = [inicio]  // Cola de prioridad simplificada
+
+    mientras (longitud(cola) > 0) {
+        // Extraer nodo con menor distancia
+        sea u = cola[0]
+        sea ui = 0
+        sea k = 1
+        mientras (k < longitud(cola)) {
+            si (dist[cola[k]] < dist[u]) {
+                u = cola[k]
+                ui = k
+            }
+            k = k + 1
+        }
+        eliminar(cola, ui)
+
+        si (visitados[u]) { continuar }
+        visitados[u] = verdadero
+
+        para arista en grafo_vecinos(g, u) {
+            sea v = arista["hasta"]
+            sea peso = arista["peso"]
+            sea nueva_dist = dist[u] + peso
+            si (nueva_dist < dist[v]) {
+                dist[v] = nueva_dist
+                prev[v] = u
+                agregar(cola, v)
+            }
+        }
+    }
+    retornar {"distancias": dist, "predecesores": prev}
+}
+
+/// @doc Reconstruir camino desde Dijkstra
+funcion grafo_camino(prev, destino) {
+    sea camino = []
+    sea actual = destino
+    mientras (actual != nulo) {
+        insertar(camino, 0, actual)
+        actual = prev[actual]
+    }
+    retornar camino
+}
+
+// ── Algoritmos funcionales ─────────────────────────────────────────────────────
+
+/// @doc Aplanar lista de listas en un nivel
+funcion aplanar(lista) {
+    retornar reducir(lista, funcion(acc, sub) {
+        si (tipo_de(sub) == "lista") {
+            para e en sub { agregar(acc, e) }
+        } sino {
+            agregar(acc, sub)
+        }
+        retornar acc
+    }, [])
+}
+
+/// @doc Agrupar lista por clave
+funcion agrupar_por(lista, clave_fn) {
+    retornar reducir(lista, funcion(acc, item) {
+        sea k = a_texto(clave_fn(item))
+        si (no tiene_clave(acc, k)) { acc[k] = [] }
+        agregar(acc[k], item)
+        retornar acc
+    }, {})
+}
+
+/// @doc Contar ocurrencias que cumplen predicado
+funcion contar(lista, pred) {
+    retornar longitud(filtrar(lista, pred))
+}
+
+/// @doc Verificar si todos cumplen predicado
+funcion todos(lista, pred) {
+    para e en lista { si (no pred(e)) { retornar falso } }
+    retornar verdadero
+}
+
+/// @doc Verificar si alguno cumple predicado
+funcion alguno(lista, pred) {
+    para e en lista { si (pred(e)) { retornar verdadero } }
+    retornar falso
+}
+
+/// @doc Chunk: dividir lista en grupos de tamaño n
+funcion chunk(lista, n) {
+    sea resultado = []
+    sea i = 0
+    mientras (i < longitud(lista)) {
+        sea grupo = []
+        sea j = i
+        mientras (j < i + n y j < longitud(lista)) {
+            agregar(grupo, lista[j])
+            j = j + 1
+        }
+        agregar(resultado, grupo)
+        i = i + n
+    }
+    retornar resultado
+}
+
+/// @doc Zip: combinar dos listas elemento a elemento
+funcion zip(a, b) {
+    sea resultado = []
+    sea n = minimo(longitud(a), longitud(b))
+    sea i = 0
+    mientras (i < n) {
+        agregar(resultado, [a[i], b[i]])
+        i = i + 1
+    }
+    retornar resultado
+}
+
+/// @doc Único: eliminar duplicados preservando orden
+funcion unico(lista) {
+    sea visto = {}
+    sea resultado = []
+    para e en lista {
+        sea k = json_texto(e)
+        si (no visto[k]) {
+            visto[k] = verdadero
+            agregar(resultado, e)
+        }
+    }
+    retornar resultado
+}
+
+/// @doc Diferencia entre listas
+funcion diferencia(a, b) {
+    sea set_b = {}
+    para e en b { set_b[json_texto(e)] = verdadero }
+    retornar filtrar(a, funcion(e) { retornar no set_b[json_texto(e)] })
+}
+
+/// @doc Intersección entre listas
+funcion interseccion(a, b) {
+    sea set_b = {}
+    para e en b { set_b[json_texto(e)] = verdadero }
+    retornar filtrar(a, funcion(e) { retornar set_b[json_texto(e)] })
+}
+
+/// @doc Union de listas sin duplicados
+funcion union(a, b) {
+    retornar unico(a + b)
+}
