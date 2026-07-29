@@ -1,0 +1,37 @@
+importar "stdlib/errores.cfv"
+
+// lanzar_si_no
+intentar {
+    lanzar_si_no(falso, "condicion falsa")
+} capturar (e) {
+    mostrar("lanzar_si_no OK: " + e)
+}
+
+// lanzar_si_err
+sea resultado: cualquiera = err("algo fallo")
+intentar {
+    lanzar_si_err(resultado)
+} capturar (e2) {
+    mostrar("lanzar_si_err OK: " + e2)
+}
+
+// desenvolver falla → capturado
+intentar {
+    desenvolver(err("resultado malo"))
+} capturar (e3) {
+    mostrar("desenvolver capturado: " + e3)
+}
+
+// intentar anidado
+intentar {
+    intentar {
+        lanzar "error interno"
+    } capturar (inner) {
+        mostrar("inner capturado: " + inner)
+        lanzar "relanzado desde catch"
+    }
+} capturar (outer) {
+    mostrar("outer capturado: " + outer)
+}
+
+mostrar("Todo OK")

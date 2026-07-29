@@ -5,7 +5,7 @@
 set -e
 
 REPO="VemorisGroup/C-Forge"
-VERSION="2.5.1"
+VERSION="3.0.0"
 INSTALL_DIR="/usr/local/bin"
 TOOLS_DIR="/usr/local/lib/cforge/tools"
 BINARY_NAME="cforgev"

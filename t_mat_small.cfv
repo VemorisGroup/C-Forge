@@ -1,0 +1,14 @@
+sea MAT_INF: numero = 100000000000.0
+
+funcion mat_mcd(a: numero, b: numero): numero {
+    sea x: numero = absoluto(a)
+    sea y: numero = absoluto(b)
+    mientras (y != 0) {
+        sea temp: numero = y
+        y = x - piso(x / y) * y
+        x = temp
+    }
+    retornar x
+}
+
+mostrar(a_texto(mat_mcd(48, 18)))

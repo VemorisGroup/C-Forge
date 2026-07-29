@@ -1,0 +1,315 @@
+// ejemplos/microservicio/arquitectura.cfv
+// Arquitectura de microservicios distribuida con C-Forge v3.0
+
+importar "microservicio"
+importar "cola_mensajes"
+importar "metricas"
+importar "auditoria"
+importar "auth"
+importar "log"
+importar "validar"
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SERVICIO DE USUARIOS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+sea usuarios_db = {}
+sea _user_id_seq = 1
+
+funcion servicio_usuarios() {
+    sea config = {
+        "nombre": "usuarios-svc",
+        "puerto": 3001,
+        "version": "1.0.0"
+    }
+
+    registro_ruta("POST", "/api/usuarios/registro", funcion(req, res) {
+        sea body = req["body"]
+
+        // Validar
+        sea errores_v = validar(body, {
+            "email": ["requerido", "email"],
+            "password": ["requerido", "min:8"],
+            "nombre": ["requerido", "min:2", "max:100"]
+        })
+        si (longitud(errores_v) > 0) {
+            retornar respuesta_error(400, "Datos inválidos", errores_v)
+        }
+
+        // Verificar duplicado
+        para uid en mapa_claves(usuarios_db) {
+            si (usuarios_db[uid]["email"] == body["email"]) {
+                retornar respuesta_error(409, "Email ya registrado")
+            }
+        }
+
+        // Crear usuario
+        sea id = _user_id_seq
+        _user_id_seq = _user_id_seq + 1
+        sea hash_pwd = hash_password(body["password"])
+        usuarios_db[a_texto(id)] = {
+            "id": id,
+            "email": body["email"],
+            "nombre": body["nombre"],
+            "password_hash": hash_pwd,
+            "rol": "usuario",
+            "activo": verdadero,
+            "creado": reloj_ms()
+        }
+
+        // Publicar evento
+        publicar("usuarios.registrado", {
+            "user_id": id,
+            "email": body["email"],
+            "nombre": body["nombre"]
+        })
+
+        // Auditoría
+        auditar("USUARIO_REGISTRADO", {"id": id, "email": body["email"]}, "sistema")
+
+        retornar respuesta_creado({"id": id, "email": body["email"], "nombre": body["nombre"]})
+    })
+
+    registro_ruta("POST", "/api/usuarios/login", funcion(req, res) {
+        sea body = req["body"]
+        sea usuario = nulo
+        para uid en mapa_claves(usuarios_db) {
+            si (usuarios_db[uid]["email"] == body["email"]) {
+                usuario = usuarios_db[uid]
+            }
+        }
+        si (usuario == nulo o no verificar_password(body["password"] ?? "", usuario["password_hash"])) {
+            retornar respuesta_error(401, "Credenciales inválidas")
+        }
+        sea token = jwt_crear({"user_id": usuario["id"], "email": usuario["email"], "rol": usuario["rol"]}, "secret_key", 86400)
+        registrar_sesion(a_texto(usuario["id"]), token)
+        retornar respuesta_ok({"token": token, "user": {"id": usuario["id"], "email": usuario["email"], "nombre": usuario["nombre"]}})
+    })
+
+    registro_ruta("GET", "/api/usuarios/:id", funcion(req, res) {
+        sea id = req["params"]["id"]
+        sea u = usuarios_db[id] ?? nulo
+        si (u == nulo) { retornar respuesta_error(404, "Usuario no encontrado") }
+        retornar respuesta_ok({"id": u["id"], "email": u["email"], "nombre": u["nombre"]})
+    })
+
+    registro_ruta("GET", "/api/usuarios", funcion(req, res) {
+        sea lista = []
+        para uid en mapa_claves(usuarios_db) {
+            sea u = usuarios_db[uid]
+            agregar(lista, {"id": u["id"], "email": u["email"], "nombre": u["nombre"], "activo": u["activo"]})
+        }
+        retornar respuesta_ok({"usuarios": lista, "total": longitud(lista)})
+    })
+
+    mostrar("▶ Servicio de Usuarios listo en puerto 3001")
+    retornar config
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SERVICIO DE PEDIDOS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+sea pedidos_db = {}
+sea _pedido_id_seq = 1
+
+funcion servicio_pedidos() {
+    sea config = {"nombre": "pedidos-svc", "puerto": 3002}
+
+    registro_ruta("POST", "/api/pedidos", funcion(req, res) {
+        sea body = req["body"]
+        sea errores_v = validar(body, {
+            "user_id": ["requerido", "numero"],
+            "items": ["requerido"],
+            "direccion": ["requerido", "min:10"]
+        })
+        si (longitud(errores_v) > 0) { retornar respuesta_error(400, "Datos inválidos", errores_v) }
+
+        sea total = 0
+        para item en (body["items"] ?? []) {
+            total = total + (item["precio"] ?? 0) * (item["cantidad"] ?? 1)
+        }
+
+        sea id = _pedido_id_seq
+        _pedido_id_seq = _pedido_id_seq + 1
+        pedidos_db[a_texto(id)] = {
+            "id": id,
+            "user_id": body["user_id"],
+            "items": body["items"],
+            "total": total,
+            "estado": "pendiente",
+            "direccion": body["direccion"],
+            "creado": reloj_ms()
+        }
+
+        publicar("pedidos.creado", {"pedido_id": id, "user_id": body["user_id"], "total": total})
+        contador_incrementar("pedidos.total")
+        histograma_observar("pedidos.monto", total)
+
+        retornar respuesta_creado({"id": id, "total": total, "estado": "pendiente"})
+    })
+
+    registro_ruta("GET", "/api/pedidos/:id", funcion(req, res) {
+        sea p = pedidos_db[req["params"]["id"]] ?? nulo
+        si (p == nulo) { retornar respuesta_error(404, "Pedido no encontrado") }
+        retornar respuesta_ok(p)
+    })
+
+    registro_ruta("PATCH", "/api/pedidos/:id/estado", funcion(req, res) {
+        sea id = req["params"]["id"]
+        sea p = pedidos_db[id] ?? nulo
+        si (p == nulo) { retornar respuesta_error(404, "Pedido no encontrado") }
+        sea estados_validos = ["pendiente", "procesando", "enviado", "entregado", "cancelado"]
+        sea nuevo_estado = req["body"]["estado"]
+        si (no lista_contiene(estados_validos, nuevo_estado)) {
+            retornar respuesta_error(400, "Estado inválido: " + nuevo_estado)
+        }
+        p["estado"] = nuevo_estado
+        publicar("pedidos.estado_cambiado", {"pedido_id": id, "estado": nuevo_estado})
+        retornar respuesta_ok({"id": id, "estado": nuevo_estado})
+    })
+
+    mostrar("▶ Servicio de Pedidos listo en puerto 3002")
+    retornar config
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SERVICIO DE NOTIFICACIONES (Suscriptor de eventos)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+funcion servicio_notificaciones() {
+    suscribir("usuarios.registrado", funcion(datos) {
+        mostrar("📧 [Notificaciones] Bienvenido " + datos["nombre"] + " <" + datos["email"] + ">")
+        // Aquí iría el envío real de email
+    })
+
+    suscribir("pedidos.creado", funcion(datos) {
+        mostrar("📦 [Notificaciones] Pedido #" + a_texto(datos["pedido_id"]) +
+               " por $" + a_texto(datos["total"]) + " creado para user " + a_texto(datos["user_id"]))
+    })
+
+    suscribir("pedidos.estado_cambiado", funcion(datos) {
+        mostrar("🔔 [Notificaciones] Pedido #" + a_texto(datos["pedido_id"]) +
+               " → " + datos["estado"])
+    })
+
+    mostrar("▶ Servicio de Notificaciones suscrito a eventos")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// API GATEWAY (orquestador)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+funcion api_gateway() {
+    sea config = {
+        "nombre": "api-gateway",
+        "puerto": 8080,
+        "version": "1.0.0"
+    }
+
+    // Configurar métricas
+    contador_crear("requests.total", "Total de requests")
+    contador_crear("requests.error", "Total de errores")
+    contador_crear("pedidos.total", "Total de pedidos")
+    histograma_crear("pedidos.monto", "Monto de pedidos", [10, 50, 100, 500, 1000])
+    histograma_crear("request.latencia", "Latencia de requests ms", [10, 50, 100, 500, 1000])
+
+    // Log de auditoría
+    auditar_inicio("api-gateway-v1", "gateway")
+
+    registro_ruta("GET", "/metrics", funcion(req, res) {
+        retornar respuesta_ok({"metricas": exportar_prometheus()})
+    })
+
+    registro_ruta("GET", "/audit", funcion(req, res) {
+        retornar respuesta_ok({"trail": obtener_trail(50)})
+    })
+
+    mostrar("▶ API Gateway listo en puerto 8080")
+    retornar config
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SIMULACIÓN DEL SISTEMA
+// ═══════════════════════════════════════════════════════════════════════════════
+
+funcion simular_sistema() {
+    mostrar("\n╔══════════════════════════════════════════════════════════╗")
+    mostrar("║   ARQUITECTURA MICROSERVICIOS — C-Forge v3.0             ║")
+    mostrar("╚══════════════════════════════════════════════════════════╝\n")
+
+    // Iniciar servicios
+    servicio_usuarios()
+    servicio_pedidos()
+    servicio_notificaciones()
+    api_gateway()
+
+    mostrar("\n══════ Simulando requests ══════\n")
+
+    // Función helper para simular request
+    funcion sim_request(metodo, ruta, body) {
+        sea req = {"method": metodo, "path": ruta, "body": body ?? {}, "params": {}, "query": {}, "headers": {}}
+        sea res = {}
+        // Encontrar handler
+        mostrar("[" + metodo + "] " + ruta)
+        retornar {"status": 200, "body": {}}  // Simplificado para demo
+    }
+
+    // 1. Registrar usuarios
+    mostrar("1. Registrando usuarios...")
+    publicar("usuarios.registrado", {"user_id": 1, "email": "ana@cforge.io", "nombre": "Ana González"})
+    publicar("usuarios.registrado", {"user_id": 2, "email": "bob@empresa.com", "nombre": "Bob Smith"})
+
+    // 2. Crear pedidos
+    mostrar("\n2. Creando pedidos...")
+    publicar("pedidos.creado", {
+        "pedido_id": 1,
+        "user_id": 1,
+        "total": 150.99
+    })
+    publicar("pedidos.creado", {
+        "pedido_id": 2,
+        "user_id": 2,
+        "total": 89.50
+    })
+
+    // 3. Actualizar estados
+    mostrar("\n3. Actualizando estados...")
+    publicar("pedidos.estado_cambiado", {"pedido_id": 1, "estado": "procesando"})
+    publicar("pedidos.estado_cambiado", {"pedido_id": 1, "estado": "enviado"})
+    publicar("pedidos.estado_cambiado", {"pedido_id": 2, "estado": "entregado"})
+
+    // 4. Métricas
+    contador_incrementar("requests.total")
+    contador_incrementar("requests.total")
+    histograma_observar("request.latencia", 23)
+    histograma_observar("request.latencia", 156)
+
+    mostrar("\n══════ Estado del sistema ══════\n")
+
+    sea reporte_m = reporte_metricas()
+    mostrar("📊 Métricas:")
+    mostrar("  Requests totales: " + a_texto(reporte_m["contadores"]["requests.total"] ?? 0))
+    mostrar("  Pedidos creados:  " + a_texto(reporte_m["contadores"]["pedidos.total"] ?? 0))
+
+    sea estado_health = {
+        "status": "ok",
+        "servicios": {
+            "usuarios-svc": "healthy",
+            "pedidos-svc": "healthy",
+            "notificaciones-svc": "healthy",
+            "api-gateway": "healthy"
+        },
+        "uptime": "00:05:23",
+        "version": "3.0.0"
+    }
+
+    mostrar("\n🏥 Health Check:")
+    para svc en mapa_claves(estado_health["servicios"]) {
+        mostrar("  ✅ " + svc + ": " + estado_health["servicios"][svc])
+    }
+
+    mostrar("\n✅ Arquitectura de microservicios C-Forge operacional\n")
+}
+
+simular_sistema()

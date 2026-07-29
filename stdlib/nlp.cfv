@@ -1,0 +1,305 @@
+// stdlib/nlp.cfv — Procesamiento de lenguaje natural
+// C-Forge Standard Library v3.0
+
+// ── Tokenización ───────────────────────────────────────────────────────────────
+
+funcion nlp_tokenizar(texto_entrada) {
+    sea texto_lower = texto_minusculas(texto_entrada)
+    sea limpio = texto_reemplazar(texto_reemplazar(texto_reemplazar(texto_lower, ".", " "), ",", " "), "!", " ")
+    limpio = texto_reemplazar(texto_reemplazar(texto_reemplazar(limpio, "?", " "), ";", " "), ":", " ")
+    limpio = texto_reemplazar(texto_reemplazar(limpio, "(", " "), ")", " ")
+    sea tokens = []
+    para t en separar(limpio, " ") {
+        sea t2 = texto_recortar(t)
+        si (longitud(t2) > 0) { agregar(tokens, t2) }
+    }
+    retornar tokens
+}
+
+funcion nlp_tokenizar_oraciones(texto_entrada) {
+    sea oraciones = []
+    para oracion en separar(texto_entrada, ".") {
+        sea o = texto_recortar(oracion)
+        si (longitud(o) > 0) { agregar(oraciones, o) }
+    }
+    retornar oraciones
+}
+
+funcion nlp_ngrams(tokens, n) {
+    sea ngrams = []
+    sea i = 0
+    mientras (i <= longitud(tokens) - n) {
+        sea gram = subarray(tokens, i, i + n)
+        agregar(ngrams, unir(gram, " "))
+        i = i + 1
+    }
+    retornar ngrams
+}
+
+// ── Vocabulario ────────────────────────────────────────────────────────────────
+
+funcion nlp_vocabulario_crear() {
+    retornar {
+        "token_a_id": {"<PAD>": 0, "<UNK>": 1, "<BOS>": 2, "<EOS>": 3},
+        "id_a_token": {0: "<PAD>", 1: "<UNK>", 2: "<BOS>", 3: "<EOS>"},
+        "frecuencias": {},
+        "size": 4
+    }
+}
+
+funcion nlp_vocab_agregar(vocab, token) {
+    si (no tiene_clave(vocab["token_a_id"], token)) {
+        sea id = vocab["size"]
+        vocab["token_a_id"][token] = id
+        vocab["id_a_token"][id] = token
+        vocab["size"] = id + 1
+    }
+    vocab["frecuencias"][token] = (vocab["frecuencias"][token] ?? 0) + 1
+    retornar vocab["token_a_id"][token]
+}
+
+funcion nlp_vocab_construir(corpus, min_freq) {
+    sea vocab = nlp_vocabulario_crear()
+    sea mf = min_freq ?? 1
+    sea conteos = {}
+    para texto_elem en corpus {
+        para token en nlp_tokenizar(texto_elem) {
+            conteos[token] = (conteos[token] ?? 0) + 1
+        }
+    }
+    para token en mapa_claves(conteos) {
+        si (conteos[token] >= mf) {
+            nlp_vocab_agregar(vocab, token)
+        }
+    }
+    retornar vocab
+}
+
+funcion nlp_encodificar(vocab, tokens) {
+    retornar lista_mapear(tokens, funcion(t) {
+        retornar vocab["token_a_id"][t] ?? vocab["token_a_id"]["<UNK>"]
+    })
+}
+
+funcion nlp_decodificar(vocab, ids) {
+    retornar lista_mapear(ids, funcion(id) {
+        retornar vocab["id_a_token"][id] ?? "<UNK>"
+    })
+}
+
+// ── Stopwords ──────────────────────────────────────────────────────────────────
+
+sea _stopwords_es = ["de", "la", "el", "en", "y", "a", "los", "del", "se", "las", "por", "un", "para", "con", "no", "una", "su", "al", "lo", "como", "más", "pero", "sus", "le", "ya", "o", "este", "sí", "porque", "esta", "entre", "cuando", "muy", "sin", "sobre", "también", "me", "hasta", "hay", "donde", "quien", "desde", "todo", "nos", "durante", "todos", "uno", "les", "ni", "contra", "otros", "ese", "eso", "ante", "ellos", "e", "esto", "mí", "antes", "algunos", "qué", "unos", "yo", "otro", "otras", "otra", "él", "tanto", "esa", "estos", "mucho", "quienes", "nada", "muchos", "cual", "sea", "poco", "ella", "estar", "estas", "ser", "tiene", "dicen", "que"]
+
+sea _stopwords_en = ["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "from", "up", "about", "into", "over", "after", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "it", "its", "this", "that", "these", "those", "i", "me", "my", "we", "our", "you", "your", "he", "she", "they", "them", "his", "her", "their", "not", "no", "as", "if", "so", "than", "because"]
+
+funcion nlp_eliminar_stopwords(tokens, idioma) {
+    sea stops = si(idioma == "en", _stopwords_en, _stopwords_es)
+    retornar lista_filtrar(tokens, funcion(t) { retornar no lista_contiene(stops, t) })
+}
+
+// ── TF-IDF ─────────────────────────────────────────────────────────────────────
+
+funcion nlp_tf(tokens) {
+    sea conteos = {}
+    sea n = longitud(tokens)
+    para t en tokens { conteos[t] = (conteos[t] ?? 0) + 1 }
+    sea tf = {}
+    para t en mapa_claves(conteos) { tf[t] = conteos[t] / n }
+    retornar tf
+}
+
+funcion nlp_idf(corpus_tokens) {
+    sea n = longitud(corpus_tokens)
+    sea df = {}
+    para doc_tokens en corpus_tokens {
+        sea vistos = {}
+        para t en doc_tokens {
+            si (no tiene_clave(vistos, t)) {
+                df[t] = (df[t] ?? 0) + 1
+                vistos[t] = verdadero
+            }
+        }
+    }
+    sea idf = {}
+    para t en mapa_claves(df) {
+        idf[t] = logaritmo((n + 1) / (df[t] + 1)) + 1  // suavizado
+    }
+    retornar idf
+}
+
+funcion nlp_tfidf_vector(tokens, idf, vocab) {
+    sea tf = nlp_tf(tokens)
+    sea vector = lista_repetir(0, vocab["size"])
+    para t en mapa_claves(tf) {
+        si (tiene_clave(vocab["token_a_id"], t)) {
+            sea id = vocab["token_a_id"][t]
+            sea idf_val = idf[t] ?? 1
+            vector[id] = tf[t] * idf_val
+        }
+    }
+    retornar vector
+}
+
+// ── Similitud de textos ────────────────────────────────────────────────────────
+
+funcion nlp_similitud_coseno(vec_a, vec_b) {
+    sea dot = 0
+    sea norm_a = 0
+    sea norm_b = 0
+    sea i = 0
+    mientras (i < longitud(vec_a)) {
+        dot = dot + vec_a[i] * vec_b[i]
+        norm_a = norm_a + vec_a[i] * vec_a[i]
+        norm_b = norm_b + vec_b[i] * vec_b[i]
+        i = i + 1
+    }
+    si (norm_a == 0 o norm_b == 0) { retornar 0 }
+    retornar dot / (raiz(norm_a) * raiz(norm_b))
+}
+
+funcion nlp_distancia_levenshtein(a, b) {
+    sea la = longitud(a)
+    sea lb = longitud(b)
+    sea dp = []
+    sea i = 0
+    mientras (i <= la) {
+        sea fila = lista_repetir(0, lb + 1)
+        fila[0] = i
+        agregar(dp, fila)
+        i = i + 1
+    }
+    sea j = 0
+    mientras (j <= lb) { dp[0][j] = j; j = j + 1 }
+    sea i2 = 1
+    mientras (i2 <= la) {
+        sea j2 = 1
+        mientras (j2 <= lb) {
+            si (a[i2-1] == b[j2-1]) {
+                dp[i2][j2] = dp[i2-1][j2-1]
+            } sino {
+                dp[i2][j2] = 1 + minimo(dp[i2-1][j2], minimo(dp[i2][j2-1], dp[i2-1][j2-1]))
+            }
+            j2 = j2 + 1
+        }
+        i2 = i2 + 1
+    }
+    retornar dp[la][lb]
+}
+
+funcion nlp_similitud_jaccard(tokens_a, tokens_b) {
+    sea set_a = lista_a_conjunto(tokens_a)
+    sea set_b = lista_a_conjunto(tokens_b)
+    sea interseccion = 0
+    para t en conjunto_a_lista(set_a) {
+        si (conjunto_contiene(set_b, t)) { interseccion = interseccion + 1 }
+    }
+    sea union = longitud(conjunto_a_lista(set_a)) + longitud(conjunto_a_lista(set_b)) - interseccion
+    si (union == 0) { retornar 0 }
+    retornar interseccion / union
+}
+
+// ── Análisis de sentimiento simple ─────────────────────────────────────────────
+
+sea _palabras_positivas_es = ["bueno", "excelente", "increíble", "perfecto", "genial", "fantástico", "maravilloso", "feliz", "amor", "mejor", "útil", "fácil", "rápido", "eficiente", "recomiendo", "satisfecho", "contento"]
+sea _palabras_negativas_es = ["malo", "terrible", "horrible", "pésimo", "lento", "difícil", "complicado", "roto", "error", "problema", "falla", "peor", "decepcionante", "inútil", "frustrado", "molesto"]
+
+funcion nlp_sentimiento(texto_entrada, idioma) {
+    sea tokens = nlp_tokenizar(texto_entrada)
+    sea pos_words = _palabras_positivas_es
+    sea neg_words = _palabras_negativas_es
+    sea score = 0
+    sea negacion = falso
+    para token en tokens {
+        si (lista_contiene(["no", "sin", "nunca", "jamás", "tampoco"], token)) {
+            negacion = verdadero
+            continuar
+        }
+        sea es_pos = lista_contiene(pos_words, token)
+        sea es_neg = lista_contiene(neg_words, token)
+        si (es_pos) { score = score + si(negacion, -1, 1) }
+        sino si (es_neg) { score = score + si(negacion, 1, -1) }
+        negacion = falso
+    }
+    retornar {
+        "score": score,
+        "sentimiento": si(score > 0, "positivo", si(score < 0, "negativo", "neutro")),
+        "confianza": minimo(1, absoluto(score) / 5)
+    }
+}
+
+// ── Stem / Lemmatización básica (español) ─────────────────────────────────────
+
+funcion nlp_stem(palabra) {
+    // Stemmer básico para español
+    sea p = palabra
+    sea sufijos = ["ando", "iendo", "ación", "aciones", "mente", "idad", "idades", "ismo", "ista", "able", "ible", "oso", "osa"]
+    para suf en sufijos {
+        si (texto_termina_con(p, suf) y longitud(p) > longitud(suf) + 3) {
+            retornar texto_subcadena(p, 0, longitud(p) - longitud(suf))
+        }
+    }
+    retornar p
+}
+
+// ── Extracción de información ──────────────────────────────────────────────────
+
+funcion nlp_extraer_numeros(texto_entrada) {
+    sea tokens = separar(texto_entrada, " ")
+    sea numeros = []
+    para t en tokens {
+        sea n = a_numero(t)
+        si (n != nulo) { agregar(numeros, n) }
+    }
+    retornar numeros
+}
+
+funcion nlp_extraer_emails(texto_entrada) {
+    sea tokens = separar(texto_entrada, " ")
+    sea emails = []
+    para t en tokens {
+        sea t_limpio = texto_reemplazar(texto_reemplazar(t, ",", ""), ".", "")
+        si (texto_contiene(t_limpio, "@") y texto_contiene(t_limpio, ".")) {
+            agregar(emails, t_limpio)
+        }
+    }
+    retornar emails
+}
+
+funcion nlp_contar_palabras(texto_entrada) {
+    sea tokens = nlp_tokenizar(texto_entrada)
+    sea conteos = {}
+    para t en tokens {
+        conteos[t] = (conteos[t] ?? 0) + 1
+    }
+    retornar conteos
+}
+
+funcion nlp_palabras_frecuentes(texto_entrada, n_top) {
+    sea conteos = nlp_contar_palabras(texto_entrada)
+    sea pairs = []
+    para k en mapa_claves(conteos) {
+        agregar(pairs, {"palabra": k, "freq": conteos[k]})
+    }
+    sea ordenado = mergesort(pairs, funcion(a, b) { retornar b["freq"] - a["freq"] })
+    retornar subarray(ordenado, 0, minimo(n_top ?? 10, longitud(ordenado)))
+}
+
+// ── Resumen automático básico ──────────────────────────────────────────────────
+
+funcion nlp_resumir(texto_entrada, n_oraciones) {
+    sea oraciones = nlp_tokenizar_oraciones(texto_entrada)
+    sea n = n_oraciones ?? 3
+    si (longitud(oraciones) <= n) { retornar texto_entrada }
+    // Puntuar oraciones por frecuencia de palabras
+    sea freq = nlp_contar_palabras(texto_entrada)
+    sea puntuaciones = lista_mapear(oraciones, funcion(o) {
+        sea tokens = nlp_tokenizar(o)
+        sea score = 0
+        para t en tokens { score = score + (freq[t] ?? 0) }
+        retornar {"oracion": o, "score": si(longitud(tokens) > 0, score/longitud(tokens), 0)}
+    })
+    sea ordenadas = mergesort(puntuaciones, funcion(a, b) { retornar b["score"] - a["score"] })
+    sea top = subarray(ordenadas, 0, minimo(n, longitud(ordenadas)))
+    retornar unir(lista_mapear(top, funcion(x) { retornar x["oracion"] }), ". ") + "."
+}

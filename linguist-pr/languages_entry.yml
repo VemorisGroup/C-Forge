@@ -1,0 +1,8 @@
+C-Forge:
+  type: programming
+  color: "#FF6B1A"
+  extensions:
+  - ".cfv"
+  tm_scope: source.cfv
+  ace_mode: text
+  language_id: 0  # will be assigned by script/update-ids

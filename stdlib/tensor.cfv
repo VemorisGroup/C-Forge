@@ -1,0 +1,340 @@
+// stdlib/tensor.cfv — Tensores N-dimensionales
+// C-Forge Standard Library v3.0
+
+// ── Tensor ─────────────────────────────────────────────────────────────────────
+
+funcion tensor_crear(forma, datos) {
+    sea total = 1
+    para d en forma { total = total * d }
+    sea data = datos ?? lista_repetir(0, total)
+    retornar {
+        "forma": forma,
+        "datos": data,
+        "ndim": longitud(forma),
+        "size": total,
+        "dtype": "float32"
+    }
+}
+
+funcion tensor_zeros(forma) { retornar tensor_crear(forma, nulo) }
+
+funcion tensor_ones(forma) {
+    sea total = 1
+    para d en forma { total = total * d }
+    retornar tensor_crear(forma, lista_repetir(1, total))
+}
+
+funcion tensor_desde(lista) {
+    retornar tensor_crear([longitud(lista)], lista)
+}
+
+funcion tensor_desde_2d(matriz) {
+    sea filas = longitud(matriz)
+    sea cols = longitud(matriz[0])
+    sea datos = []
+    para f en matriz { para v en f { agregar(datos, v) } }
+    retornar tensor_crear([filas, cols], datos)
+}
+
+funcion tensor_aleatorio(forma) {
+    sea total = 1
+    para d en forma { total = total * d }
+    sea datos = []
+    sea i = 0
+    mientras (i < total) { agregar(datos, aleatorio() * 2 - 1); i = i + 1 }
+    retornar tensor_crear(forma, datos)
+}
+
+funcion tensor_aleatorio_normal(forma, media, desv) {
+    sea m = media ?? 0
+    sea s = desv ?? 1
+    sea total = 1
+    para d en forma { total = total * d }
+    sea datos = []
+    sea i = 0
+    mientras (i < total) {
+        // Box-Muller transform
+        sea u1 = maximo(0.0000001, aleatorio())
+        sea u2 = aleatorio()
+        sea z = raiz(-2 * logaritmo(u1)) * coseno(2 * PI * u2)
+        agregar(datos, m + s * z)
+        i = i + 1
+    }
+    retornar tensor_crear(forma, datos)
+}
+
+// ── Indexación ─────────────────────────────────────────────────────────────────
+
+funcion tensor_indice_plano(t, indices) {
+    sea idx = 0
+    sea stride = 1
+    sea i = longitud(indices) - 1
+    mientras (i >= 0) {
+        idx = idx + indices[i] * stride
+        stride = stride * t["forma"][i]
+        i = i - 1
+    }
+    retornar idx
+}
+
+funcion tensor_get(t, indices) {
+    retornar t["datos"][tensor_indice_plano(t, indices)]
+}
+
+funcion tensor_set(t, indices, valor) {
+    t["datos"][tensor_indice_plano(t, indices)] = valor
+}
+
+// ── Reshape / Transponer ───────────────────────────────────────────────────────
+
+funcion tensor_reshape(t, nueva_forma) {
+    sea total = 1
+    para d en nueva_forma { total = total * d }
+    si (total != t["size"]) { retornar {"error": "Forma incompatible"} }
+    retornar {"forma": nueva_forma, "datos": t["datos"], "ndim": longitud(nueva_forma), "size": total, "dtype": t["dtype"]}
+}
+
+funcion tensor_transponer(t) {
+    si (t["ndim"] != 2) { retornar {"error": "Transponer solo funciona en matrices 2D"} }
+    sea filas = t["forma"][0]
+    sea cols = t["forma"][1]
+    sea datos = lista_repetir(0, t["size"])
+    sea i = 0
+    mientras (i < filas) {
+        sea j = 0
+        mientras (j < cols) {
+            datos[j * filas + i] = t["datos"][i * cols + j]
+            j = j + 1
+        }
+        i = i + 1
+    }
+    retornar tensor_crear([cols, filas], datos)
+}
+
+funcion tensor_aplanar(t) { retornar tensor_reshape(t, [t["size"]]) }
+
+// ── Operaciones elementales ────────────────────────────────────────────────────
+
+funcion tensor_op(a, b, fn) {
+    sea datos = []
+    sea i = 0
+    mientras (i < a["size"]) {
+        sea bv = si(tipo(b) == "numero", b, b["datos"][i])
+        agregar(datos, fn(a["datos"][i], bv))
+        i = i + 1
+    }
+    retornar tensor_crear(a["forma"], datos)
+}
+
+funcion tensor_suma(a, b) { retornar tensor_op(a, b, funcion(x, y) { retornar x + y }) }
+funcion tensor_resta(a, b) { retornar tensor_op(a, b, funcion(x, y) { retornar x - y }) }
+funcion tensor_mul(a, b) { retornar tensor_op(a, b, funcion(x, y) { retornar x * y }) }
+funcion tensor_div(a, b) { retornar tensor_op(a, b, funcion(x, y) { si (y == 0) { retornar 0 }; retornar x / y }) }
+funcion tensor_pow(t, exp) { retornar tensor_op(t, exp, funcion(x, e) { retornar potencia(x, e) }) }
+funcion tensor_sqrt(t) { retornar tensor_op(t, 0, funcion(x, _) { retornar raiz(x) }) }
+funcion tensor_abs(t) { retornar tensor_op(t, 0, funcion(x, _) { retornar absoluto(x) }) }
+funcion tensor_neg(t) { retornar tensor_op(t, 0, funcion(x, _) { retornar -x }) }
+funcion tensor_exp(t) { retornar tensor_op(t, 0, funcion(x, _) { retornar potencia(2.71828, x) }) }
+funcion tensor_log(t) { retornar tensor_op(t, 0, funcion(x, _) { retornar si(x > 0, logaritmo(x), -999999) }) }
+funcion tensor_clip(t, min_v, max_v) { retornar tensor_op(t, 0, funcion(x, _) { retornar maximo(min_v, minimo(max_v, x)) }) }
+
+// ── Multiplicación de matrices ─────────────────────────────────────────────────
+
+funcion tensor_matmul(a, b) {
+    si (a["ndim"] != 2 o b["ndim"] != 2) { retornar {"error": "matmul requiere matrices 2D"} }
+    sea m = a["forma"][0]
+    sea k = a["forma"][1]
+    si (k != b["forma"][0]) { retornar {"error": "Dimensiones incompatibles"} }
+    sea n = b["forma"][1]
+    sea datos = lista_repetir(0, m * n)
+    sea i = 0
+    mientras (i < m) {
+        sea j = 0
+        mientras (j < n) {
+            sea suma = 0
+            sea l = 0
+            mientras (l < k) {
+                suma = suma + a["datos"][i*k+l] * b["datos"][l*n+j]
+                l = l + 1
+            }
+            datos[i*n+j] = suma
+            j = j + 1
+        }
+        i = i + 1
+    }
+    retornar tensor_crear([m, n], datos)
+}
+
+// ── Reducción ──────────────────────────────────────────────────────────────────
+
+funcion tensor_sum(t) {
+    sea s = 0
+    para v en t["datos"] { s = s + v }
+    retornar s
+}
+
+funcion tensor_mean(t) { retornar tensor_sum(t) / t["size"] }
+
+funcion tensor_max(t) {
+    sea m = t["datos"][0]
+    para v en t["datos"] { si (v > m) { m = v } }
+    retornar m
+}
+
+funcion tensor_min(t) {
+    sea m = t["datos"][0]
+    para v en t["datos"] { si (v < m) { m = v } }
+    retornar m
+}
+
+funcion tensor_argmax(t) {
+    sea m = t["datos"][0]
+    sea idx = 0
+    sea i = 1
+    mientras (i < t["size"]) {
+        si (t["datos"][i] > m) { m = t["datos"][i]; idx = i }
+        i = i + 1
+    }
+    retornar idx
+}
+
+funcion tensor_argmin(t) {
+    sea m = t["datos"][0]
+    sea idx = 0
+    sea i = 1
+    mientras (i < t["size"]) {
+        si (t["datos"][i] < m) { m = t["datos"][i]; idx = i }
+        i = i + 1
+    }
+    retornar idx
+}
+
+funcion tensor_std(t) {
+    sea media = tensor_mean(t)
+    sea var = 0
+    para v en t["datos"] { var = var + (v - media) * (v - media) }
+    retornar raiz(var / t["size"])
+}
+
+// ── Normalización ──────────────────────────────────────────────────────────────
+
+funcion tensor_normalizar_minmax(t) {
+    sea mn = tensor_min(t)
+    sea mx = tensor_max(t)
+    sea rango = mx - mn
+    si (rango == 0) { retornar tensor_ones(t["forma"]) }
+    retornar tensor_op(t, mn, funcion(x, m) {
+        retornar (x - m) / rango
+    })
+}
+
+funcion tensor_normalizar_zscore(t) {
+    sea media = tensor_mean(t)
+    sea std = tensor_std(t)
+    si (std == 0) { retornar tensor_zeros(t["forma"]) }
+    retornar tensor_op(t, 0, funcion(x, _) { retornar (x - media) / std })
+}
+
+// ── Funciones de activación ────────────────────────────────────────────────────
+
+funcion tensor_relu(t) { retornar tensor_op(t, 0, funcion(x, _) { retornar maximo(0, x) }) }
+funcion tensor_leaky_relu(t, alpha) {
+    sea a = alpha ?? 0.01
+    retornar tensor_op(t, 0, funcion(x, _) { retornar si(x > 0, x, a * x) })
+}
+funcion tensor_sigmoid(t) {
+    retornar tensor_op(t, 0, funcion(x, _) { retornar 1 / (1 + potencia(2.71828, -x)) })
+}
+funcion tensor_tanh(t) {
+    retornar tensor_op(t, 0, funcion(x, _) {
+        sea ep = potencia(2.71828, x)
+        sea en = potencia(2.71828, -x)
+        retornar (ep - en) / (ep + en)
+    })
+}
+funcion tensor_softmax(t) {
+    sea mx = tensor_max(t)
+    sea exps = tensor_op(t, mx, funcion(x, m) { retornar potencia(2.71828, x - m) })
+    sea suma = tensor_sum(exps)
+    retornar tensor_op(exps, suma, funcion(x, s) { retornar x / s })
+}
+funcion tensor_softplus(t) {
+    retornar tensor_op(t, 0, funcion(x, _) { retornar logaritmo(1 + potencia(2.71828, x)) })
+}
+funcion tensor_gelu(t) {
+    retornar tensor_op(t, 0, funcion(x, _) {
+        retornar 0.5 * x * (1 + tangente(0.7978845608 * (x + 0.044715 * x * x * x)))
+    })
+}
+
+// ── Concatenación / Apilado ────────────────────────────────────────────────────
+
+funcion tensor_concat(lista_tensores, eje) {
+    sea ax = eje ?? 0
+    si (ax == 0) {
+        sea datos = []
+        sea n_filas = 0
+        para t en lista_tensores {
+            para v en t["datos"] { agregar(datos, v) }
+            n_filas = n_filas + t["forma"][0]
+        }
+        sea nueva_forma = lista_tensores[0]["forma"]
+        nueva_forma[0] = n_filas
+        retornar tensor_crear(nueva_forma, datos)
+    }
+    retornar {"error": "Solo concatenación en eje 0 soportada actualmente"}
+}
+
+// ── Producto externo ───────────────────────────────────────────────────────────
+
+funcion tensor_outer(a, b) {
+    sea datos = []
+    para va en a["datos"] {
+        para vb en b["datos"] {
+            agregar(datos, va * vb)
+        }
+    }
+    retornar tensor_crear([a["size"], b["size"]], datos)
+}
+
+// ── Distancias ─────────────────────────────────────────────────────────────────
+
+funcion tensor_distancia_euclidiana(a, b) {
+    sea diff = tensor_resta(a, b)
+    retornar raiz(tensor_sum(tensor_mul(diff, diff)))
+}
+
+funcion tensor_similitud_coseno(a, b) {
+    sea dot = tensor_sum(tensor_mul(a, b))
+    sea norm_a = raiz(tensor_sum(tensor_mul(a, a)))
+    sea norm_b = raiz(tensor_sum(tensor_mul(b, b)))
+    si (norm_a == 0 o norm_b == 0) { retornar 0 }
+    retornar dot / (norm_a * norm_b)
+}
+
+// ── Serialización ──────────────────────────────────────────────────────────────
+
+funcion tensor_a_json(t) {
+    retornar json_serializar({"forma": t["forma"], "datos": t["datos"], "dtype": t["dtype"]})
+}
+
+funcion tensor_desde_json(texto) {
+    sea obj = json_parsear(texto)
+    retornar tensor_crear(obj["forma"], obj["datos"])
+}
+
+funcion tensor_imprimir(t) {
+    si (t["ndim"] == 1) {
+        mostrar("[" + unir(lista_mapear(t["datos"], funcion(v) { retornar a_texto(numero_decimales(v, 4)) }), ", ") + "]")
+    } sino si (t["ndim"] == 2) {
+        sea filas = t["forma"][0]
+        sea cols = t["forma"][1]
+        mostrar("Tensor " + a_texto(filas) + "x" + a_texto(cols) + ":")
+        sea i = 0
+        mientras (i < filas) {
+            sea fila = subarray(t["datos"], i*cols, (i+1)*cols)
+            mostrar("  [" + unir(lista_mapear(fila, funcion(v) { retornar a_texto(numero_decimales(v, 4)) }), ", ") + "]")
+            i = i + 1
+        }
+    }
+}

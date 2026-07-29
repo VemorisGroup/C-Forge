@@ -1,0 +1,166 @@
+// ejemplos/ml/clasificador.cfv
+// Clasificador de iris con C-Forge v3.0
+// Demuestra: tensor, red neuronal, métricas, datos
+
+importar "tensor"
+importar "red_neuronal"
+importar "ml"
+importar "datos"
+
+// ── Dataset Iris sintético ─────────────────────────────────────────────────────
+
+funcion generar_iris(n_por_clase) {
+    sea n = n_por_clase ?? 50
+    sea X = []
+    sea Y_raw = []
+
+    // Setosa: flores pequeñas
+    sea i = 0
+    mientras (i < n) {
+        agregar(X, [4.5 + aleatorio()*0.8, 3.0 + aleatorio()*0.6, 1.3 + aleatorio()*0.5, 0.2 + aleatorio()*0.2])
+        agregar(Y_raw, 0)
+        i = i + 1
+    }
+
+    // Versicolor
+    i = 0
+    mientras (i < n) {
+        agregar(X, [5.5 + aleatorio()*1.2, 2.7 + aleatorio()*0.5, 4.0 + aleatorio()*0.8, 1.2 + aleatorio()*0.4])
+        agregar(Y_raw, 1)
+        i = i + 1
+    }
+
+    // Virginica: flores grandes
+    i = 0
+    mientras (i < n) {
+        agregar(X, [6.5 + aleatorio()*0.9, 3.0 + aleatorio()*0.5, 5.5 + aleatorio()*0.7, 2.0 + aleatorio()*0.4])
+        agregar(Y_raw, 2)
+        i = i + 1
+    }
+
+    // One-hot encode Y
+    sea Y = lista_mapear(Y_raw, funcion(c) {
+        sea oh = [0, 0, 0]
+        oh[c] = 1
+        retornar oh
+    })
+
+    retornar {"X": X, "Y": Y, "Y_raw": Y_raw}
+}
+
+funcion main() {
+    mostrar("╔══════════════════════════════════════════════╗")
+    mostrar("║  Clasificador Iris — C-Forge ML v3.0         ║")
+    mostrar("╚══════════════════════════════════════════════╝\n")
+
+    // Generar datos
+    sea dataset = generar_iris(50)
+    mostrar("Dataset: " + a_texto(longitud(dataset["X"])) + " muestras, 4 features, 3 clases")
+
+    // Escalar features
+    sea scaled = escalar_minmax(dataset["X"])
+    sea X_scaled = scaled["datos"]
+
+    // Split train/test
+    sea split = train_test_split(X_scaled, dataset["Y"], 0.25)
+
+    sea X_train = tensor_desde_2d(split["X_train"])
+    sea Y_train = tensor_desde_2d(split["Y_train"])
+    sea X_test = tensor_desde_2d(split["X_test"])
+    sea Y_test = tensor_desde_2d(split["Y_test"])
+
+    mostrar("Train: " + a_texto(X_train["forma"][0]) + " | Test: " + a_texto(X_test["forma"][0]))
+
+    // ── Red neuronal ──────────────────────────────────────────────────────────
+
+    mostrar("\n--- Entrenando Red Neuronal ---")
+    sea modelo_nn = red_crear([
+        capa_densa(4, 32, "relu"),
+        capa_dropout(0.3),
+        capa_densa(32, 16, "relu"),
+        capa_densa(16, 3, "softmax")
+    ])
+
+    sea historial = red_entrenar(modelo_nn, X_train, Y_train, {
+        "epocas": 100,
+        "batch_size": 32,
+        "lr": 0.005,
+        "perdida": "cross_entropy",
+        "verbose": verdadero
+    })
+
+    sea preds_nn = red_predecir(modelo_nn, X_test)
+    sea acc_nn = precision(preds_nn, Y_test)
+    mostrar("\n✓ Red Neuronal — Precisión: " + a_texto(numero_decimales(acc_nn * 100, 2)) + "%")
+
+    // ── Árbol de decisión ─────────────────────────────────────────────────────
+
+    mostrar("\n--- Entrenando Árbol de Decisión ---")
+    sea arbol = arbol_decision_crear(8)
+    sea Y_flat = lista_mapear(dataset["Y"], funcion(oh) {
+        si (oh[0] == 1) { retornar 0 }
+        si (oh[1] == 1) { retornar 1 }
+        retornar 2
+    })
+    arbol_decision_entrenar(arbol, split["X_train"], subarray(Y_flat, 0, longitud(split["X_train"])))
+    sea preds_tree = arbol_decision_predecir(arbol, split["X_test"])
+    sea Y_test_flat = subarray(Y_flat, longitud(split["X_train"]), longitud(Y_flat))
+    sea acc_tree = ml_precision(Y_test_flat, preds_tree)
+    mostrar("✓ Árbol de Decisión — Precisión: " + a_texto(numero_decimales(acc_tree * 100, 2)) + "%")
+
+    // ── Random Forest ─────────────────────────────────────────────────────────
+
+    mostrar("\n--- Entrenando Random Forest ---")
+    sea rf = random_forest_crear(10, 6, 2)
+    random_forest_entrenar(rf, split["X_train"], subarray(Y_flat, 0, longitud(split["X_train"])))
+    sea preds_rf = lista_mapear(split["X_test"], funcion(x) { retornar random_forest_predecir(rf, x) })
+    sea acc_rf = ml_precision(Y_test_flat, preds_rf)
+    mostrar("✓ Random Forest — Precisión: " + a_texto(numero_decimales(acc_rf * 100, 2)) + "%")
+
+    // ── Reporte de clasificación ──────────────────────────────────────────────
+
+    mostrar("\n--- Reporte de Clasificación (Random Forest) ---")
+    sea reporte = reporte_clasificacion(Y_test_flat, preds_rf, [0, 1, 2])
+    sea clases_nombres = ["Setosa", "Versicolor", "Virginica"]
+    sea ci = 0
+    para clase en [0, 1, 2] {
+        sea r = reporte[a_texto(clase)]
+        mostrar("  " + clases_nombres[ci] + ":")
+        mostrar("    Precisión: " + a_texto(numero_decimales(r["precision"] * 100, 1)) + "%")
+        mostrar("    Recall:    " + a_texto(numero_decimales(r["recall"] * 100, 1)) + "%")
+        mostrar("    F1-Score:  " + a_texto(numero_decimales(r["f1"] * 100, 1)) + "%")
+        ci = ci + 1
+    }
+
+    // ── DataFrame análisis ────────────────────────────────────────────────────
+
+    mostrar("\n--- Análisis estadístico (primeras 20 muestras) ---")
+    sea df = df_desde_lista_mapas(lista_mapear(
+        subarray(dataset["X"], 0, 20),
+        funcion(fila) {
+            retornar {
+                "sepal_len": fila[0],
+                "sepal_w": fila[1],
+                "petal_len": fila[2],
+                "petal_w": fila[3]
+            }
+        }
+    ))
+    sea stats = df_describe(df)
+    para col en ["sepal_len", "petal_len"] {
+        mostrar("  " + col + " — media: " + a_texto(numero_decimales(stats[col]["mean"], 3)) +
+               " | std: " + a_texto(numero_decimales(stats[col]["std"], 3)) +
+               " | [" + a_texto(numero_decimales(stats[col]["min"], 2)) + ", " + a_texto(numero_decimales(stats[col]["max"], 2)) + "]")
+    }
+
+    mostrar("\n╔══════════════════════════════════════════════╗")
+    mostrar("║  RESUMEN DE MODELOS                          ║")
+    mostrar("╠══════════════════════════════════════════════╣")
+    mostrar("║  Red Neuronal:     " + a_texto(numero_decimales(acc_nn * 100, 1)) + "%                          ║")
+    mostrar("║  Árbol Decisión:   " + a_texto(numero_decimales(acc_tree * 100, 1)) + "%                          ║")
+    mostrar("║  Random Forest:    " + a_texto(numero_decimales(acc_rf * 100, 1)) + "%                          ║")
+    mostrar("╚══════════════════════════════════════════════╝")
+    mostrar("\n✅ Pipeline ML completado con C-Forge")
+}
+
+main()

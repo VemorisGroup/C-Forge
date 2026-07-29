@@ -1,4 +1,4 @@
-name: CI — C-Forge v2.5.1
+name: CI — C-Forge v3.0.0
 
 on:
   push:

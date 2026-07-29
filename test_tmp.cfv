@@ -1,0 +1,7 @@
+importar "stdlib/colecciones.cfv"
+importar "stdlib/aleatorio.cfv"
+importar "stdlib/fecha.cfv"
+importar "stdlib/base64.cfv"
+importar "stdlib/json.cfv"
+importar "stdlib/regex.cfv"
+mostrar("imports ok")

@@ -1,0 +1,4 @@
+sea x: numero = 48
+sea y: numero = 18
+y = x - 5
+mostrar(a_texto(y))

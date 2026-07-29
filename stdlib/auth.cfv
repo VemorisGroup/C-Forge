@@ -1,0 +1,302 @@
+// stdlib/auth.cfv — Autenticación y autorización empresarial
+// C-Forge Standard Library v3.0
+
+importar "crypto"
+importar "fecha"
+
+// ── JWT HS256 ──────────────────────────────────────────────────────────────────
+
+/// @doc Crear token JWT con payload y secreto
+funcion jwt_crear(payload, secreto, expiracion_seg) {
+    sea header = json_texto({"alg": "HS256", "typ": "JWT"})
+    sea header_b64 = base64_url(header)
+    sea exp = tiempo_segundos() + (expiracion_seg ?? 3600)
+    sea p2 = {}
+    para k en mapa_claves(payload) { p2[k] = payload[k] }
+    p2["exp"] = exp
+    p2["iat"] = tiempo_segundos()
+    sea payload_b64 = base64_url(json_texto(p2))
+    sea firma_entrada = header_b64 + "." + payload_b64
+    sea firma = hmac_sha256(secreto, firma_entrada)
+    retornar firma_entrada + "." + base64_url(firma)
+}
+
+/// @doc Verificar y decodificar token JWT
+funcion jwt_verificar(token, secreto) {
+    sea partes = texto_dividir(token, ".")
+    si (longitud(partes) != 3) { lanzar "JWT inválido: formato incorrecto" }
+    sea header_b64 = partes[0]
+    sea payload_b64 = partes[1]
+    sea firma_recibida = partes[2]
+    sea firma_esperada = base64_url(hmac_sha256(secreto, header_b64 + "." + payload_b64))
+    si (firma_recibida != firma_esperada) { lanzar "JWT inválido: firma incorrecta" }
+    sea payload_str = base64_url_decode(payload_b64)
+    sea payload = json_parsear(payload_str)
+    si (tiene_clave(payload, "exp") y payload["exp"] < tiempo_segundos()) {
+        lanzar "JWT expirado"
+    }
+    retornar payload
+}
+
+/// @doc Decodificar JWT sin verificar (para inspección)
+funcion jwt_decodificar(token) {
+    sea partes = texto_dividir(token, ".")
+    si (longitud(partes) < 2) { lanzar "JWT inválido" }
+    retornar json_parsear(base64_url_decode(partes[1]))
+}
+
+// ── Base64 URL (RFC 4648) ──────────────────────────────────────────────────────
+
+funcion base64_url(s) {
+    sea chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    sea resultado = ""
+    sea i = 0
+    mientras (i < longitud(s)) {
+        sea b0 = codigo_char(s[i])
+        sea b1 = i + 1 < longitud(s) ? codigo_char(s[i+1]) : 0
+        sea b2 = i + 2 < longitud(s) ? codigo_char(s[i+2]) : 0
+        resultado = resultado + chars[piso(b0 / 4)]
+        resultado = resultado + chars[((b0 % 4) * 16) + piso(b1 / 16)]
+        resultado = resultado + (i + 1 < longitud(s) ? chars[((b1 % 16) * 4) + piso(b2 / 64)] : "=")
+        resultado = resultado + (i + 2 < longitud(s) ? chars[b2 % 64] : "=")
+        i = i + 3
+    }
+    // URL-safe: replace + → - and / → _ and remove =
+    resultado = texto_reemplazar(resultado, "+", "-")
+    resultado = texto_reemplazar(resultado, "/", "_")
+    resultado = texto_reemplazar(resultado, "=", "")
+    retornar resultado
+}
+
+funcion base64_url_decode(s) {
+    // Add padding back
+    sea pad = longitud(s) % 4
+    si (pad == 2) { s = s + "==" }
+    si (pad == 3) { s = s + "=" }
+    s = texto_reemplazar(s, "-", "+")
+    s = texto_reemplazar(s, "_", "/")
+    sea chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    sea resultado = ""
+    sea i = 0
+    mientras (i < longitud(s)) {
+        sea c0 = texto_buscar(chars, s[i])
+        sea c1 = i+1 < longitud(s) ? texto_buscar(chars, s[i+1]) : 0
+        sea c2 = i+2 < longitud(s) ? texto_buscar(chars, s[i+2]) : 0
+        sea c3 = i+3 < longitud(s) ? texto_buscar(chars, s[i+3]) : 0
+        resultado = resultado + char_de(c0 * 4 + piso(c1 / 16))
+        si (s[i+2] != "=") { resultado = resultado + char_de((c1 % 16) * 16 + piso(c2 / 4)) }
+        si (i+3 < longitud(s) y s[i+3] != "=") { resultado = resultado + char_de((c2 % 4) * 64 + c3) }
+        i = i + 4
+    }
+    retornar resultado
+}
+
+// ── Sesiones ───────────────────────────────────────────────────────────────────
+
+sea _sesiones = {}
+
+/// @doc Crear nueva sesión de usuario
+funcion sesion_crear(usuario_id, datos) {
+    sea token = sha256(a_texto(usuario_id) + a_texto(tiempo_ms()) + a_texto(aleatorio()))
+    _sesiones[token] = {
+        "usuario_id": usuario_id,
+        "datos": datos ?? {},
+        "creada": tiempo_segundos(),
+        "ultima_actividad": tiempo_segundos(),
+        "activa": verdadero
+    }
+    retornar token
+}
+
+/// @doc Obtener datos de sesión
+funcion sesion_obtener(token) {
+    si (no tiene_clave(_sesiones, token)) { lanzar "Sesión no encontrada" }
+    sea sesion = _sesiones[token]
+    si (no sesion["activa"]) { lanzar "Sesión inactiva" }
+    _sesiones[token]["ultima_actividad"] = tiempo_segundos()
+    retornar sesion
+}
+
+/// @doc Cerrar sesión
+funcion sesion_cerrar(token) {
+    si (tiene_clave(_sesiones, token)) {
+        _sesiones[token]["activa"] = falso
+    }
+}
+
+/// @doc Limpiar sesiones expiradas
+funcion sesion_limpiar(max_inactividad_seg) {
+    sea limite = tiempo_segundos() - (max_inactividad_seg ?? 3600)
+    sea tokens_a_eliminar = []
+    para t en mapa_claves(_sesiones) {
+        si (_sesiones[t]["ultima_actividad"] < limite) {
+            agregar(tokens_a_eliminar, t)
+        }
+    }
+    para t en tokens_a_eliminar { eliminar_clave(_sesiones, t) }
+    retornar longitud(tokens_a_eliminar)
+}
+
+// ── RBAC (Role-Based Access Control) ──────────────────────────────────────────
+
+sea _roles = {}
+sea _permisos_rol = {}
+sea _usuarios_roles = {}
+
+/// @doc Definir rol con sus permisos
+funcion rbac_definir_rol(rol, permisos) {
+    _roles[rol] = verdadero
+    _permisos_rol[rol] = permisos
+}
+
+/// @doc Asignar rol a usuario
+funcion rbac_asignar_rol(usuario_id, rol) {
+    sea uid = a_texto(usuario_id)
+    si (no tiene_clave(_usuarios_roles, uid)) { _usuarios_roles[uid] = [] }
+    si (no lista_contiene(_usuarios_roles[uid], rol)) {
+        agregar(_usuarios_roles[uid], rol)
+    }
+}
+
+/// @doc Verificar si usuario tiene permiso
+funcion rbac_tiene_permiso(usuario_id, permiso) {
+    sea uid = a_texto(usuario_id)
+    si (no tiene_clave(_usuarios_roles, uid)) { retornar falso }
+    para rol en _usuarios_roles[uid] {
+        si (tiene_clave(_permisos_rol, rol)) {
+            para p en _permisos_rol[rol] {
+                si (p == permiso o p == "*") { retornar verdadero }
+            }
+        }
+    }
+    retornar falso
+}
+
+/// @doc Requerir permiso — lanza error si no tiene acceso
+funcion rbac_requerir(usuario_id, permiso) {
+    si (no rbac_tiene_permiso(usuario_id, permiso)) {
+        lanzar "Acceso denegado: se requiere permiso '" + permiso + "'"
+    }
+}
+
+/// @doc Obtener roles de usuario
+funcion rbac_roles_usuario(usuario_id) {
+    sea uid = a_texto(usuario_id)
+    retornar _usuarios_roles[uid] ?? []
+}
+
+// ── Hash de contraseñas ────────────────────────────────────────────────────────
+
+/// @doc Hash seguro de contraseña (PBKDF2-like con SHA256)
+funcion password_hash(password) {
+    sea salt = sha256(a_texto(tiempo_ms()) + a_texto(aleatorio()))
+    sea hash = sha256(salt + password)
+    retornar salt + ":" + hash
+}
+
+/// @doc Verificar contraseña contra hash
+funcion password_verificar(password, hash_guardado) {
+    sea partes = texto_dividir(hash_guardado, ":")
+    si (longitud(partes) != 2) { retornar falso }
+    sea salt = partes[0]
+    sea hash_esperado = partes[1]
+    sea hash_calculado = sha256(salt + password)
+    retornar hash_calculado == hash_esperado
+}
+
+// ── OAuth2 simplificado ───────────────────────────────────────────────────────
+
+/// @doc Generar URL de autorización OAuth2
+funcion oauth2_auth_url(config) {
+    sea base = config["auth_url"]
+    sea params = "response_type=code"
+        + "&client_id=" + config["client_id"]
+        + "&redirect_uri=" + config["redirect_uri"]
+        + "&scope=" + texto_reemplazar(config["scope"] ?? "openid profile email", " ", "%20")
+        + "&state=" + sha256(a_texto(tiempo_ms()))
+    retornar base + "?" + params
+}
+
+/// @doc Intercambiar código por tokens OAuth2
+funcion oauth2_intercambiar(config, codigo) {
+    sea body = "grant_type=authorization_code"
+        + "&code=" + codigo
+        + "&redirect_uri=" + config["redirect_uri"]
+        + "&client_id=" + config["client_id"]
+        + "&client_secret=" + config["client_secret"]
+    sea respuesta = http_post(config["token_url"], body, {
+        "Content-Type": "application/x-www-form-urlencoded"
+    })
+    retornar json_parsear(respuesta["cuerpo"])
+}
+
+/// @doc Refrescar token de acceso
+funcion oauth2_refrescar(config, refresh_token) {
+    sea body = "grant_type=refresh_token"
+        + "&refresh_token=" + refresh_token
+        + "&client_id=" + config["client_id"]
+        + "&client_secret=" + config["client_secret"]
+    sea respuesta = http_post(config["token_url"], body, {
+        "Content-Type": "application/x-www-form-urlencoded"
+    })
+    retornar json_parsear(respuesta["cuerpo"])
+}
+
+// ── Rate limiting ──────────────────────────────────────────────────────────────
+
+sea _rate_buckets = {}
+
+/// @doc Verificar rate limit por clave (IP, usuario, etc.)
+funcion rate_limit(clave, max_solicitudes, ventana_seg) {
+    sea ahora = tiempo_segundos()
+    sea bucket_key = a_texto(clave)
+    si (no tiene_clave(_rate_buckets, bucket_key)) {
+        _rate_buckets[bucket_key] = {"conteo": 0, "inicio": ahora}
+    }
+    sea bucket = _rate_buckets[bucket_key]
+    si (ahora - bucket["inicio"] > ventana_seg) {
+        _rate_buckets[bucket_key] = {"conteo": 1, "inicio": ahora}
+        retornar {"permitido": verdadero, "restantes": max_solicitudes - 1}
+    }
+    si (bucket["conteo"] >= max_solicitudes) {
+        sea reset_en = bucket["inicio"] + ventana_seg - ahora
+        retornar {"permitido": falso, "restantes": 0, "reset_en": reset_en}
+    }
+    _rate_buckets[bucket_key]["conteo"] = bucket["conteo"] + 1
+    retornar {"permitido": verdadero, "restantes": max_solicitudes - bucket["conteo"] - 1}
+}
+
+/// @doc Middleware de rate limit — lanza error si excede límite
+funcion rate_limit_requerir(clave, max_solicitudes, ventana_seg) {
+    sea resultado = rate_limit(clave, max_solicitudes, ventana_seg)
+    si (no resultado["permitido"]) {
+        lanzar "Rate limit excedido. Reintentar en " + a_texto(resultado["reset_en"]) + " segundos"
+    }
+}
+
+// ── Utilidades ────────────────────────────────────────────────────────────────
+
+/// @doc Generar token aleatorio seguro (hex)
+funcion generar_token(longitud_bytes) {
+    sea bytes = longitud_bytes ?? 32
+    sea resultado = ""
+    sea i = 0
+    mientras (i < bytes) {
+        sea b = piso(aleatorio() * 256)
+        sea hex = numero_a_base(b, 16)
+        si (longitud(hex) < 2) { hex = "0" + hex }
+        resultado = resultado + hex
+        i = i + 1
+    }
+    retornar resultado
+}
+
+/// @doc Sanitizar input para prevenir inyecciones
+funcion sanitizar_input(s) {
+    s = texto_reemplazar(s, "<", "&lt;")
+    s = texto_reemplazar(s, ">", "&gt;")
+    s = texto_reemplazar(s, "\"", "&quot;")
+    s = texto_reemplazar(s, "'", "&#x27;")
+    s = texto_reemplazar(s, "&", "&amp;")
+    retornar s
+}

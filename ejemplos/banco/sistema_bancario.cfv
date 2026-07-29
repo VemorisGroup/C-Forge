@@ -1,0 +1,380 @@
+// ejemplos/banco/sistema_bancario.cfv
+// Sistema bancario completo con C-Forge v3.0
+// Demuestra: clases, interfaces, tipos, transacciones, auditoría
+
+// ── Interfaces ─────────────────────────────────────────────────────────────────
+
+interfaz ICuenta {
+    depositar(monto)
+    retirar(monto)
+    saldo()
+    numero_cuenta()
+}
+
+interfaz ITransaccion {
+    ejecutar()
+    revertir()
+    estado()
+}
+
+// ── Clases base ────────────────────────────────────────────────────────────────
+
+abstracto clase CuentaBase implementa ICuenta {
+    constructor(numero, titular, saldo_inicial) {
+        este.numero = numero
+        este.titular = titular
+        este._saldo = saldo_inicial ?? 0
+        este.movimientos = []
+        este.activa = verdadero
+        este.creada = fecha_actual()
+    }
+
+    funcion saldo() { retornar este._saldo }
+    funcion numero_cuenta() { retornar este.numero }
+
+    funcion _registrar_movimiento(tipo, monto, descripcion) {
+        agregar(este.movimientos, {
+            "tipo": tipo,
+            "monto": monto,
+            "descripcion": descripcion,
+            "fecha": fecha_actual(),
+            "saldo_tras": este._saldo
+        })
+    }
+
+    funcion historial(n) {
+        sea hist = este.movimientos
+        retornar si(n != nulo, subarray(hist, maximo(0, longitud(hist)-n), longitud(hist)), hist)
+    }
+
+    funcion a_texto() {
+        retornar "[" + este.tipo_cuenta() + "] " + este.numero + " — " + este.titular + " — $" + a_texto(numero_decimales(este._saldo, 2))
+    }
+}
+
+// ── Cuenta corriente ───────────────────────────────────────────────────────────
+
+clase CuentaCorriente extiende CuentaBase {
+    constructor(numero, titular, saldo_inicial, limite_sobregiro) {
+        super(numero, titular, saldo_inicial)
+        este.limite_sobregiro = limite_sobregiro ?? 500
+        este.comision_mensual = 5.0
+    }
+
+    funcion tipo_cuenta() { retornar "Corriente" }
+
+    funcion depositar(monto) {
+        si (monto <= 0) { lanzar "Monto debe ser positivo" }
+        este._saldo = este._saldo + monto
+        este._registrar_movimiento("deposito", monto, "Depósito")
+        retornar este._saldo
+    }
+
+    funcion retirar(monto) {
+        si (monto <= 0) { lanzar "Monto debe ser positivo" }
+        si (este._saldo - monto < -este.limite_sobregiro) {
+            lanzar "Límite de sobregiro excedido. Disponible: $" + a_texto(este._saldo + este.limite_sobregiro)
+        }
+        este._saldo = este._saldo - monto
+        este._registrar_movimiento("retiro", monto, "Retiro")
+        retornar este._saldo
+    }
+
+    funcion cobrar_comision() {
+        si (este._saldo >= este.comision_mensual) {
+            este._saldo = este._saldo - este.comision_mensual
+            este._registrar_movimiento("comision", este.comision_mensual, "Comisión mensual")
+        }
+    }
+}
+
+// ── Cuenta de ahorros ─────────────────────────────────────────────────────────
+
+clase CuentaAhorros extiende CuentaBase {
+    constructor(numero, titular, saldo_inicial, tasa_interes) {
+        super(numero, titular, saldo_inicial)
+        este.tasa_interes = tasa_interes ?? 0.035  // 3.5% anual
+        este.retiros_mes = 0
+        este.limite_retiros_mes = 6
+    }
+
+    funcion tipo_cuenta() { retornar "Ahorros" }
+
+    funcion depositar(monto) {
+        si (monto <= 0) { lanzar "Monto debe ser positivo" }
+        este._saldo = este._saldo + monto
+        este._registrar_movimiento("deposito", monto, "Depósito")
+        retornar este._saldo
+    }
+
+    funcion retirar(monto) {
+        si (monto <= 0) { lanzar "Monto debe ser positivo" }
+        si (este.retiros_mes >= este.limite_retiros_mes) {
+            lanzar "Límite de retiros mensuales alcanzado (" + a_texto(este.limite_retiros_mes) + ")"
+        }
+        si (monto > este._saldo) {
+            lanzar "Saldo insuficiente. Disponible: $" + a_texto(numero_decimales(este._saldo, 2))
+        }
+        este._saldo = este._saldo - monto
+        este.retiros_mes = este.retiros_mes + 1
+        este._registrar_movimiento("retiro", monto, "Retiro " + a_texto(este.retiros_mes) + "/" + a_texto(este.limite_retiros_mes))
+        retornar este._saldo
+    }
+
+    funcion acreditar_intereses() {
+        sea interes = este._saldo * (este.tasa_interes / 12)
+        este._saldo = este._saldo + interes
+        este._registrar_movimiento("interes", interes, "Intereses del mes")
+        retornar interes
+    }
+}
+
+// ── Cuenta inversión ──────────────────────────────────────────────────────────
+
+clase CuentaInversion extiende CuentaBase {
+    constructor(numero, titular, saldo_inicial) {
+        super(numero, titular, saldo_inicial)
+        este.portafolio = {}
+        este.rendimiento_total = 0
+    }
+
+    funcion tipo_cuenta() { retornar "Inversión" }
+
+    funcion depositar(monto) {
+        si (monto < 100) { lanzar "Depósito mínimo $100 para cuenta de inversión" }
+        este._saldo = este._saldo + monto
+        este._registrar_movimiento("deposito", monto, "Depósito para inversión")
+        retornar este._saldo
+    }
+
+    funcion retirar(monto) {
+        si (monto > este._saldo) { lanzar "Saldo insuficiente" }
+        este._saldo = este._saldo - monto
+        este._registrar_movimiento("retiro", monto, "Retiro de inversión")
+        retornar este._saldo
+    }
+
+    funcion invertir(instrumento, monto, precio) {
+        si (monto > este._saldo) { lanzar "Saldo insuficiente para invertir" }
+        sea unidades = monto / precio
+        este._saldo = este._saldo - monto
+        si (no tiene_clave(este.portafolio, instrumento)) {
+            este.portafolio[instrumento] = {"unidades": 0, "precio_promedio": 0}
+        }
+        sea pos = este.portafolio[instrumento]
+        sea total_unidades = pos["unidades"] + unidades
+        pos["precio_promedio"] = (pos["unidades"] * pos["precio_promedio"] + monto) / total_unidades
+        pos["unidades"] = total_unidades
+        este._registrar_movimiento("inversion", monto, "Compra " + instrumento + " x" + a_texto(numero_decimales(unidades, 4)))
+        retornar pos
+    }
+
+    funcion valor_portafolio(precios_actuales) {
+        sea total = este._saldo
+        para instrumento en mapa_claves(este.portafolio) {
+            sea precio = precios_actuales[instrumento] ?? este.portafolio[instrumento]["precio_promedio"]
+            total = total + este.portafolio[instrumento]["unidades"] * precio
+        }
+        retornar total
+    }
+}
+
+// ── Transferencia (Saga) ──────────────────────────────────────────────────────
+
+clase Transferencia implementa ITransaccion {
+    constructor(origen, destino, monto, descripcion) {
+        este.origen = origen
+        este.destino = destino
+        este.monto = monto
+        este.descripcion = descripcion ?? "Transferencia"
+        este._estado = "pendiente"
+        este.id = "TRF-" + a_texto(aleatorio_entero(100000, 999999))
+        este.fecha = fecha_actual()
+    }
+
+    funcion estado() { retornar este._estado }
+
+    funcion ejecutar() {
+        intentar {
+            este.origen.retirar(este.monto)
+            intentar {
+                este.destino.depositar(este.monto)
+                este._estado = "completada"
+                mostrar("✓ Transferencia " + este.id + ": $" + a_texto(numero_decimales(este.monto, 2)) +
+                       " de " + este.origen.numero_cuenta() + " a " + este.destino.numero_cuenta())
+            } capturar(e) {
+                // Compensar: devolver a origen
+                este.origen.depositar(este.monto)
+                este._estado = "fallida"
+                lanzar "Error al acreditar: " + e
+            }
+        } capturar(e) {
+            este._estado = "fallida"
+            lanzar "Error en transferencia: " + e
+        }
+    }
+
+    funcion revertir() {
+        si (este._estado != "completada") { retornar }
+        este.destino.retirar(este.monto)
+        este.origen.depositar(este.monto)
+        este._estado = "revertida"
+        mostrar("↩ Transferencia " + este.id + " revertida")
+    }
+}
+
+// ── Banco ─────────────────────────────────────────────────────────────────────
+
+clase Banco {
+    constructor(nombre) {
+        este.nombre = nombre
+        este.cuentas = {}
+        este.transacciones = []
+        este.log_auditoria = []
+        este._siguiente_numero = 1000000
+    }
+
+    funcion _numero_nuevo(prefijo) {
+        este._siguiente_numero = este._siguiente_numero + 1
+        retornar (prefijo ?? "CC") + a_texto(este._siguiente_numero)
+    }
+
+    funcion abrir_cuenta_corriente(titular, deposito_inicial, limite_sobregiro) {
+        sea numero = este._numero_nuevo("CC")
+        sea cuenta = CuentaCorriente(numero, titular, deposito_inicial ?? 0, limite_sobregiro)
+        este.cuentas[numero] = cuenta
+        este._auditar("APERTURA_CUENTA", {"tipo": "corriente", "numero": numero, "titular": titular})
+        mostrar("✓ Cuenta corriente abierta: " + numero + " para " + titular)
+        retornar cuenta
+    }
+
+    funcion abrir_cuenta_ahorros(titular, deposito_inicial, tasa) {
+        sea numero = este._numero_nuevo("CA")
+        sea cuenta = CuentaAhorros(numero, titular, deposito_inicial ?? 0, tasa)
+        este.cuentas[numero] = cuenta
+        este._auditar("APERTURA_CUENTA", {"tipo": "ahorros", "numero": numero, "titular": titular})
+        mostrar("✓ Cuenta de ahorros abierta: " + numero + " para " + titular)
+        retornar cuenta
+    }
+
+    funcion abrir_cuenta_inversion(titular, deposito_inicial) {
+        sea numero = este._numero_nuevo("CI")
+        sea cuenta = CuentaInversion(numero, titular, deposito_inicial ?? 0)
+        este.cuentas[numero] = cuenta
+        este._auditar("APERTURA_CUENTA", {"tipo": "inversion", "numero": numero, "titular": titular})
+        mostrar("✓ Cuenta de inversión abierta: " + numero + " para " + titular)
+        retornar cuenta
+    }
+
+    funcion transferir(num_origen, num_destino, monto, descripcion) {
+        sea origen = este.cuentas[num_origen]
+        sea destino = este.cuentas[num_destino]
+        si (origen == nulo) { lanzar "Cuenta origen no encontrada: " + num_origen }
+        si (destino == nulo) { lanzar "Cuenta destino no encontrada: " + num_destino }
+        sea trx = Transferencia(origen, destino, monto, descripcion)
+        trx.ejecutar()
+        agregar(este.transacciones, trx)
+        este._auditar("TRANSFERENCIA", {"id": trx.id, "monto": monto, "origen": num_origen, "destino": num_destino})
+        retornar trx
+    }
+
+    funcion obtener_cuenta(numero) {
+        retornar este.cuentas[numero] ?? nulo
+    }
+
+    funcion _auditar(evento, datos) {
+        agregar(este.log_auditoria, {
+            "evento": evento,
+            "datos": datos,
+            "timestamp": reloj_ms()
+        })
+    }
+
+    funcion reporte_general() {
+        mostrar("\n═══════════════════════════════════════")
+        mostrar("  REPORTE GENERAL — " + este.nombre)
+        mostrar("═══════════════════════════════════════")
+        sea total_depositos = 0
+        para num en mapa_claves(este.cuentas) {
+            sea c = este.cuentas[num]
+            mostrar(c.a_texto())
+            total_depositos = total_depositos + c.saldo()
+        }
+        mostrar("───────────────────────────────────────")
+        mostrar("Total en custodia: $" + a_texto(numero_decimales(total_depositos, 2)))
+        mostrar("Transacciones: " + a_texto(longitud(este.transacciones)))
+        mostrar("═══════════════════════════════════════\n")
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DEMO DEL SISTEMA BANCARIO
+// ══════════════════════════════════════════════════════════════════════════════
+
+funcion demo_banco() {
+    mostrar("\n╔══════════════════════════════════════════╗")
+    mostrar("║   SISTEMA BANCARIO C-FORGE v3.0          ║")
+    mostrar("╚══════════════════════════════════════════╝\n")
+
+    sea banco = Banco("Banco CForge Internacional")
+
+    // Abrir cuentas
+    sea c_juan = banco.abrir_cuenta_corriente("Juan García", 1000, 500)
+    sea c_maria = banco.abrir_cuenta_ahorros("María López", 5000, 0.04)
+    sea c_carlos = banco.abrir_cuenta_inversion("Carlos Ruiz", 10000)
+
+    mostrar("")
+
+    // Operaciones
+    c_juan.depositar(500)
+    c_maria.depositar(2000)
+
+    intentar {
+        c_juan.retirar(200)
+        mostrar("✓ Retiro $200 de " + c_juan.numero_cuenta())
+    } capturar(e) {
+        mostrar("✗ Error retiro: " + e)
+    }
+
+    // Intereses
+    sea intereses = c_maria.acreditar_intereses()
+    mostrar("✓ Intereses acreditados: $" + a_texto(numero_decimales(intereses, 2)))
+
+    // Inversión
+    c_carlos.invertir("AAPL", 2000, 185.50)
+    c_carlos.invertir("BTC", 3000, 65000)
+
+    sea precios_actuales = {"AAPL": 192.50, "BTC": 68000}
+    sea valor_total = c_carlos.valor_portafolio(precios_actuales)
+    mostrar("✓ Valor portafolio: $" + a_texto(numero_decimales(valor_total, 2)))
+
+    // Transferencias
+    mostrar("\n--- Transferencias ---")
+    intentar {
+        banco.transferir(c_juan.numero_cuenta(), c_maria.numero_cuenta(), 300, "Pago renta")
+    } capturar(e) {
+        mostrar("✗ Error: " + e)
+    }
+
+    intentar {
+        banco.transferir(c_juan.numero_cuenta(), c_maria.numero_cuenta(), 50000, "Monto imposible")
+    } capturar(e) {
+        mostrar("✗ Correcto rechazo: " + e)
+    }
+
+    // Comisiones
+    c_juan.cobrar_comision()
+
+    // Reporte
+    banco.reporte_general()
+
+    // Historial de movimientos
+    mostrar("Historial de " + c_maria.numero_cuenta() + " (últimos 5):")
+    para mov en c_maria.historial(5) {
+        mostrar("  " + mov["tipo"] + " $" + a_texto(numero_decimales(mov["monto"], 2)) + " → Saldo: $" + a_texto(numero_decimales(mov["saldo_tras"], 2)))
+    }
+
+    mostrar("\n✅ Sistema bancario funcionando correctamente")
+}
+
+demo_banco()

@@ -1,0 +1,256 @@
+// stdlib/input.cfv — Sistema de entrada para videojuegos
+// C-Forge Standard Library v3.0
+
+// ── Estado del teclado ─────────────────────────────────────────────────────────
+
+sea _teclas_presionadas = {}
+sea _teclas_anterior = {}
+sea _teclas_mapeadas = {}
+
+/// @doc Actualizar estado de teclas (llamar cada frame antes de lógica)
+funcion input_actualizar() {
+    _teclas_anterior = {}
+    para k en mapa_claves(_teclas_presionadas) {
+        _teclas_anterior[k] = _teclas_presionadas[k]
+    }
+}
+
+/// @doc Registrar tecla presionada (desde evento del sistema)
+funcion input_tecla_presionar(codigo) {
+    _teclas_presionadas[codigo] = verdadero
+}
+
+/// @doc Registrar tecla soltada
+funcion input_tecla_soltar(codigo) {
+    _teclas_presionadas[codigo] = falso
+}
+
+/// @doc Tecla está presionada este frame
+funcion input_presionada(codigo) {
+    retornar _teclas_presionadas[codigo] ?? falso
+}
+
+/// @doc Tecla acaba de presionarse (solo este frame)
+funcion input_recien_presionada(codigo) {
+    retornar (_teclas_presionadas[codigo] ?? falso) y no (_teclas_anterior[codigo] ?? falso)
+}
+
+/// @doc Tecla acaba de soltarse
+funcion input_recien_soltada(codigo) {
+    retornar no (_teclas_presionadas[codigo] ?? falso) y (_teclas_anterior[codigo] ?? falso)
+}
+
+// ── Mapeo de acciones ──────────────────────────────────────────────────────────
+
+/// @doc Mapear acción a tecla(s)
+funcion input_mapear(accion, teclas) {
+    _teclas_mapeadas[accion] = si(tipo(teclas) == "texto", [teclas], teclas)
+}
+
+/// @doc Verificar si acción está activa
+funcion input_accion(accion) {
+    si (no tiene_clave(_teclas_mapeadas, accion)) { retornar falso }
+    para tecla en _teclas_mapeadas[accion] {
+        si (input_presionada(tecla)) { retornar verdadero }
+    }
+    retornar falso
+}
+
+/// @doc Acción recién iniciada
+funcion input_accion_inicio(accion) {
+    si (no tiene_clave(_teclas_mapeadas, accion)) { retornar falso }
+    para tecla en _teclas_mapeadas[accion] {
+        si (input_recien_presionada(tecla)) { retornar verdadero }
+    }
+    retornar falso
+}
+
+/// @doc Acción recién terminada
+funcion input_accion_fin(accion) {
+    si (no tiene_clave(_teclas_mapeadas, accion)) { retornar falso }
+    para tecla en _teclas_mapeadas[accion] {
+        si (input_recien_soltada(tecla)) { retornar verdadero }
+    }
+    retornar falso
+}
+
+// ── Eje de movimiento (retorna -1, 0, 1) ──────────────────────────────────────
+
+/// @doc Eje horizontal (izquierda/derecha)
+funcion input_eje_x() {
+    sea val = 0
+    si (input_presionada("ArrowRight") o input_presionada("KeyD")) { val = val + 1 }
+    si (input_presionada("ArrowLeft") o input_presionada("KeyA")) { val = val - 1 }
+    retornar val
+}
+
+/// @doc Eje vertical (arriba/abajo)
+funcion input_eje_y() {
+    sea val = 0
+    si (input_presionada("ArrowDown") o input_presionada("KeyS")) { val = val + 1 }
+    si (input_presionada("ArrowUp") o input_presionada("KeyW")) { val = val - 1 }
+    retornar val
+}
+
+/// @doc Vector de movimiento normalizado
+funcion input_movimiento() {
+    sea x = input_eje_x()
+    sea y = input_eje_y()
+    si (x != 0 y y != 0) {
+        sea mag = raiz(2) / 2
+        retornar {"x": x * mag, "y": y * mag}
+    }
+    retornar {"x": x, "y": y}
+}
+
+// ── Ratón ──────────────────────────────────────────────────────────────────────
+
+sea _raton = {
+    "x": 0, "y": 0,
+    "dx": 0, "dy": 0,
+    "rueda": 0,
+    "botones": {},
+    "botones_anterior": {}
+}
+
+funcion input_raton_mover(x, y) {
+    _raton["dx"] = x - _raton["x"]
+    _raton["dy"] = y - _raton["y"]
+    _raton["x"] = x
+    _raton["y"] = y
+}
+
+funcion input_raton_boton_presionar(boton) { _raton["botones"][a_texto(boton)] = verdadero }
+funcion input_raton_boton_soltar(boton) { _raton["botones"][a_texto(boton)] = falso }
+funcion input_raton_rueda(delta) { _raton["rueda"] = delta }
+
+funcion input_raton_x() { retornar _raton["x"] }
+funcion input_raton_y() { retornar _raton["y"] }
+funcion input_raton_dx() { retornar _raton["dx"] }
+funcion input_raton_dy() { retornar _raton["dy"] }
+funcion input_raton_rueda_delta() { retornar _raton["rueda"] }
+
+funcion input_click_izquierdo() { retornar _raton["botones"]["0"] ?? falso }
+funcion input_click_derecho() { retornar _raton["botones"]["2"] ?? falso }
+funcion input_click_medio() { retornar _raton["botones"]["1"] ?? falso }
+
+funcion input_raton_actualizar() {
+    _raton["dx"] = 0
+    _raton["dy"] = 0
+    _raton["rueda"] = 0
+    _raton["botones_anterior"] = {}
+    para k en mapa_claves(_raton["botones"]) {
+        _raton["botones_anterior"][k] = _raton["botones"][k]
+    }
+}
+
+// ── Gamepad ────────────────────────────────────────────────────────────────────
+
+sea _gamepads = {}
+
+funcion input_gamepad_conectar(id, estado) {
+    _gamepads[a_texto(id)] = {
+        "id": id,
+        "conectado": verdadero,
+        "botones": estado["botones"] ?? [],
+        "ejes": estado["ejes"] ?? [0, 0, 0, 0],
+        "nombre": estado["nombre"] ?? "Gamepad"
+    }
+}
+
+funcion input_gamepad_desconectar(id) {
+    si (tiene_clave(_gamepads, a_texto(id))) {
+        _gamepads[a_texto(id)]["conectado"] = falso
+    }
+}
+
+funcion input_gamepad_actualizar(id, estado) {
+    sea sid = a_texto(id)
+    si (tiene_clave(_gamepads, sid)) {
+        _gamepads[sid]["botones"] = estado["botones"] ?? []
+        _gamepads[sid]["ejes"] = estado["ejes"] ?? [0, 0, 0, 0]
+    }
+}
+
+funcion input_gamepad_boton(id, indice) {
+    sea gp = _gamepads[a_texto(id)] ?? nulo
+    si (gp == nulo o no gp["conectado"]) { retornar falso }
+    retornar gp["botones"][indice] ?? falso
+}
+
+funcion input_gamepad_eje(id, indice) {
+    sea gp = _gamepads[a_texto(id)] ?? nulo
+    si (gp == nulo o no gp["conectado"]) { retornar 0 }
+    retornar gp["ejes"][indice] ?? 0
+}
+
+// ── Gestos táctiles ────────────────────────────────────────────────────────────
+
+sea _toques = {}
+
+funcion input_toque_inicio(id, x, y) {
+    _toques[a_texto(id)] = {"id": id, "x": x, "y": y, "inicio_x": x, "inicio_y": y, "activo": verdadero}
+}
+
+funcion input_toque_mover(id, x, y) {
+    sea sid = a_texto(id)
+    si (tiene_clave(_toques, sid)) {
+        _toques[sid]["x"] = x
+        _toques[sid]["y"] = y
+    }
+}
+
+funcion input_toque_fin(id) {
+    sea sid = a_texto(id)
+    si (tiene_clave(_toques, sid)) {
+        _toques[sid]["activo"] = falso
+    }
+}
+
+funcion input_toques_activos() {
+    sea lista = []
+    para sid en mapa_claves(_toques) {
+        si (_toques[sid]["activo"]) { agregar(lista, _toques[sid]) }
+    }
+    retornar lista
+}
+
+// ── Configuración por defecto ──────────────────────────────────────────────────
+
+funcion input_configurar_juego_plataformas() {
+    input_mapear("mover_izquierda", ["ArrowLeft", "KeyA"])
+    input_mapear("mover_derecha", ["ArrowRight", "KeyD"])
+    input_mapear("saltar", ["Space", "ArrowUp", "KeyW"])
+    input_mapear("agacharse", ["ArrowDown", "KeyS"])
+    input_mapear("atacar", ["KeyZ", "KeyJ"])
+    input_mapear("correr", ["ShiftLeft", "ShiftRight"])
+    input_mapear("pausa", ["Escape", "KeyP"])
+    input_mapear("interactuar", ["KeyE", "KeyF"])
+}
+
+funcion input_configurar_fps() {
+    input_mapear("adelante", ["KeyW", "ArrowUp"])
+    input_mapear("atras", ["KeyS", "ArrowDown"])
+    input_mapear("izquierda", ["KeyA", "ArrowLeft"])
+    input_mapear("derecha", ["KeyD", "ArrowRight"])
+    input_mapear("saltar", ["Space"])
+    input_mapear("agacharse", ["ControlLeft", "KeyC"])
+    input_mapear("correr", ["ShiftLeft"])
+    input_mapear("disparar", ["Mouse0"])
+    input_mapear("apuntar", ["Mouse2"])
+    input_mapear("recargar", ["KeyR"])
+    input_mapear("pausa", ["Escape"])
+}
+
+funcion input_configurar_rts() {
+    input_mapear("seleccionar", ["Mouse0"])
+    input_mapear("orden", ["Mouse2"])
+    input_mapear("cancelar", ["Escape"])
+    input_mapear("pausa", ["Space"])
+    input_mapear("camara_izquierda", ["ArrowLeft", "KeyA"])
+    input_mapear("camara_derecha", ["ArrowRight", "KeyD"])
+    input_mapear("camara_arriba", ["ArrowUp", "KeyW"])
+    input_mapear("camara_abajo", ["ArrowDown", "KeyS"])
+    input_mapear("zoom_in", ["Equal", "NumpadAdd"])
+    input_mapear("zoom_out", ["Minus", "NumpadSubtract"])
+}

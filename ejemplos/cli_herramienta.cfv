@@ -1,0 +1,167 @@
+// ejemplos/cli_herramienta.cfv — Herramienta CLI completa en C-Forge
+// Demuestra: argumentos, colores, tabla, busqueda en archivos, menu
+//
+// Correr: ./cforgev ejemplos/cli_herramienta.cfv [comando] [opciones]
+
+importar "stdlib/cli.cfv"
+importar "stdlib/log.cfv"
+importar "stdlib/archivo.cfv"
+
+// ── Comandos disponibles ──────────────────────────────────────────────────────
+
+funcion cmd_buscar(dir: texto, patron: texto): nulo {
+    cli_info("Buscando '" + patron + "' en " + dir + "...")
+    sea t0 = tiempo_ms()
+    sea resultados = buscar_en_archivos(dir, patron)
+    sea t1 = tiempo_ms()
+    sea dt = t1 - t0
+
+    si (longitud(resultados) == 0) {
+        cli_advertencia("Sin resultados.")
+        retornar nulo
+    }
+
+    cli_tabla(
+        ["Archivo", "Linea", "Contenido"],
+        lista_mapear_display(resultados)
+    )
+    cli_ok("Encontrado en " + longitud(resultados) + " linea(s) en " + formatear_ms(dt))
+}
+
+funcion lista_mapear_display(resultados: lista): lista {
+    sea r = []
+    para item en resultados {
+        sea linea = texto_recortar(item["texto"])
+        si (longitud(linea) > 60) {
+            linea = subcadena(linea, 0, 57) + "..."
+        }
+        agregar(r, [ruta_nombre(item["archivo"]), item["linea"], linea])
+    }
+    retornar r
+}
+
+funcion texto_recortar(t: texto): texto {
+    // Eliminar espacios al inicio
+    sea i = 0
+    mientras (i < longitud(t) y (subcadena(t, i, i+1) == " " o subcadena(t, i, i+1) == "\t")) {
+        i = i + 1
+    }
+    retornar subcadena(t, i, longitud(t))
+}
+
+funcion cmd_info(ruta: texto): nulo {
+    sea info = archivo_info(ruta)
+    si (!info["existe"]) {
+        cli_error("No existe: " + ruta)
+        retornar nulo
+    }
+    cli_tabla(
+        ["Propiedad", "Valor"],
+        [
+            ["Ruta",       info["ruta"]],
+            ["Nombre",     info["nombre"]],
+            ["Extension",  info["extension"]],
+            ["Directorio", info["directorio"]],
+            ["Tipo",       si (info["es_dir"]) { "directorio" } sino { "archivo" }],
+            ["Tamano",     tam_legible(info["tam"])]
+        ]
+    )
+}
+
+funcion cmd_listar(dir: texto, ext: texto): nulo {
+    sea archivos = si (ext != "") {
+        listar_por_extension(dir, ext)
+    } sino {
+        directorio_listar(dir)
+    }
+
+    si (longitud(archivos) == 0) {
+        cli_advertencia("Directorio vacio o no encontrado: " + dir)
+        retornar nulo
+    }
+
+    sea filas = []
+    para a en archivos {
+        sea nombre = ruta_nombre(a)
+        sea es_dir = es_directorio(a)
+        sea icono = si (es_dir) { azul("📁") } sino { "📄" }
+        sea tam_str = si (es_dir) { "-" } sino { tam_legible(archivo_tam(a)) }
+        agregar(filas, [icono + " " + nombre, ruta_extension(a), tam_str])
+    }
+
+    cli_tabla(["Nombre", "Extension", "Tamano"], filas)
+    cli_ok(longitud(archivos) + " elemento(s) en " + dir)
+}
+
+funcion cmd_stats(dir: texto): nulo {
+    sea archivos = directorio_listar_rec(dir)
+    sea total = longitud(archivos)
+    sea extensiones = {}
+    sea tamano_total = 0
+
+    para a en archivos {
+        si (!es_directorio(a)) {
+            sea ext = ruta_extension(a)
+            si (ext == "") { ext = "(sin ext)" }
+            si (tiene_clave(extensiones, ext)) {
+                extensiones[ext] = extensiones[ext] + 1
+            } sino {
+                extensiones[ext] = 1
+            }
+            intentar {
+                tamano_total = tamano_total + archivo_tam(a)
+            } capturar (e) {
+                // omitir
+            }
+        }
+    }
+
+    mostrar("")
+    mostrar(negrita("  Estadisticas de: ") + cian(dir))
+    mostrar("  Total elementos: " + total)
+    mostrar("  Tamano total:    " + tam_legible(tamano_total))
+    mostrar("")
+    mostrar(negrita("  Por extension:"))
+    para kv en mapa_entradas(extensiones) {
+        sea bar = texto_repetir("█", kv[1])
+        mostrar("  " + texto_relleno_der(cian(kv[0]), 15, " ") + " " + verde(bar) + " " + kv[1])
+    }
+    mostrar("")
+}
+
+funcion cmd_ayuda(): nulo {
+    cli_banner("cforge-cli", "2.2", "Vemoris Group")
+    cli_ayuda("cforge-cli", "Herramienta de archivos en C-Forge", [
+        ["buscar <dir> <patron>", "Buscar texto en archivos"],
+        ["info <ruta>",          "Ver informacion de un archivo"],
+        ["listar <dir> [ext]",   "Listar archivos en directorio"],
+        ["stats <dir>",          "Estadisticas del directorio"],
+        ["ayuda",                "Mostrar esta ayuda"]
+    ])
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+
+// En modo demo corremos todos los comandos con el directorio actual
+mostrar("")
+cli_banner("cforge-cli demo", "2.2", "Vemoris Group")
+
+// Listar stdlib
+mostrar(negrita("=== listar stdlib ==="))
+cmd_listar("stdlib", ".cfv")
+
+mostrar("")
+mostrar(negrita("=== stats stdlib ==="))
+cmd_stats("stdlib")
+
+mostrar("")
+mostrar(negrita("=== buscar 'funcion' en stdlib ==="))
+cmd_buscar("stdlib", "funcion retornar")
+
+mostrar("")
+mostrar(negrita("=== info cforgev.cpp ==="))
+cmd_info("cforgev.cpp")
+
+mostrar("")
+mostrar(negrita("=== Ayuda ==="))
+cmd_ayuda()

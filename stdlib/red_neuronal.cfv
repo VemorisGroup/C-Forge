@@ -1,0 +1,397 @@
+// stdlib/red_neuronal.cfv — Redes neuronales desde cero
+// C-Forge Standard Library v3.0
+
+importar "tensor"
+
+// ── Capas ──────────────────────────────────────────────────────────────────────
+
+funcion capa_densa(entradas, salidas, activacion) {
+    sea escala = raiz(2.0 / entradas)
+    retornar {
+        "tipo": "Dense",
+        "entradas": entradas,
+        "salidas": salidas,
+        "activacion": activacion ?? "relu",
+        "W": tensor_aleatorio_normal([entradas, salidas], 0, escala),
+        "b": tensor_zeros([1, salidas]),
+        "dW": tensor_zeros([entradas, salidas]),
+        "db": tensor_zeros([1, salidas]),
+        "entrada_cache": nulo,
+        "salida_cache": nulo,
+        "entrenando": verdadero
+    }
+}
+
+funcion capa_dropout(tasa) {
+    retornar {
+        "tipo": "Dropout",
+        "tasa": tasa ?? 0.5,
+        "mascara": nulo,
+        "entrenando": verdadero
+    }
+}
+
+funcion capa_batch_norm(size) {
+    retornar {
+        "tipo": "BatchNorm",
+        "gamma": tensor_ones([1, size]),
+        "beta": tensor_zeros([1, size]),
+        "eps": 0.000001,
+        "momentum": 0.99,
+        "media_mov": tensor_zeros([1, size]),
+        "var_mov": tensor_ones([1, size]),
+        "entrenando": verdadero
+    }
+}
+
+// ── Forward pass ───────────────────────────────────────────────────────────────
+
+funcion capa_forward(capa, x) {
+    si (capa["tipo"] == "Dense") {
+        capa["entrada_cache"] = x
+        sea z = tensor_suma(tensor_matmul(x, capa["W"]), capa["b"])
+        sea a = nulo
+        si (capa["activacion"] == "relu") { a = tensor_relu(z) }
+        sino si (capa["activacion"] == "sigmoid") { a = tensor_sigmoid(z) }
+        sino si (capa["activacion"] == "tanh") { a = tensor_tanh(z) }
+        sino si (capa["activacion"] == "softmax") { a = tensor_softmax(z) }
+        sino si (capa["activacion"] == "gelu") { a = tensor_gelu(z) }
+        sino { a = z }  // lineal
+        capa["salida_cache"] = a
+        retornar a
+    }
+    si (capa["tipo"] == "Dropout") {
+        si (no capa["entrenando"]) { retornar x }
+        sea mascara_datos = []
+        sea escala = 1.0 / (1.0 - capa["tasa"])
+        para v en x["datos"] {
+            agregar(mascara_datos, si(aleatorio() > capa["tasa"], escala, 0))
+        }
+        capa["mascara"] = tensor_crear(x["forma"], mascara_datos)
+        retornar tensor_mul(x, capa["mascara"])
+    }
+    si (capa["tipo"] == "BatchNorm") {
+        sea media = tensor_mean(x)
+        sea var = tensor_std(x)
+        sea x_norm = tensor_op(x, 0, funcion(v, _) { retornar (v - media) / (var + capa["eps"]) })
+        retornar tensor_op(x_norm, 0, funcion(v, _) { retornar v })  // simplificado
+    }
+    retornar x
+}
+
+// ── Backward pass ──────────────────────────────────────────────────────────────
+
+funcion capa_backward(capa, grad_salida) {
+    si (capa["tipo"] == "Dense") {
+        sea x = capa["entrada_cache"]
+        sea a = capa["salida_cache"]
+        // Gradiente de activación
+        sea grad_z = nulo
+        si (capa["activacion"] == "relu") {
+            grad_z = tensor_mul(grad_salida, tensor_op(a, 0, funcion(v, _) { retornar si(v > 0, 1, 0) }))
+        } sino si (capa["activacion"] == "sigmoid") {
+            grad_z = tensor_mul(grad_salida, tensor_op(a, 0, funcion(v, _) { retornar v * (1 - v) }))
+        } sino si (capa["activacion"] == "tanh") {
+            grad_z = tensor_mul(grad_salida, tensor_op(a, 0, funcion(v, _) { retornar 1 - v * v }))
+        } sino {
+            grad_z = grad_salida
+        }
+        // Gradiente de pesos
+        sea batch_size = x["forma"][0]
+        sea xt = tensor_transponer(x)
+        capa["dW"] = tensor_div(tensor_matmul(xt, grad_z), batch_size)
+        // Gradiente de bias (media sobre batch)
+        sea db_suma = tensor_zeros([1, capa["salidas"]])
+        sea i = 0
+        mientras (i < batch_size) {
+            sea inicio = i * capa["salidas"]
+            sea j = 0
+            mientras (j < capa["salidas"]) {
+                db_suma["datos"][j] = db_suma["datos"][j] + grad_z["datos"][inicio + j]
+                j = j + 1
+            }
+            i = i + 1
+        }
+        capa["db"] = tensor_div(db_suma, batch_size)
+        // Gradiente hacia entrada
+        sea Wt = tensor_transponer(capa["W"])
+        retornar tensor_matmul(grad_z, Wt)
+    }
+    si (capa["tipo"] == "Dropout") {
+        si (capa["mascara"] != nulo) { retornar tensor_mul(grad_salida, capa["mascara"]) }
+        retornar grad_salida
+    }
+    retornar grad_salida
+}
+
+// ── Red neuronal (Sequential) ──────────────────────────────────────────────────
+
+funcion red_crear(capas) {
+    retornar {
+        "capas": capas,
+        "entrenando": verdadero,
+        "historial": {"perdida": [], "precision": []}
+    }
+}
+
+funcion red_forward(red, x) {
+    sea actual = x
+    para capa en red["capas"] {
+        actual = capa_forward(capa, actual)
+    }
+    retornar actual
+}
+
+funcion red_backward(red, grad) {
+    sea actual = grad
+    sea i = longitud(red["capas"]) - 1
+    mientras (i >= 0) {
+        actual = capa_backward(red["capas"][i], actual)
+        i = i - 1
+    }
+    retornar actual
+}
+
+funcion red_modo_inferencia(red) {
+    para capa en red["capas"] { capa["entrenando"] = falso }
+    red["entrenando"] = falso
+}
+
+funcion red_modo_entrenamiento(red) {
+    para capa en red["capas"] { capa["entrenando"] = verdadero }
+    red["entrenando"] = verdadero
+}
+
+// ── Funciones de pérdida ───────────────────────────────────────────────────────
+
+funcion perdida_mse(prediccion, objetivo) {
+    sea diff = tensor_resta(prediccion, objetivo)
+    retornar tensor_mean(tensor_mul(diff, diff))
+}
+
+funcion perdida_mse_grad(prediccion, objetivo) {
+    sea n = prediccion["size"]
+    retornar tensor_op(tensor_resta(prediccion, objetivo), 0, funcion(x, _) { retornar 2 * x / n })
+}
+
+funcion perdida_cross_entropy(prediccion, objetivo) {
+    sea eps = 0.0000001
+    sea log_pred = tensor_op(prediccion, 0, funcion(x, _) { retornar logaritmo(maximo(x, eps)) })
+    retornar -tensor_sum(tensor_mul(objetivo, log_pred)) / prediccion["forma"][0]
+}
+
+funcion perdida_cross_entropy_grad(prediccion, objetivo) {
+    sea n = prediccion["forma"][0]
+    retornar tensor_op(tensor_resta(prediccion, objetivo), 0, funcion(x, _) { retornar x / n })
+}
+
+funcion perdida_mae(prediccion, objetivo) {
+    retornar tensor_mean(tensor_abs(tensor_resta(prediccion, objetivo)))
+}
+
+funcion perdida_binary_cross_entropy(prediccion, objetivo) {
+    sea eps = 0.0000001
+    sea perdida = 0
+    sea i = 0
+    mientras (i < prediccion["size"]) {
+        sea p = maximo(eps, minimo(1 - eps, prediccion["datos"][i]))
+        sea y = objetivo["datos"][i]
+        perdida = perdida + -(y * logaritmo(p) + (1-y) * logaritmo(1-p))
+        i = i + 1
+    }
+    retornar perdida / prediccion["size"]
+}
+
+// ── Optimizadores ──────────────────────────────────────────────────────────────
+
+funcion optimizador_sgd(lr, momentum) {
+    retornar {"tipo": "SGD", "lr": lr ?? 0.01, "momentum": momentum ?? 0, "velocidades": {}}
+}
+
+funcion optimizador_adam(lr, beta1, beta2, eps) {
+    retornar {
+        "tipo": "Adam",
+        "lr": lr ?? 0.001,
+        "beta1": beta1 ?? 0.9,
+        "beta2": beta2 ?? 0.999,
+        "eps": eps ?? 0.00000001,
+        "t": 0,
+        "m": {},
+        "v": {}
+    }
+}
+
+funcion optimizador_rmsprop(lr, rho) {
+    retornar {"tipo": "RMSProp", "lr": lr ?? 0.001, "rho": rho ?? 0.9, "eps": 0.000001, "cache": {}}
+}
+
+funcion _opt_actualizar_capa(opt, capa, idx) {
+    si (capa["tipo"] != "Dense") { retornar }
+    sea key_W = a_texto(idx) + "_W"
+    sea key_b = a_texto(idx) + "_b"
+    si (opt["tipo"] == "SGD") {
+        capa["W"] = tensor_resta(capa["W"], tensor_escalar(capa["dW"], opt["lr"]))
+        capa["b"] = tensor_resta(capa["b"], tensor_escalar(capa["db"], opt["lr"]))
+    }
+    sino si (opt["tipo"] == "Adam") {
+        opt["t"] = opt["t"] + 1
+        sea t = opt["t"]
+        sea b1 = opt["beta1"]
+        sea b2 = opt["beta2"]
+        sea lr_t = opt["lr"] * raiz(1 - potencia(b2, t)) / (1 - potencia(b1, t))
+        // Actualizar W
+        si (no tiene_clave(opt["m"], key_W)) {
+            opt["m"][key_W] = tensor_zeros(capa["W"]["forma"])
+            opt["v"][key_W] = tensor_zeros(capa["W"]["forma"])
+        }
+        opt["m"][key_W] = tensor_suma(tensor_escalar(opt["m"][key_W], b1), tensor_escalar(capa["dW"], 1-b1))
+        opt["v"][key_W] = tensor_suma(tensor_escalar(opt["v"][key_W], b2), tensor_escalar(tensor_mul(capa["dW"], capa["dW"]), 1-b2))
+        sea update_W = tensor_op(opt["m"][key_W], 0, funcion(m, _) { retornar lr_t * m })
+        sea denom_W = tensor_op(opt["v"][key_W], 0, funcion(v, _) { retornar raiz(v) + opt["eps"] })
+        capa["W"] = tensor_resta(capa["W"], tensor_div(update_W, denom_W))
+        // Actualizar b
+        si (no tiene_clave(opt["m"], key_b)) {
+            opt["m"][key_b] = tensor_zeros(capa["b"]["forma"])
+            opt["v"][key_b] = tensor_zeros(capa["b"]["forma"])
+        }
+        opt["m"][key_b] = tensor_suma(tensor_escalar(opt["m"][key_b], b1), tensor_escalar(capa["db"], 1-b1))
+        opt["v"][key_b] = tensor_suma(tensor_escalar(opt["v"][key_b], b2), tensor_escalar(tensor_mul(capa["db"], capa["db"]), 1-b2))
+        sea update_b = tensor_op(opt["m"][key_b], 0, funcion(m, _) { retornar lr_t * m })
+        sea denom_b = tensor_op(opt["v"][key_b], 0, funcion(v, _) { retornar raiz(v) + opt["eps"] })
+        capa["b"] = tensor_resta(capa["b"], tensor_div(update_b, denom_b))
+    }
+}
+
+funcion optimizador_paso(opt, red) {
+    sea idx = 0
+    para capa en red["capas"] {
+        _opt_actualizar_capa(opt, capa, idx)
+        idx = idx + 1
+    }
+}
+
+// ── Entrenamiento ──────────────────────────────────────────────────────────────
+
+funcion red_entrenar(red, X, Y, config) {
+    sea c = config ?? {}
+    sea epocas = c["epocas"] ?? 10
+    sea batch_size = c["batch_size"] ?? 32
+    sea lr = c["lr"] ?? 0.001
+    sea opt = c["optimizador"] ?? optimizador_adam(lr)
+    sea fn_perdida = c["perdida"] ?? "mse"
+    sea verbose = c["verbose"] ?? verdadero
+    sea n = X["forma"][0]
+    sea historial = {"perdida": [], "epoca": []}
+    sea epoca = 0
+    mientras (epoca < epocas) {
+        sea perdida_total = 0
+        sea n_batches = 0
+        sea i = 0
+        mientras (i < n) {
+            sea fin = minimo(i + batch_size, n)
+            sea Xb_datos = subarray(X["datos"], i * X["forma"][1], fin * X["forma"][1])
+            sea Yb_datos = subarray(Y["datos"], i * Y["forma"][1], fin * Y["forma"][1])
+            sea bs = fin - i
+            sea Xb = tensor_crear([bs, X["forma"][1]], Xb_datos)
+            sea Yb = tensor_crear([bs, Y["forma"][1]], Yb_datos)
+            // Forward
+            sea pred = red_forward(red, Xb)
+            // Calcular pérdida
+            sea perdida = 0
+            sea grad = nulo
+            si (fn_perdida == "mse") {
+                perdida = perdida_mse(pred, Yb)
+                grad = perdida_mse_grad(pred, Yb)
+            } sino si (fn_perdida == "cross_entropy") {
+                perdida = perdida_cross_entropy(pred, Yb)
+                grad = perdida_cross_entropy_grad(pred, Yb)
+            } sino {
+                perdida = perdida_mse(pred, Yb)
+                grad = perdida_mse_grad(pred, Yb)
+            }
+            perdida_total = perdida_total + perdida
+            n_batches = n_batches + 1
+            // Backward + update
+            red_backward(red, grad)
+            optimizador_paso(opt, red)
+            i = fin
+        }
+        sea perdida_media = perdida_total / n_batches
+        agregar(historial["perdida"], perdida_media)
+        agregar(historial["epoca"], epoca)
+        si (verbose y (epoca % 10 == 0 o epoca == epocas - 1)) {
+            mostrar("Época " + a_texto(epoca + 1) + "/" + a_texto(epocas) + " — Pérdida: " + a_texto(numero_decimales(perdida_media, 6)))
+        }
+        epoca = epoca + 1
+    }
+    retornar historial
+}
+
+/// @doc Predicción (inferencia)
+funcion red_predecir(red, X) {
+    red_modo_inferencia(red)
+    sea pred = red_forward(red, X)
+    red_modo_entrenamiento(red)
+    retornar pred
+}
+
+/// @doc Precisión de clasificación
+funcion precision(predicciones, objetivos) {
+    sea correctos = 0
+    sea n = predicciones["forma"][0]
+    sea cols = predicciones["forma"][1]
+    sea i = 0
+    mientras (i < n) {
+        sea inicio = i * cols
+        sea pred_max = predicciones["datos"][inicio]
+        sea pred_idx = 0
+        sea obj_idx = 0
+        sea j = 0
+        mientras (j < cols) {
+            si (predicciones["datos"][inicio + j] > pred_max) {
+                pred_max = predicciones["datos"][inicio + j]
+                pred_idx = j
+            }
+            si (objetivos["datos"][inicio + j] > 0.5) { obj_idx = j }
+            j = j + 1
+        }
+        si (pred_idx == obj_idx) { correctos = correctos + 1 }
+        i = i + 1
+    }
+    retornar correctos / n
+}
+
+// ── Serialización del modelo ───────────────────────────────────────────────────
+
+funcion red_guardar(red) {
+    sea capas_json = []
+    para capa en red["capas"] {
+        si (capa["tipo"] == "Dense") {
+            agregar(capas_json, {
+                "tipo": "Dense",
+                "entradas": capa["entradas"],
+                "salidas": capa["salidas"],
+                "activacion": capa["activacion"],
+                "W": tensor_a_json(capa["W"]),
+                "b": tensor_a_json(capa["b"])
+            })
+        } sino {
+            agregar(capas_json, {"tipo": capa["tipo"]})
+        }
+    }
+    retornar json_serializar({"version": "3.0", "capas": capas_json})
+}
+
+funcion red_cargar(json_texto) {
+    sea obj = json_parsear(json_texto)
+    sea capas = []
+    para c en obj["capas"] {
+        si (c["tipo"] == "Dense") {
+            sea capa = capa_densa(c["entradas"], c["salidas"], c["activacion"])
+            capa["W"] = tensor_desde_json(c["W"])
+            capa["b"] = tensor_desde_json(c["b"])
+            agregar(capas, capa)
+        }
+    }
+    retornar red_crear(capas)
+}

@@ -1,0 +1,297 @@
+// stdlib/fisica2d.cfv — Motor de física 2D
+// C-Forge Standard Library v3.0
+
+// ── Vectores 2D ────────────────────────────────────────────────────────────────
+
+funcion vec2(x, y) { retornar {"x": x ?? 0, "y": y ?? 0} }
+funcion vec2_suma(a, b) { retornar vec2(a["x"] + b["x"], a["y"] + b["y"]) }
+funcion vec2_resta(a, b) { retornar vec2(a["x"] - b["x"], a["y"] - b["y"]) }
+funcion vec2_escalar(v, s) { retornar vec2(v["x"] * s, v["y"] * s) }
+funcion vec2_magnitud(v) { retornar raiz(v["x"] * v["x"] + v["y"] * v["y"]) }
+funcion vec2_normalizar(v) {
+    sea m = vec2_magnitud(v)
+    si (m == 0) { retornar vec2(0, 0) }
+    retornar vec2(v["x"] / m, v["y"] / m)
+}
+funcion vec2_punto(a, b) { retornar a["x"] * b["x"] + a["y"] * b["y"] }
+funcion vec2_distancia(a, b) { retornar vec2_magnitud(vec2_resta(b, a)) }
+funcion vec2_rotar(v, angulo) {
+    sea cos_a = coseno(angulo)
+    sea sin_a = seno(angulo)
+    retornar vec2(v["x"] * cos_a - v["y"] * sin_a, v["x"] * sin_a + v["y"] * cos_a)
+}
+funcion vec2_perp(v) { retornar vec2(-v["y"], v["x"]) }
+funcion vec2_cruzado(a, b) { retornar a["x"] * b["y"] - a["y"] * b["x"] }
+
+// ── Cuerpo rígido 2D ───────────────────────────────────────────────────────────
+
+funcion f2d_cuerpo_crear(x, y, masa, tipo) {
+    sea m = masa ?? 1.0
+    retornar {
+        "pos": vec2(x ?? 0, y ?? 0),
+        "vel": vec2(0, 0),
+        "aceleracion": vec2(0, 0),
+        "fuerza": vec2(0, 0),
+        "masa": m,
+        "masa_inv": si(m == 0, 0, 1/m),
+        "angulo": 0,
+        "vel_angular": 0,
+        "torque": 0,
+        "inercia": m * 100,
+        "inercia_inv": si(m == 0, 0, 1/(m * 100)),
+        "tipo": tipo ?? "dinamico",   // "dinamico", "cinematico", "estatico"
+        "friccion": 0.3,
+        "rebote": 0.2,
+        "gravedad_escala": 1.0,
+        "activo": verdadero,
+        "dormido": falso,
+        "shapes": [],
+        "id": aleatorio_entero(100000, 999999)
+    }
+}
+
+funcion f2d_aplicar_fuerza(cuerpo, fx, fy) {
+    cuerpo["fuerza"]["x"] = cuerpo["fuerza"]["x"] + fx
+    cuerpo["fuerza"]["y"] = cuerpo["fuerza"]["y"] + fy
+}
+
+funcion f2d_aplicar_impulso(cuerpo, ix, iy) {
+    cuerpo["vel"]["x"] = cuerpo["vel"]["x"] + ix * cuerpo["masa_inv"]
+    cuerpo["vel"]["y"] = cuerpo["vel"]["y"] + iy * cuerpo["masa_inv"]
+}
+
+funcion f2d_integrar(cuerpo, delta, gravedad) {
+    si (cuerpo["tipo"] != "dinamico") { retornar }
+    sea g = gravedad ?? vec2(0, -9.8)
+    // Gravedad
+    sea gx = g["x"] * cuerpo["gravedad_escala"]
+    sea gy = g["y"] * cuerpo["gravedad_escala"]
+    // Fuerza -> aceleración
+    sea ax = cuerpo["fuerza"]["x"] * cuerpo["masa_inv"] + gx
+    sea ay = cuerpo["fuerza"]["y"] * cuerpo["masa_inv"] + gy
+    // Integrar velocidad (Euler semi-implícito)
+    cuerpo["vel"]["x"] = cuerpo["vel"]["x"] + ax * delta
+    cuerpo["vel"]["y"] = cuerpo["vel"]["y"] + ay * delta
+    // Integrar posición
+    cuerpo["pos"]["x"] = cuerpo["pos"]["x"] + cuerpo["vel"]["x"] * delta
+    cuerpo["pos"]["y"] = cuerpo["pos"]["y"] + cuerpo["vel"]["y"] * delta
+    // Rotación
+    cuerpo["vel_angular"] = cuerpo["vel_angular"] + cuerpo["torque"] * cuerpo["inercia_inv"] * delta
+    cuerpo["angulo"] = cuerpo["angulo"] + cuerpo["vel_angular"] * delta
+    // Reset fuerzas
+    cuerpo["fuerza"]["x"] = 0
+    cuerpo["fuerza"]["y"] = 0
+    cuerpo["torque"] = 0
+    // Amortiguamiento
+    cuerpo["vel"]["x"] = cuerpo["vel"]["x"] * 0.999
+    cuerpo["vel"]["y"] = cuerpo["vel"]["y"] * 0.999
+}
+
+// ── Shapes / Formas ────────────────────────────────────────────────────────────
+
+funcion shape_circulo(radio, offset_x, offset_y) {
+    retornar {"tipo": "circulo", "radio": radio, "offset": vec2(offset_x ?? 0, offset_y ?? 0)}
+}
+
+funcion shape_aabb(ancho, alto, offset_x, offset_y) {
+    sea hw = ancho / 2
+    sea hh = alto / 2
+    retornar {
+        "tipo": "aabb",
+        "ancho": ancho, "alto": alto,
+        "hw": hw, "hh": hh,
+        "offset": vec2(offset_x ?? 0, offset_y ?? 0)
+    }
+}
+
+funcion f2d_agregar_shape(cuerpo, shape) {
+    agregar(cuerpo["shapes"], shape)
+}
+
+// ── Detección de colisión ──────────────────────────────────────────────────────
+
+funcion f2d_colision_circulo_circulo(pos_a, ra, pos_b, rb) {
+    sea dx = pos_b["x"] - pos_a["x"]
+    sea dy = pos_b["y"] - pos_a["y"]
+    sea dist2 = dx * dx + dy * dy
+    sea sum_r = ra + rb
+    si (dist2 >= sum_r * sum_r) { retornar nulo }
+    sea dist = raiz(dist2)
+    sea nx = si(dist > 0, dx / dist, 1)
+    sea ny = si(dist > 0, dy / dist, 0)
+    retornar {
+        "colision": verdadero,
+        "normal": vec2(nx, ny),
+        "penetracion": sum_r - dist,
+        "contacto": vec2(pos_a["x"] + nx * ra, pos_a["y"] + ny * ra)
+    }
+}
+
+funcion f2d_colision_aabb_aabb(ax, ay, ahw, ahh, bx, by, bhw, bhh) {
+    sea dx = bx - ax
+    sea dy = by - ay
+    sea ox = ahw + bhw - absoluto(dx)
+    sea oy = ahh + bhh - absoluto(dy)
+    si (ox <= 0 o oy <= 0) { retornar nulo }
+    sea nx = 0
+    sea ny = 0
+    sea pen = 0
+    si (ox < oy) {
+        nx = si(dx < 0, -1, 1)
+        pen = ox
+    } sino {
+        ny = si(dy < 0, -1, 1)
+        pen = oy
+    }
+    retornar {
+        "colision": verdadero,
+        "normal": vec2(nx, ny),
+        "penetracion": pen
+    }
+}
+
+funcion f2d_colision_circulo_aabb(cx, cy, radio, ax, ay, ahw, ahh) {
+    sea clamp_x = maximo(ax - ahw, minimo(cx, ax + ahw))
+    sea clamp_y = maximo(ay - ahh, minimo(cy, ay + ahh))
+    sea dx = cx - clamp_x
+    sea dy = cy - clamp_y
+    sea dist2 = dx * dx + dy * dy
+    si (dist2 >= radio * radio) { retornar nulo }
+    sea dist = raiz(dist2)
+    sea nx = si(dist > 0, dx / dist, 0)
+    sea ny = si(dist > 0, dy / dist, 1)
+    retornar {
+        "colision": verdadero,
+        "normal": vec2(nx, ny),
+        "penetracion": radio - dist
+    }
+}
+
+// ── Resolución de colisión ─────────────────────────────────────────────────────
+
+funcion f2d_resolver_colision(a, b, info) {
+    si (info == nulo) { retornar }
+    sea rv_x = b["vel"]["x"] - a["vel"]["x"]
+    sea rv_y = b["vel"]["y"] - a["vel"]["y"]
+    sea vel_normal = rv_x * info["normal"]["x"] + rv_y * info["normal"]["y"]
+    si (vel_normal > 0) { retornar } // Alejándose
+    sea e = minimo(a["rebote"], b["rebote"])
+    sea j = -(1 + e) * vel_normal / (a["masa_inv"] + b["masa_inv"])
+    sea jx = j * info["normal"]["x"]
+    sea jy = j * info["normal"]["y"]
+    si (a["tipo"] == "dinamico") {
+        a["vel"]["x"] = a["vel"]["x"] - jx * a["masa_inv"]
+        a["vel"]["y"] = a["vel"]["y"] - jy * a["masa_inv"]
+    }
+    si (b["tipo"] == "dinamico") {
+        b["vel"]["x"] = b["vel"]["x"] + jx * b["masa_inv"]
+        b["vel"]["y"] = b["vel"]["y"] + jy * b["masa_inv"]
+    }
+    // Corrección de posición
+    sea porcentaje = 0.2
+    sea slop = 0.01
+    sea corr = maximo(info["penetracion"] - slop, 0) / (a["masa_inv"] + b["masa_inv"]) * porcentaje
+    sea cx = corr * info["normal"]["x"]
+    sea cy = corr * info["normal"]["y"]
+    si (a["tipo"] == "dinamico") {
+        a["pos"]["x"] = a["pos"]["x"] - cx * a["masa_inv"]
+        a["pos"]["y"] = a["pos"]["y"] - cy * a["masa_inv"]
+    }
+    si (b["tipo"] == "dinamico") {
+        b["pos"]["x"] = b["pos"]["x"] + cx * b["masa_inv"]
+        b["pos"]["y"] = b["pos"]["y"] + cy * b["masa_inv"]
+    }
+}
+
+// ── Mundo físico ───────────────────────────────────────────────────────────────
+
+funcion f2d_mundo_crear(gravedad_x, gravedad_y) {
+    retornar {
+        "cuerpos": [],
+        "gravedad": vec2(gravedad_x ?? 0, gravedad_y ?? -9.8),
+        "iteraciones": 8,
+        "tiempo_acumulado": 0,
+        "paso_fijo": 1.0 / 60.0
+    }
+}
+
+funcion f2d_agregar_cuerpo(mundo, cuerpo) {
+    agregar(mundo["cuerpos"], cuerpo)
+    retornar cuerpo
+}
+
+funcion f2d_eliminar_cuerpo(mundo, cuerpo_id) {
+    sea nuevos = []
+    para c en mundo["cuerpos"] {
+        si (c["id"] != cuerpo_id) { agregar(nuevos, c) }
+    }
+    mundo["cuerpos"] = nuevos
+}
+
+funcion f2d_paso(mundo, delta) {
+    // Integrar cuerpos
+    para cuerpo en mundo["cuerpos"] {
+        f2d_integrar(cuerpo, delta, mundo["gravedad"])
+    }
+    // Detectar y resolver colisiones (broadphase simple O(n²))
+    sea n = longitud(mundo["cuerpos"])
+    sea i = 0
+    mientras (i < n) {
+        sea a = mundo["cuerpos"][i]
+        sea j = i + 1
+        mientras (j < n) {
+            sea b = mundo["cuerpos"][j]
+            // Por ahora detección AABB vs AABB simple
+            sea info = f2d_colision_aabb_aabb(
+                a["pos"]["x"], a["pos"]["y"], 16, 16,
+                b["pos"]["x"], b["pos"]["y"], 16, 16
+            )
+            si (info != nulo) {
+                f2d_resolver_colision(a, b, info)
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+}
+
+// ── Raycasting ─────────────────────────────────────────────────────────────────
+
+funcion f2d_raycast(mundo, origen, direccion, distancia_max) {
+    sea dist_max = distancia_max ?? 1000
+    sea mejor = nulo
+    sea mejor_dist = dist_max
+    para cuerpo en mundo["cuerpos"] {
+        sea dx = cuerpo["pos"]["x"] - origen["x"]
+        sea dy = cuerpo["pos"]["y"] - origen["y"]
+        sea t = dx * direccion["x"] + dy * direccion["y"]
+        si (t < 0) { continuar }
+        sea px = origen["x"] + direccion["x"] * t
+        sea py = origen["y"] + direccion["y"] * t
+        sea dist_perp = raiz((px - cuerpo["pos"]["x"])*(px - cuerpo["pos"]["x"]) + (py - cuerpo["pos"]["y"])*(py - cuerpo["pos"]["y"]))
+        si (dist_perp < 16 y t < mejor_dist) {
+            mejor_dist = t
+            mejor = {"cuerpo": cuerpo, "distancia": t, "punto": vec2(px, py)}
+        }
+    }
+    retornar mejor
+}
+
+// ── Joints / Restricciones ─────────────────────────────────────────────────────
+
+funcion f2d_spring_actualizar(a, b, longitud_reposo, rigidez, amortiguamiento) {
+    sea dx = b["pos"]["x"] - a["pos"]["x"]
+    sea dy = b["pos"]["y"] - a["pos"]["y"]
+    sea dist = raiz(dx*dx + dy*dy)
+    si (dist == 0) { retornar }
+    sea nx = dx / dist
+    sea ny = dy / dist
+    sea extension = dist - longitud_reposo
+    sea fx = rigidez * extension * nx
+    sea fy = rigidez * extension * ny
+    sea dvx = b["vel"]["x"] - a["vel"]["x"]
+    sea dvy = b["vel"]["y"] - a["vel"]["y"]
+    sea dam = amortiguamiento * (dvx * nx + dvy * ny)
+    f2d_aplicar_fuerza(a, fx + dam * nx, fy + dam * ny)
+    f2d_aplicar_fuerza(b, -(fx + dam * nx), -(fy + dam * ny))
+}

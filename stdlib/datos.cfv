@@ -1,0 +1,337 @@
+// stdlib/datos.cfv — Procesamiento y análisis de datos (tipo Pandas)
+// C-Forge Standard Library v3.0
+
+// ── DataFrame ─────────────────────────────────────────────────────────────────
+
+funcion df_crear(columnas, filas) {
+    sea ncols = longitud(columnas)
+    sea nfilas = longitud(filas) ?? 0
+    sea data = {}
+    para col en columnas { data[col] = [] }
+    para fila en (filas ?? []) {
+        sea i = 0
+        para col en columnas {
+            agregar(data[col], fila[i] ?? nulo)
+            i = i + 1
+        }
+    }
+    retornar {
+        "columnas": columnas,
+        "data": data,
+        "nfilas": nfilas,
+        "ncols": ncols,
+        "dtype": {}
+    }
+}
+
+funcion df_desde_lista_mapas(lista_mapas) {
+    si (longitud(lista_mapas) == 0) { retornar df_crear([], []) }
+    sea columnas = mapa_claves(lista_mapas[0])
+    sea data = {}
+    para col en columnas { data[col] = [] }
+    sea nfilas = 0
+    para fila en lista_mapas {
+        para col en columnas {
+            agregar(data[col], fila[col] ?? nulo)
+        }
+        nfilas = nfilas + 1
+    }
+    retornar {"columnas": columnas, "data": data, "nfilas": nfilas, "ncols": longitud(columnas), "dtype": {}}
+}
+
+funcion df_desde_csv(texto_csv) {
+    sea lineas = separar(texto_csv, "\n")
+    sea cabecera = lista_mapear(separar(lineas[0], ","), funcion(c) { retornar texto_recortar(c) })
+    sea filas = []
+    sea i = 1
+    mientras (i < longitud(lineas)) {
+        sea linea = texto_recortar(lineas[i])
+        si (longitud(linea) == 0) { i = i + 1; continuar }
+        sea valores = lista_mapear(separar(linea, ","), funcion(v) {
+            sea v2 = texto_recortar(v)
+            sea n = a_numero(v2)
+            retornar si(n != nulo, n, v2)
+        })
+        agregar(filas, valores)
+        i = i + 1
+    }
+    retornar df_crear(cabecera, filas)
+}
+
+funcion df_a_csv(df) {
+    sea lineas = [unir(df["columnas"], ",")]
+    sea i = 0
+    mientras (i < df["nfilas"]) {
+        sea fila = lista_mapear(df["columnas"], funcion(col) { retornar a_texto(df["data"][col][i] ?? "") })
+        agregar(lineas, unir(fila, ","))
+        i = i + 1
+    }
+    retornar unir(lineas, "\n")
+}
+
+// ── Acceso ─────────────────────────────────────────────────────────────────────
+
+funcion df_col(df, nombre) { retornar df["data"][nombre] ?? [] }
+
+funcion df_fila(df, i) {
+    sea fila = {}
+    para col en df["columnas"] { fila[col] = df["data"][col][i] }
+    retornar fila
+}
+
+funcion df_get(df, col, fila) { retornar df["data"][col][fila] }
+
+funcion df_set(df, col, fila, valor) { df["data"][col][fila] = valor }
+
+funcion df_cabeza(df, n) {
+    sea n2 = minimo(n ?? 5, df["nfilas"])
+    sea data = {}
+    para col en df["columnas"] {
+        data[col] = subarray(df["data"][col], 0, n2)
+    }
+    retornar {"columnas": df["columnas"], "data": data, "nfilas": n2, "ncols": df["ncols"], "dtype": {}}
+}
+
+funcion df_cola(df, n) {
+    sea n2 = minimo(n ?? 5, df["nfilas"])
+    sea inicio = df["nfilas"] - n2
+    sea data = {}
+    para col en df["columnas"] { data[col] = subarray(df["data"][col], inicio, df["nfilas"]) }
+    retornar {"columnas": df["columnas"], "data": data, "nfilas": n2, "ncols": df["ncols"], "dtype": {}}
+}
+
+// ── Selección ──────────────────────────────────────────────────────────────────
+
+funcion df_select(df, columnas) {
+    sea data = {}
+    para col en columnas { data[col] = df["data"][col] ?? [] }
+    retornar {"columnas": columnas, "data": data, "nfilas": df["nfilas"], "ncols": longitud(columnas), "dtype": {}}
+}
+
+funcion df_filtrar(df, condicion_fn) {
+    sea data = {}
+    para col en df["columnas"] { data[col] = [] }
+    sea nfilas = 0
+    sea i = 0
+    mientras (i < df["nfilas"]) {
+        sea fila = df_fila(df, i)
+        si (condicion_fn(fila)) {
+            para col en df["columnas"] { agregar(data[col], df["data"][col][i]) }
+            nfilas = nfilas + 1
+        }
+        i = i + 1
+    }
+    retornar {"columnas": df["columnas"], "data": data, "nfilas": nfilas, "ncols": df["ncols"], "dtype": {}}
+}
+
+funcion df_donde(df, col, operador, valor) {
+    retornar df_filtrar(df, funcion(fila) {
+        sea v = fila[col]
+        si (operador == "==") { retornar v == valor }
+        si (operador == "!=") { retornar v != valor }
+        si (operador == ">") { retornar v > valor }
+        si (operador == ">=") { retornar v >= valor }
+        si (operador == "<") { retornar v < valor }
+        si (operador == "<=") { retornar v <= valor }
+        si (operador == "contiene") { retornar texto_contiene(a_texto(v), a_texto(valor)) }
+        retornar verdadero
+    })
+}
+
+// ── Transformación ─────────────────────────────────────────────────────────────
+
+funcion df_agregar_columna(df, nombre, valores) {
+    agregar(df["columnas"], nombre)
+    df["data"][nombre] = valores
+    df["ncols"] = df["ncols"] + 1
+}
+
+funcion df_columna_calculada(df, nombre, fn) {
+    sea valores = []
+    sea i = 0
+    mientras (i < df["nfilas"]) {
+        agregar(valores, fn(df_fila(df, i)))
+        i = i + 1
+    }
+    df_agregar_columna(df, nombre, valores)
+}
+
+funcion df_eliminar_columna(df, nombre) {
+    df["columnas"] = lista_filtrar(df["columnas"], funcion(c) { retornar c != nombre })
+    eliminar_clave(df["data"], nombre)
+    df["ncols"] = df["ncols"] - 1
+}
+
+funcion df_renombrar(df, mapa_nombres) {
+    sea nuevas_cols = lista_mapear(df["columnas"], funcion(c) { retornar mapa_nombres[c] ?? c })
+    sea nuevo_data = {}
+    sea i = 0
+    para col en df["columnas"] {
+        nuevo_data[nuevas_cols[i]] = df["data"][col]
+        i = i + 1
+    }
+    df["columnas"] = nuevas_cols
+    df["data"] = nuevo_data
+}
+
+funcion df_mapear(df, col, fn) {
+    df["data"][col] = lista_mapear(df["data"][col], fn)
+}
+
+funcion df_drop_nulos(df) {
+    retornar df_filtrar(df, funcion(fila) {
+        para col en mapa_claves(fila) {
+            si (fila[col] == nulo) { retornar falso }
+        }
+        retornar verdadero
+    })
+}
+
+funcion df_fill_nulos(df, valor) {
+    para col en df["columnas"] {
+        df["data"][col] = lista_mapear(df["data"][col], funcion(v) { retornar si(v == nulo, valor, v) })
+    }
+}
+
+// ── Estadísticas ───────────────────────────────────────────────────────────────
+
+funcion df_describe(df) {
+    sea stats = {}
+    para col en df["columnas"] {
+        sea vals = lista_filtrar(df["data"][col], funcion(v) { retornar v != nulo y tipo(v) == "numero" })
+        si (longitud(vals) == 0) { continuar }
+        sea sorted_vals = mergesort(vals, funcion(a, b) { retornar a - b })
+        sea n = longitud(vals)
+        sea suma = 0
+        para v en vals { suma = suma + v }
+        sea media = suma / n
+        sea variance = 0
+        para v en vals { variance = variance + (v - media) * (v - media) }
+        stats[col] = {
+            "count": n,
+            "mean": media,
+            "std": raiz(variance / n),
+            "min": sorted_vals[0],
+            "q25": sorted_vals[piso(n * 0.25)],
+            "median": sorted_vals[piso(n * 0.5)],
+            "q75": sorted_vals[piso(n * 0.75)],
+            "max": sorted_vals[n - 1]
+        }
+    }
+    retornar stats
+}
+
+funcion df_corr(df, col_a, col_b) {
+    sea a = lista_filtrar(df["data"][col_a], funcion(v) { retornar v != nulo })
+    sea b = lista_filtrar(df["data"][col_b], funcion(v) { retornar v != nulo })
+    sea n = minimo(longitud(a), longitud(b))
+    sea media_a = 0; sea media_b = 0
+    sea i = 0
+    mientras (i < n) { media_a = media_a + a[i]; media_b = media_b + b[i]; i = i + 1 }
+    media_a = media_a / n; media_b = media_b / n
+    sea cov = 0; sea std_a = 0; sea std_b = 0
+    i = 0
+    mientras (i < n) {
+        sea da = a[i] - media_a; sea db = b[i] - media_b
+        cov = cov + da * db; std_a = std_a + da*da; std_b = std_b + db*db
+        i = i + 1
+    }
+    si (std_a == 0 o std_b == 0) { retornar 0 }
+    retornar cov / raiz(std_a * std_b)
+}
+
+// ── Ordenación ─────────────────────────────────────────────────────────────────
+
+funcion df_ordenar(df, col, ascendente) {
+    sea asc = ascendente ?? verdadero
+    sea indices = rango(0, df["nfilas"])
+    sea vals = df["data"][col]
+    indices = mergesort(indices, funcion(i, j) {
+        sea vi = vals[i] ?? 0
+        sea vj = vals[j] ?? 0
+        retornar si(asc, vi - vj, vj - vi)
+    })
+    sea nuevo_data = {}
+    para col2 en df["columnas"] {
+        nuevo_data[col2] = lista_mapear(indices, funcion(i) { retornar df["data"][col2][i] })
+    }
+    retornar {"columnas": df["columnas"], "data": nuevo_data, "nfilas": df["nfilas"], "ncols": df["ncols"], "dtype": {}}
+}
+
+// ── Group By ───────────────────────────────────────────────────────────────────
+
+funcion df_groupby(df, col_grupo, col_valor, fn_agg) {
+    sea grupos = {}
+    sea i = 0
+    mientras (i < df["nfilas"]) {
+        sea clave = a_texto(df["data"][col_grupo][i])
+        si (no tiene_clave(grupos, clave)) { grupos[clave] = [] }
+        agregar(grupos[clave], df["data"][col_valor][i])
+        i = i + 1
+    }
+    sea resultado = []
+    para clave en mapa_claves(grupos) {
+        sea agg = fn_agg(grupos[clave])
+        agregar(resultado, {col_grupo: clave, col_valor: agg})
+    }
+    retornar df_desde_lista_mapas(resultado)
+}
+
+funcion df_agg_suma(vals) { sea s = 0; para v en vals { s = s + (v ?? 0) }; retornar s }
+funcion df_agg_media(vals) {
+    sea n = longitud(vals); si (n == 0) { retornar 0 }
+    retornar df_agg_suma(vals) / n
+}
+funcion df_agg_contar(vals) { retornar longitud(vals) }
+funcion df_agg_max(vals) {
+    sea m = vals[0]; para v en vals { si (v > m) { m = v } }; retornar m
+}
+funcion df_agg_min(vals) {
+    sea m = vals[0]; para v en vals { si (v < m) { m = v } }; retornar m
+}
+
+// ── Join ───────────────────────────────────────────────────────────────────────
+
+funcion df_join(df_a, df_b, clave_a, clave_b, tipo) {
+    sea tipo_join = tipo ?? "inner"
+    sea resultado = []
+    sea i = 0
+    mientras (i < df_a["nfilas"]) {
+        sea fila_a = df_fila(df_a, i)
+        sea encontrado = falso
+        sea j = 0
+        mientras (j < df_b["nfilas"]) {
+            sea fila_b = df_fila(df_b, j)
+            si (fila_a[clave_a] == fila_b[clave_b]) {
+                sea fila_merge = {}
+                para k en mapa_claves(fila_a) { fila_merge[k] = fila_a[k] }
+                para k en mapa_claves(fila_b) {
+                    si (k != clave_b) { fila_merge["b_" + k] = fila_b[k] }
+                }
+                agregar(resultado, fila_merge)
+                encontrado = verdadero
+            }
+            j = j + 1
+        }
+        si (no encontrado y (tipo_join == "left" o tipo_join == "outer")) {
+            agregar(resultado, fila_a)
+        }
+        i = i + 1
+    }
+    retornar df_desde_lista_mapas(resultado)
+}
+
+// ── Imprimir ───────────────────────────────────────────────────────────────────
+
+funcion df_imprimir(df, max_filas) {
+    sea mf = max_filas ?? 20
+    mostrar(unir(df["columnas"], " | "))
+    mostrar(texto_repetir("-", 60))
+    sea i = 0
+    mientras (i < minimo(df["nfilas"], mf)) {
+        sea vals = lista_mapear(df["columnas"], funcion(col) { retornar a_texto(df["data"][col][i] ?? "null") })
+        mostrar(unir(vals, " | "))
+        i = i + 1
+    }
+    si (df["nfilas"] > mf) { mostrar("... (" + a_texto(df["nfilas"]) + " filas)") }
+}

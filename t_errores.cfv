@@ -1,0 +1,2 @@
+importar "stdlib/errores.cfv"
+mostrar("errores ok")

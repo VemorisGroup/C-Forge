@@ -1,0 +1,288 @@
+// stdlib/particulas.cfv — Sistema de partículas para videojuegos
+// C-Forge Standard Library v3.0
+
+// ── Emisor de partículas ───────────────────────────────────────────────────────
+
+funcion emisor_crear(x, y, config) {
+    sea c = config ?? {}
+    retornar {
+        "x": x ?? 0,
+        "y": y ?? 0,
+        "activo": verdadero,
+        "particulas": [],
+        // Configuracion de emisión
+        "tasa": c["tasa"] ?? 30,          // partículas por segundo
+        "rafaga": c["rafaga"] ?? 0,        // emitir N de golpe
+        "duracion": c["duracion"] ?? -1,   // -1 = infinito
+        "tiempo_vida": 0,
+        "_acumulador": 0,
+        // Config partícula
+        "vida_min": c["vida_min"] ?? 0.5,
+        "vida_max": c["vida_max"] ?? 1.5,
+        "vel_x_min": c["vel_x_min"] ?? -50,
+        "vel_x_max": c["vel_x_max"] ?? 50,
+        "vel_y_min": c["vel_y_min"] ?? -100,
+        "vel_y_max": c["vel_y_max"] ?? -50,
+        "gravedad_x": c["gravedad_x"] ?? 0,
+        "gravedad_y": c["gravedad_y"] ?? 98,
+        "tamano_inicio": c["tamano_inicio"] ?? 8,
+        "tamano_fin": c["tamano_fin"] ?? 0,
+        "color_inicio": c["color_inicio"] ?? "#FFAA00",
+        "color_fin": c["color_fin"] ?? "#FF000000",
+        "opacidad_inicio": c["opacidad_inicio"] ?? 1.0,
+        "opacidad_fin": c["opacidad_fin"] ?? 0.0,
+        "angulo_min": c["angulo_min"] ?? 0,
+        "angulo_max": c["angulo_max"] ?? 360,
+        "velocidad_angular": c["velocidad_angular"] ?? 0,
+        "dispersion_x": c["dispersion_x"] ?? 0,
+        "dispersion_y": c["dispersion_y"] ?? 0,
+        "textura": c["textura"] ?? nulo,
+        "max_particulas": c["max_particulas"] ?? 1000,
+        "modo_blend": c["modo_blend"] ?? "normal",  // "normal", "add"
+        // Callbacks
+        "on_morir": c["on_morir"] ?? nulo
+    }
+}
+
+funcion _emisor_crear_particula(emisor) {
+    sea vida = emisor["vida_min"] + aleatorio() * (emisor["vida_max"] - emisor["vida_min"])
+    sea vx = emisor["vel_x_min"] + aleatorio() * (emisor["vel_x_max"] - emisor["vel_x_min"])
+    sea vy = emisor["vel_y_min"] + aleatorio() * (emisor["vel_y_max"] - emisor["vel_y_min"])
+    retornar {
+        "x": emisor["x"] + (aleatorio() - 0.5) * emisor["dispersion_x"] * 2,
+        "y": emisor["y"] + (aleatorio() - 0.5) * emisor["dispersion_y"] * 2,
+        "vel_x": vx,
+        "vel_y": vy,
+        "angulo": emisor["angulo_min"] + aleatorio() * (emisor["angulo_max"] - emisor["angulo_min"]),
+        "vel_angular": emisor["velocidad_angular"],
+        "vida": vida,
+        "vida_max": vida,
+        "tamano": emisor["tamano_inicio"],
+        "opacidad": emisor["opacidad_inicio"],
+        "color": emisor["color_inicio"],
+        "viva": verdadero
+    }
+}
+
+/// @doc Emitir ráfaga de partículas
+funcion emisor_rafaga(emisor, cantidad) {
+    sea n = cantidad ?? emisor["rafaga"]
+    sea i = 0
+    mientras (i < n y longitud(emisor["particulas"]) < emisor["max_particulas"]) {
+        agregar(emisor["particulas"], _emisor_crear_particula(emisor))
+        i = i + 1
+    }
+}
+
+/// @doc Actualizar emisor y sus partículas
+funcion emisor_actualizar(emisor, delta) {
+    si (no emisor["activo"]) { retornar }
+    // Tiempo de vida del emisor
+    si (emisor["duracion"] > 0) {
+        emisor["tiempo_vida"] = emisor["tiempo_vida"] + delta
+        si (emisor["tiempo_vida"] >= emisor["duracion"]) {
+            emisor["activo"] = falso
+        }
+    }
+    // Emitir nuevas partículas
+    si (emisor["activo"]) {
+        emisor["_acumulador"] = emisor["_acumulador"] + emisor["tasa"] * delta
+        mientras (emisor["_acumulador"] >= 1 y longitud(emisor["particulas"]) < emisor["max_particulas"]) {
+            agregar(emisor["particulas"], _emisor_crear_particula(emisor))
+            emisor["_acumulador"] = emisor["_acumulador"] - 1
+        }
+    }
+    // Actualizar partículas existentes
+    sea vivas = []
+    para p en emisor["particulas"] {
+        p["vida"] = p["vida"] - delta
+        si (p["vida"] <= 0) {
+            p["viva"] = falso
+            si (emisor["on_morir"] != nulo) { emisor["on_morir"](p) }
+            continuar
+        }
+        // Física
+        p["vel_x"] = p["vel_x"] + emisor["gravedad_x"] * delta
+        p["vel_y"] = p["vel_y"] + emisor["gravedad_y"] * delta
+        p["x"] = p["x"] + p["vel_x"] * delta
+        p["y"] = p["y"] + p["vel_y"] * delta
+        p["angulo"] = p["angulo"] + p["vel_angular"] * delta
+        // Interpolar propiedades
+        sea t = 1 - (p["vida"] / p["vida_max"])
+        p["tamano"] = emisor["tamano_inicio"] + (emisor["tamano_fin"] - emisor["tamano_inicio"]) * t
+        p["opacidad"] = emisor["opacidad_inicio"] + (emisor["opacidad_fin"] - emisor["opacidad_inicio"]) * t
+        agregar(vivas, p)
+    }
+    emisor["particulas"] = vivas
+}
+
+/// @doc Contar partículas vivas
+funcion emisor_contar(emisor) { retornar longitud(emisor["particulas"]) }
+
+/// @doc Verificar si el emisor terminó
+funcion emisor_terminado(emisor) {
+    retornar no emisor["activo"] y longitud(emisor["particulas"]) == 0
+}
+
+// ── Efectos predefinidos ───────────────────────────────────────────────────────
+
+/// @doc Efecto de explosión
+funcion efecto_explosion(x, y) {
+    sea e = emisor_crear(x, y, {
+        "tasa": 0,
+        "rafaga": 80,
+        "duracion": 0.01,
+        "vida_min": 0.3, "vida_max": 0.8,
+        "vel_x_min": -300, "vel_x_max": 300,
+        "vel_y_min": -300, "vel_y_max": 300,
+        "gravedad_y": 200,
+        "tamano_inicio": 12, "tamano_fin": 0,
+        "color_inicio": "#FFDD00",
+        "opacidad_inicio": 1, "opacidad_fin": 0,
+        "modo_blend": "add"
+    })
+    emisor_rafaga(e, 80)
+    retornar e
+}
+
+/// @doc Efecto de fuego
+funcion efecto_fuego(x, y) {
+    retornar emisor_crear(x, y, {
+        "tasa": 60,
+        "vida_min": 0.4, "vida_max": 0.8,
+        "vel_x_min": -20, "vel_x_max": 20,
+        "vel_y_min": -120, "vel_y_max": -60,
+        "gravedad_y": 0,
+        "tamano_inicio": 10, "tamano_fin": 2,
+        "color_inicio": "#FF6600",
+        "opacidad_inicio": 0.9, "opacidad_fin": 0,
+        "dispersion_x": 10,
+        "modo_blend": "add"
+    })
+}
+
+/// @doc Efecto de humo
+funcion efecto_humo(x, y) {
+    retornar emisor_crear(x, y, {
+        "tasa": 15,
+        "vida_min": 1.5, "vida_max": 3.0,
+        "vel_x_min": -15, "vel_x_max": 15,
+        "vel_y_min": -50, "vel_y_max": -30,
+        "gravedad_y": -10,
+        "tamano_inicio": 15, "tamano_fin": 40,
+        "color_inicio": "#888888",
+        "opacidad_inicio": 0.5, "opacidad_fin": 0
+    })
+}
+
+/// @doc Efecto de lluvia
+funcion efecto_lluvia(x, y, ancho) {
+    retornar emisor_crear(x, y, {
+        "tasa": 100,
+        "vida_min": 0.5, "vida_max": 1.2,
+        "vel_x_min": -10, "vel_x_max": 10,
+        "vel_y_min": 300, "vel_y_max": 500,
+        "gravedad_y": 0,
+        "tamano_inicio": 4, "tamano_fin": 2,
+        "color_inicio": "#8888FF",
+        "opacidad_inicio": 0.6, "opacidad_fin": 0.2,
+        "dispersion_x": ancho ?? 400
+    })
+}
+
+/// @doc Efecto de estrellas/magia
+funcion efecto_magia(x, y) {
+    retornar emisor_crear(x, y, {
+        "tasa": 40,
+        "vida_min": 0.5, "vida_max": 1.2,
+        "vel_x_min": -80, "vel_x_max": 80,
+        "vel_y_min": -80, "vel_y_max": 80,
+        "gravedad_y": 0,
+        "tamano_inicio": 6, "tamano_fin": 0,
+        "color_inicio": "#AA66FF",
+        "opacidad_inicio": 1, "opacidad_fin": 0,
+        "velocidad_angular": 180,
+        "modo_blend": "add"
+    })
+}
+
+/// @doc Efecto de nieve
+funcion efecto_nieve(x, y, ancho) {
+    retornar emisor_crear(x, y, {
+        "tasa": 30,
+        "vida_min": 3.0, "vida_max": 6.0,
+        "vel_x_min": -20, "vel_x_max": 20,
+        "vel_y_min": 30, "vel_y_max": 80,
+        "gravedad_y": 0,
+        "tamano_inicio": 4, "tamano_fin": 3,
+        "color_inicio": "#FFFFFF",
+        "opacidad_inicio": 0.8, "opacidad_fin": 0.5,
+        "dispersion_x": ancho ?? 800
+    })
+}
+
+/// @doc Efecto de sangre/daño
+funcion efecto_dano(x, y) {
+    sea e = emisor_crear(x, y, {
+        "tasa": 0,
+        "rafaga": 20,
+        "duracion": 0.01,
+        "vida_min": 0.3, "vida_max": 0.8,
+        "vel_x_min": -150, "vel_x_max": 150,
+        "vel_y_min": -200, "vel_y_max": -50,
+        "gravedad_y": 400,
+        "tamano_inicio": 6, "tamano_fin": 2,
+        "color_inicio": "#FF0000",
+        "opacidad_inicio": 1, "opacidad_fin": 0
+    })
+    emisor_rafaga(e, 20)
+    retornar e
+}
+
+/// @doc Efecto de monedas/recolección
+funcion efecto_recolectar(x, y, color) {
+    sea e = emisor_crear(x, y, {
+        "tasa": 0,
+        "vida_min": 0.4, "vida_max": 0.7,
+        "vel_x_min": -60, "vel_x_max": 60,
+        "vel_y_min": -120, "vel_y_max": -80,
+        "gravedad_y": 200,
+        "tamano_inicio": 8, "tamano_fin": 0,
+        "color_inicio": color ?? "#FFD700",
+        "opacidad_inicio": 1, "opacidad_fin": 0
+    })
+    emisor_rafaga(e, 12)
+    retornar e
+}
+
+// ── Sistema global de emisores ─────────────────────────────────────────────────
+
+sea _emisores_activos = []
+
+funcion particulas_agregar(emisor) {
+    agregar(_emisores_activos, emisor)
+    retornar emisor
+}
+
+funcion particulas_actualizar(delta) {
+    sea activos = []
+    para e en _emisores_activos {
+        emisor_actualizar(e, delta)
+        si (no emisor_terminado(e)) {
+            agregar(activos, e)
+        }
+    }
+    _emisores_activos = activos
+}
+
+funcion particulas_todos() { retornar _emisores_activos }
+
+funcion particulas_limpiar() { _emisores_activos = [] }
+
+funcion particulas_contar_total() {
+    sea total = 0
+    para e en _emisores_activos {
+        total = total + emisor_contar(e)
+    }
+    retornar total
+}

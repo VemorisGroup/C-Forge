@@ -1,4 +1,338 @@
-# Historial de C-Forge
+# Changelog — C-Forge
+
+## [3.0.0] — 2026-07-29
+
+### 🚀 Enterprise-Grade — Better than Java, C++, C#
+
+### Nuevas funcionalidades del intérprete
+- **Anotaciones de tipo**: `sea x: Numero = 5`, `sea items: Lista<Texto> = []`
+- **Clases abstractas**: `abstracto clase Animal { ... }`
+- **Interfaces**: `interfaz IServicio { metodo(args) }` + `implementa`
+- **Modificadores de acceso**: `publico`, `privado`, `protegido`
+
+### Stdlib — Videojuegos (15 módulos nuevos)
+- `ecs` — Entity Component System completo con sistemas built-in
+- `fisica2d` — Motor de física 2D (AABB, círculos, raycasting, springs)
+- `fisica3d` — Motor de física 3D (quaterniones, matrices 4x4, esferas)
+- `escena` — Scene manager, cámara 2D/3D, UI, transiciones
+- `particulas` — Sistema de partículas (fuego, explosión, lluvia, magia, nieve)
+- `input` — Teclado, ratón, gamepad, gestos táctiles, mapeo de acciones
+- `audio` — Sistema de audio 3D, efectos, música, crossfade, pool
+- `animacion` — Keyframes, easing, tweening, sprite sheets, animador state machine
+- `assets` — Atlas de texturas, lazy loading, cache LRU, paquetes
+- `colision` — AABB, círculos, polígonos, raycasting, Quadtree, capas
+
+### Stdlib — Machine Learning / IA (5 módulos nuevos)
+- `tensor` — Tensores N-dimensionales, activaciones, operaciones matriciales
+- `red_neuronal` — Deep learning: Dense, Dropout, BatchNorm, Adam, SGD, RMSProp
+- `ml` — Regresión lineal/logística, KNN, K-Means, Árbol de decisión, Random Forest
+- `nlp` — Tokenización, TF-IDF, sentimiento, Levenshtein, resumen automático
+- `datos` — DataFrame: filtrar, groupby, join, describe, correlación, CSV I/O
+
+### Stdlib — Enterprise (8 módulos previos)
+- `auth`, `redis`, `metricas`, `microservicio`, `graphql`, `cola_mensajes`, `auditoria`, `transacciones`
+
+### Herramientas nuevas
+- `cftype` — Type checker estático para C-Forge
+- `cfcover` — Code coverage con reporte HTML
+- `cfprofile` — Profiler con detección de hotspots
+- `cfmigrate` — Gestor de migraciones de base de datos
+- `cfgen` — Scaffolding: proyecto, clase, api, cli, videojuego, ml
+
+### Ejemplos completos
+- `ejemplos/banco/sistema_bancario.cfv` — Sistema bancario con SAGA
+- `ejemplos/ml/clasificador.cfv` — Pipeline ML: NN + Árbol + Random Forest
+- `ejemplos/cli/cforgecli.cfv` — Herramienta CLI con tabla, colores, barra de progreso
+- `ejemplos/microservicio/arquitectura.cfv` — Arquitectura distribuida completa
+
+### Cifras
+- **73** módulos de stdlib
+- **17** herramientas Python
+- **66** ejemplos
+- **~15,000** líneas de código nuevo en esta versión
+
+
+## 2.5.1 — 2026-07-28
+
+### Correcciones y mejoras del intérprete
+
+**Resolución de rutas (`cforgev.cpp`):**
+- Corregido bug crítico: `argv[1]` ahora se canonicaliza con `std::filesystem::weakly_canonical` antes de construir `cfv_base_archivos`, evitando doble prefijo en rutas relativas.
+- Scripts pueden ejecutarse desde cualquier directorio sin error de "archivo no encontrado".
+
+**Constructores de clase:**
+- El método `constructor` de una clase ahora se invoca automáticamente al instanciar con `NombreClase(args...)`.
+- `esto` correctamente enlazado dentro del constructor para acceder y modificar campos.
+
+**Closures en funciones nombradas:**
+- Funciones declaradas con `funcion nombre(...)` ahora capturan su entorno de definición igual que las lambdas.
+- Permite que módulos stdlib accedan a constantes top-level (`PI`, `E`, `PHI`) desde funciones internas como `seno()`, `coseno()`.
+
+**Builtins de orden superior (HOF):**
+- `mapear(lista, fn)` — transforma cada elemento con fn.
+- `filtrar(lista, pred)` — retorna elementos donde pred es verdadero.
+- `reducir(lista, fn, inicial)` — fold/reduce con acumulador.
+- `para_cada(lista, fn)` — forEach sin retorno.
+- `ordenar(lista)` / `ordenar(lista, comp)` — ordena con comparador opcional.
+- `mapa_claves(mapa)` — alias de `claves()`.
+- `mapa_valores(mapa)` — retorna lista de valores.
+- `aleatorio()` — número decimal en [0, 1).
+
+**Stdlib:**
+- `stdlib/numero.cfv`: corregido `NAN = 0/0` → `NAN = 0` (división por cero en importación).
+- `stdlib/algoritmos.cfv`: corregido `mergesort` con loop de índices, `busqueda_binaria` con comparador opcional por defecto, `agrupar_por` usa `a_texto()`, `grafo_bfs` con cola basada en offset, `grafo_dfs` usa `tiene_clave()`.
+
+### Nuevos archivos
+
+**Empaquetado:**
+- `pyproject.toml` — `pip install .` instala cfmt, cflint, cftest, cfdoc, cfwatch, cforgec, cforge en PATH.
+- `Dockerfile` + `.dockerignore` — imagen multi-stage Ubuntu 24.04 con cforgev + tools + stdlib.
+
+**Ejemplos verificados (10 archivos):**
+- `ejemplos/01_hola.cfv` — Hola mundo y variables.
+- `ejemplos/02_tipos.cfv` — Tipos de datos, listas, mapas.
+- `ejemplos/03_funciones.cfv` — Funciones, closures, HOF.
+- `ejemplos/04_clases.cfv` — OOP, constructores, herencia.
+- `ejemplos/05_manejo_errores.cfv` — try/catch/lanzar.
+- `ejemplos/06_stdlib_texto.cfv` — Módulo texto de stdlib.
+- `ejemplos/07_stdlib_lista.cfv` — Módulo lista + builtins HOF.
+- `ejemplos/08_concurrencia.cfv` — Canales y concurrencia.
+- `ejemplos/09_stdlib_algoritmos.cfv` — quicksort, mergesort, grafos.
+- `ejemplos/10_stdlib_numero.cfv` — Estadísticas, trigonometría, formateo.
+
+Todos los ejemplos verificados con `CFORGE_STDLIB=./stdlib ./cforgev ejemplos/XX_*.cfv`.
+
+---
+
+## 2.4.0 — 2026-07-28
+
+### Herramientas de desarrollo completas
+
+**Formatter — `tools/cfmt.py`:**
+- Formateador canónico de código C-Forge
+- `cfmt archivo.cfv` — formatea en lugar
+- `cfmt --check` — verifica sin modificar (exit 1 si hay cambios)
+- `cfmt --stdout` — imprime a stdout
+- Soporta directorios y globs (`cfmt stdlib/`)
+
+**Linter — `tools/cflint.py`:**
+- Análisis estático con 60+ reglas organizadas por categoría
+- CF001-CF009: Variables no usadas, redeclaraciones
+- CF010-CF019: Funciones no llamadas, parámetros excesivos, funciones largas
+- CF020-CF029: `var`/`let`/`const`, `console.log`, `print()`, `return` en lugar de `retornar`
+- CF030-CF039: Líneas largas, mezcla tabs/espacios, TODO/FIXME
+- CF040-CF049: Anidamiento excesivo (complejidad ciclomática)
+- CF050-CF059: Builtins deprecados
+- CF060-CF069: Credenciales hardcodeadas, SQL injection hints
+- `--strict` convierte warnings en errores, `--json` para integración CI/CD
+
+**Transpilador AOT — `tools/cforgec.py`:**
+- Compila C-Forge → C99 nativo vía transpilación
+- Tokenizador, parser y generador de código C completos
+- `cforgec archivo.cfv --compile` — genera y compila con gcc
+- `cforgec archivo.cfv --run` — compila y ejecuta directamente
+- `cforgec --ir archivo.cfv` — imprime AST
+- Runtime C mínimo incluido (CfvValue, tipos, mostrar, cfv_truthy)
+
+**Package Registry — `tools/pkg_registry.py` + `cfpkg`:**
+- Servidor HTTP del registro de paquetes (estilo npm)
+- `cfpkg serve --port 7373` — iniciar el servidor
+- `cfpkg publish ./mi-paquete/` — publicar leyendo cforge.toml
+- `cfpkg install nombre@1.0.0` — instalar en `cforge_modules/`
+- `cfpkg search texto` — buscar paquetes
+- `cfpkg info nombre` — ver metadata completa
+- Almacenamiento en archivos `.cfpkg` (tarballs gz)
+
+**Debugger DAP — `tools/dap_server.py`:**
+- Servidor Debug Adapter Protocol (Microsoft DAP spec)
+- Compatible con VS Code, Neovim DAP, cualquier cliente DAP
+- `python3 dap_server.py --stdio` — para VS Code launch config
+- `python3 dap_server.py --port 4711` — modo TCP para debug remoto
+- Soporta: breakpoints, step in/over/out, stack frames, variables, evaluate
+- Modo simulación cuando el intérprete no está disponible
+
+### Nuevos módulos stdlib
+
+- `stdlib/hilos.cfv` — Concurrencia de alto nivel
+  - `hilo_lanzar`, `pool_crear/enviar/esperar_todo`
+  - Semáforos, promesas, `promesa_todo` (Promise.all)
+  - Workers con canal entrada/salida
+- `stdlib/fecha.cfv` — Fechas y tiempos completos
+  - Parsear ISO 8601, DD/MM/YYYY, formatear con patrones
+  - Aritmética: agregar días/meses/años/horas
+  - `tiempo_relativo()` — "hace 3 días", "en 2 horas"
+  - Rangos de fechas, semana del año, año bisiesto
+
+### Mejoras de base de datos
+
+**PostgreSQL nativo (`#ifdef CFV_WITH_PGSQL`):**
+- `pg_conectar(conn_str)`, `pg_cerrar(id)`, `pg_query(id, sql)`, `pg_exec(id, sql)`, `pg_escapar(id, str)`
+- Pool de conexiones interno
+
+**MySQL nativo (`#ifdef CFV_WITH_MYSQL`):**
+- `mysql_conectar(conf)`, `mysql_cerrar(id)`, `mysql_query(id, sql)`, `mysql_escapar(id, str)`
+
+**WebSocket RFC 6455 nativo (sin deps):**
+- SHA-1 implementado desde cero (FIPS 180-4)
+- `ws_escuchar`, `ws_aceptar`, `ws_recibir`, `ws_enviar`, `ws_broadcast`, `ws_cerrar`
+
+---
+
+## 2.3.1 — 2026-07-28
+
+### Nuevas funciones nativas (builtins v2.3b)
+
+**Lista avanzada:**
+- `lista_slice(lista, desde, hasta)` — sublista por índices
+- `lista_buscar(lista, valor)` — índice de la primera ocurrencia (o -1)
+- `lista_contiene(lista, valor)` — booleano
+- `lista_contar_elem(lista, valor)` — contar ocurrencias de un valor
+- `lista_invertir(lista)` — nueva lista invertida
+- `lista_rellenar(n, valor)` — crear lista de N copias del valor
+- `lista_cada_n(lista, n)` — tomar cada N-ésimo elemento
+
+**Texto:**
+- `texto_es_numero(texto)` — verdadero si el texto es un número válido
+- `texto_unir(lista, sep)` — unir lista con separador (alias de join)
+
+**Número:**
+- `numero_es_entero(n)` — verdadero si n no tiene parte decimal
+- `numero_es_nan(n)` — verdadero si n es NaN
+
+**Rango:**
+- `rango_paso(desde, hasta, paso)` — rango con paso personalizado, soporta negativo
+
+**Mapa:**
+- `mapa_filtrar_claves(mapa, lista_claves)` — conservar solo las claves indicadas
+- `mapa_omitir_claves(mapa, lista_claves)` — excluir las claves indicadas
+
+### Nueva stdlib (31 módulos)
+
+- `stdlib/config.cfv` — parser INI/JSON, variables de entorno, validación
+- `stdlib/cache.cfv` — LRU cache, TTL cache, memoización, cache de disco
+- `stdlib/router.cfv` — router HTTP con parámetros, middleware, grupos, CORS
+
+### Nuevos ejemplos
+
+- `ejemplos/servidor_archivos.cfv` — servidor de archivos estáticos con listado HTML
+- `ejemplos/scraper.cfv` — web scraper: extracción de texto, links, emails, regex
+
+### Herramientas
+
+- `vscode-extension/` — extensión VSCode completa: resaltado, snippets, hover docs, completions, formateador, diagnósticos, botón de ejecución
+
+---
+
+## 2.3.0 — 2026-07-28
+
+### Nuevas funciones nativas (builtins)
+
+**Archivo y sistema de archivos:**
+- `archivo_copiar(src, dst)` — copiar archivo
+- `archivo_mover(src, dst)` — mover/renombrar archivo
+- `archivo_eliminar(ruta)` — eliminar archivo
+- `archivo_tam(ruta)` — tamaño en bytes
+- `directorio_crear(ruta)` — crear directorio (recursivo)
+- `directorio_eliminar(ruta)` — eliminar directorio y contenido
+- `directorio_listar(dir)` — listar entradas del directorio
+- `directorio_listar_rec(dir)` — listar recursivamente
+- `es_directorio(ruta)` — booleano
+- `es_archivo_regular(ruta)` — booleano
+
+**Rutas:**
+- `ruta_unir(lista)` o `ruta_unir(a,b,c)` — unir segmentos de ruta
+- `ruta_directorio(ruta)` — directorio padre
+- `ruta_nombre(ruta)` — nombre del archivo
+- `ruta_extension(ruta)` — extensión (.cfv)
+- `ruta_sin_extension(ruta)` — nombre sin extensión
+- `ruta_absoluta(ruta)` — ruta absoluta
+
+**Texto avanzado:**
+- `texto_repetir(texto, n)` — repetir texto N veces
+- `texto_invertir(texto)` — invertir string
+- `texto_contar(texto, sub)` — contar ocurrencias
+- `texto_posiciones(texto, sub)` — posiciones de todas las ocurrencias
+
+**Números:**
+- `numero_formato(n, decimales)` — formato con N decimales fijos
+- `numero_abs(n)` — valor absoluto
+
+**Colecciones:**
+- `lista_max(lista)` — máximo de una lista numérica
+- `lista_min(lista)` — mínimo de una lista numérica
+- `lista_suma(lista)` — suma de una lista numérica
+- `lista_promedio(lista)` — promedio de una lista numérica
+
+### Nueva stdlib (28 módulos)
+
+- `stdlib/archivo.cfv` — operaciones avanzadas de archivo/directorio
+- `stdlib/cli.cfv` — herramientas CLI (colores, tabla, progreso, menu)
+- `stdlib/matematica_avanzada.cfv` — estadísticas, regresión lineal, KNN, vectores
+- `stdlib/plantilla.cfv` — motor de plantillas HTML
+
+### Nuevos ejemplos
+
+- `ejemplos/ml_basico.cfv` — Machine Learning: estadística, regresión lineal, KNN
+- `ejemplos/cli_herramienta.cfv` — herramienta CLI completa con colores y tabla
+- `ejemplos/chat_tcp.cfv` — servidor de chat HTTP multi-sala
+
+---
+
+## 2.2.0 — 2026-07-28
+
+### Nuevas funciones nativas
+
+- `json_texto`, `json_bonito`, `json_parsear` — JSON nativo sin dependencias
+- `db_abrir`, `db_cerrar`, `db_ejecutar`, `db_consulta`, `db_consulta_p`, `db_ultimo_id`, `db_transaccion`, `db_confirmar`, `db_revertir` — SQLite integrado
+- `http_post`, `http_put`, `http_delete`, `http_solicitud` — cliente HTTP completo
+- `regex_coincidir`, `regex_buscar`, `regex_reemplazar`, `regex_grupos` — regex nativo
+- `canal_nuevo`, `canal_enviar`, `canal_recibir`, `canal_cerrar`, `canal_tam` — canales concurrentes
+- `fecha_ahora`, `fecha_formatear`, `tiempo_ms`, `tiempo_segundos` — fecha/hora nativa
+- `lista_unica`, `lista_aplanar`, `lista_zip` — colecciones avanzadas
+- `mapa_claves`, `mapa_valores`, `mapa_entradas`, `mapa_fusionar` — operaciones de mapa
+- `texto_relleno`, `texto_relleno_der`, `texto_formato` — texto avanzado
+- `env_obtener`, `env_establecer`, `proceso_ejecutar`, `salir`, `pausa` — sistema
+
+### Nueva stdlib (v2.2)
+
+- `stdlib/db.cfv` — SQLite ORM completo
+- `stdlib/pruebas.cfv` — framework de testing
+- `stdlib/log.cfv` — logging con colores y niveles
+- `stdlib/validar.cfv` — validación de datos y esquemas
+- `stdlib/http_cliente.cfv` — cliente HTTP de alto nivel
+- `stdlib/concurrencia.cfv` — canales, mutex, reintentos
+
+### Nuevos ejemplos (v2.2)
+
+- `ejemplos/app_banco.cfv` — app bancaria completa con SQLite, JWT, transacciones
+- `ejemplos/api_rest.cfv` — API REST con CRUD completo
+- `ejemplos/juego_2d.cfv` — Snake con SDL2
+- `ejemplos/juego_3d.cfv` — cubo 3D con OpenGL
+- `ejemplos/test_suite.cfv` — suite de pruebas unitarias completa
+
+---
+
+## 2.1.0 — 2026-07-28
+
+- Templates Android (JNI + NDK) en `herramientas/android-cforgev/`
+- Templates iOS (Swift + ObjC++) en `herramientas/ios-cforgev/`
+- OpenGL 3D: `gl_iniciar`, `gl_programa_basico`, `gl_malla_cubo`, `gl_dibujar_malla`, matrices MVP
+- SDL2 bindings: `juego_iniciar`, `juego_eventos`, `sdl_dibujar_rect`, `sdl_delay`
+- Plugin Unreal Engine 5: `CForgeSubsystem.h`, `CForgeRuntime.cpp`
+- Plugin Unity: `CForge.cs`, `CForgePlugin.cs`
+- `stdlib/sdl.cfv` y `stdlib/gl.cfv`
+
+---
+
+## 2.0.0 — 2026-07-26
+
+- Servidor HTTP nativo (POSIX sockets): `web_escuchar`, `web_solicitud`, `web_responder`
+- Criptografía real OpenSSL: SHA-256, HMAC-SHA256, AES-256-CBC, PBKDF2, JWT HS256
+- `stdlib/web.cfv`, `stdlib/crypto.cfv`
+- Package manager `cfpkg`
+- Install script `install.sh`
+
+---
 
 ## 1.6.0-developer-preview — en desarrollo
 

@@ -1,0 +1,33 @@
+// Estructuras, mapas y tipos en C-Forge
+
+estructura Punto {
+    x: numero
+    y: numero
+}
+
+funcion distancia(a: Punto, b: Punto): numero {
+    sea dx: numero = a.x - b.x
+    sea dy: numero = a.y - b.y
+    retornar (dx * dx + dy * dy)
+}
+
+sea origen: Punto = Punto { x: 0, y: 0 }
+sea p: Punto = Punto { x: 3, y: 4 }
+
+mostrar(distancia(origen, p))
+
+// Mapas
+sea config: mapa = {
+    "nombre": "C-Forge",
+    "version": "1.6",
+    "nativo": verdadero
+}
+
+mostrar(config["nombre"])
+mostrar(config["version"])
+
+// Listas y iteración
+sea lenguajes: lista = ["C-Forge", "C++", "Rust"]
+para lang en lenguajes {
+    mostrar(lang)
+}

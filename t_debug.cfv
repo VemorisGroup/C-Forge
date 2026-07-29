@@ -1,0 +1,3 @@
+sea y: numero = 18
+y = 5
+mostrar(a_texto(y))

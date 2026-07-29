@@ -1,0 +1,220 @@
+// stdlib/assets.cfv — Gestión de assets para videojuegos
+// C-Forge Standard Library v3.0
+
+// ── Registro de assets ─────────────────────────────────────────────────────────
+
+sea _assets = {}
+sea _grupos = {}
+sea _cargados = 0
+sea _total = 0
+sea _on_progreso = nulo
+sea _on_completo = nulo
+
+/// @doc Registrar asset
+funcion asset_registrar(id, tipo, ruta, grupo) {
+    _assets[id] = {
+        "id": id,
+        "tipo": tipo,    // "imagen", "audio", "json", "shader", "fuente", "video", "modelo3d"
+        "ruta": ruta,
+        "grupo": grupo ?? "global",
+        "cargado": falso,
+        "datos": nulo,
+        "error": nulo,
+        "tamano_bytes": 0
+    }
+    _total = _total + 1
+}
+
+/// @doc Registrar múltiples assets
+funcion assets_registrar(lista) {
+    para item en lista {
+        asset_registrar(item["id"], item["tipo"], item["ruta"], item["grupo"] ?? "global")
+    }
+}
+
+/// @doc Simular carga de asset
+funcion asset_cargar(id) {
+    si (no tiene_clave(_assets, id)) {
+        retornar {"error": "Asset no encontrado: " + id}
+    }
+    sea asset = _assets[id]
+    si (asset["cargado"]) { retornar asset }
+    // En un entorno real, esto sería async
+    asset["cargado"] = verdadero
+    asset["datos"] = {"tipo": asset["tipo"], "ruta": asset["ruta"], "cargado_en": reloj_ms()}
+    _cargados = _cargados + 1
+    si (_on_progreso != nulo) {
+        _on_progreso(_cargados, _total, id)
+    }
+    si (_cargados == _total y _on_completo != nulo) {
+        _on_completo()
+    }
+    retornar asset
+}
+
+/// @doc Cargar todos los assets de un grupo
+funcion assets_cargar_grupo(grupo) {
+    para id en mapa_claves(_assets) {
+        si (_assets[id]["grupo"] == grupo) {
+            asset_cargar(id)
+        }
+    }
+}
+
+/// @doc Cargar todos los assets
+funcion assets_cargar_todo() {
+    para id en mapa_claves(_assets) {
+        asset_cargar(id)
+    }
+}
+
+/// @doc Obtener asset cargado
+funcion asset_obtener(id) {
+    si (no tiene_clave(_assets, id)) { retornar nulo }
+    si (no _assets[id]["cargado"]) { asset_cargar(id) }
+    retornar _assets[id]["datos"]
+}
+
+/// @doc Alias corto
+funcion A(id) { retornar asset_obtener(id) }
+
+/// @doc Descargar grupo de assets (liberar memoria)
+funcion assets_descargar_grupo(grupo) {
+    para id en mapa_claves(_assets) {
+        si (_assets[id]["grupo"] == grupo) {
+            _assets[id]["cargado"] = falso
+            _assets[id]["datos"] = nulo
+            _cargados = _cargados - 1
+        }
+    }
+}
+
+/// @doc Progreso de carga (0.0 - 1.0)
+funcion assets_progreso() {
+    si (_total == 0) { retornar 1.0 }
+    retornar _cargados / _total
+}
+
+/// @doc Todos cargados
+funcion assets_listos() { retornar _cargados >= _total }
+
+funcion assets_on_progreso(fn) { _on_progreso = fn }
+funcion assets_on_completo(fn) { _on_completo = fn }
+
+// ── Atlas de texturas ──────────────────────────────────────────────────────────
+
+funcion atlas_crear(nombre, ruta_textura, ancho_frame, alto_frame) {
+    sea atlas = {
+        "nombre": nombre,
+        "textura": ruta_textura,
+        "frame_w": ancho_frame,
+        "frame_h": alto_frame,
+        "frames": {},
+        "ancho_total": 0,
+        "alto_total": 0
+    }
+    asset_registrar(nombre, "atlas", ruta_textura, "global")
+    retornar atlas
+}
+
+funcion atlas_definir_frame(atlas, nombre_frame, x, y, ancho, alto) {
+    atlas["frames"][nombre_frame] = {
+        "x": x, "y": y,
+        "ancho": ancho ?? atlas["frame_w"],
+        "alto": alto ?? atlas["frame_h"]
+    }
+}
+
+/// @doc Generar frames automáticamente (grid)
+funcion atlas_generar_grid(atlas, cols, filas, nombres) {
+    sea idx = 0
+    para f en rango(0, filas) {
+        para c en rango(0, cols) {
+            sea nombre_f = si(longitud(nombres) > idx, nombres[idx], "frame_" + a_texto(idx))
+            atlas_definir_frame(atlas, nombre_f,
+                c * atlas["frame_w"], f * atlas["frame_h"],
+                atlas["frame_w"], atlas["frame_h"])
+            idx = idx + 1
+        }
+    }
+}
+
+funcion atlas_frame(atlas, nombre_frame) {
+    retornar atlas["frames"][nombre_frame] ?? nulo
+}
+
+// ── Fuentes ────────────────────────────────────────────────────────────────────
+
+funcion fuente_registrar(nombre, ruta, tamanos) {
+    para tam en (tamanos ?? [12, 16, 24, 32, 48]) {
+        asset_registrar(nombre + "_" + a_texto(tam), "fuente", ruta, "global")
+    }
+    retornar nombre
+}
+
+// ── Shaders ────────────────────────────────────────────────────────────────────
+
+funcion shader_registrar(nombre, vert_ruta, frag_ruta) {
+    asset_registrar(nombre + "_vert", "shader", vert_ruta, "shaders")
+    asset_registrar(nombre + "_frag", "shader", frag_ruta, "shaders")
+}
+
+// ── Paquetes de assets (.cfpkg) ────────────────────────────────────────────────
+
+funcion assets_pack_crear(nombre) {
+    retornar {
+        "nombre": nombre,
+        "version": "1.0",
+        "assets": [],
+        "grupos": []
+    }
+}
+
+funcion assets_pack_agregar(pack, id, tipo, ruta, grupo) {
+    agregar(pack["assets"], {"id": id, "tipo": tipo, "ruta": ruta, "grupo": grupo ?? "default"})
+}
+
+funcion assets_pack_exportar_json(pack) {
+    retornar json_serializar(pack)
+}
+
+funcion assets_pack_importar_json(json_texto) {
+    sea pack = json_parsear(json_texto)
+    assets_registrar(pack["assets"])
+    retornar pack
+}
+
+// ── Cache de assets ────────────────────────────────────────────────────────────
+
+sea _cache_lru = []
+sea _cache_max_mb = 256
+
+funcion cache_estado() {
+    retornar {
+        "cargados": _cargados,
+        "total": _total,
+        "progreso": assets_progreso(),
+        "max_mb": _cache_max_mb
+    }
+}
+
+funcion cache_set_limite(mb) { _cache_max_mb = mb }
+
+// ── Carga lazy ─────────────────────────────────────────────────────────────────
+
+sea _cola_carga = []
+
+funcion asset_cargar_lazy(id, prioridad) {
+    agregar(_cola_carga, {"id": id, "prioridad": prioridad ?? 0})
+    _cola_carga = mergesort(_cola_carga, funcion(a, b) { retornar b["prioridad"] - a["prioridad"] })
+}
+
+funcion assets_procesar_cola(n_por_frame) {
+    sea procesados = 0
+    mientras (longitud(_cola_carga) > 0 y procesados < (n_por_frame ?? 2)) {
+        sea item = _cola_carga[0]
+        _cola_carga = subarray(_cola_carga, 1, longitud(_cola_carga))
+        asset_cargar(item["id"])
+        procesados = procesados + 1
+    }
+}

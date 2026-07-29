@@ -16,31 +16,129 @@
     { "include": "#functions" }
   ],
   "repository": {
-    "comments": { "patterns": [{ "name": "comment.line.double-slash.cforgev", "match": "//.*$" }] },
-    "strings": { "patterns": [{ "name": "string.quoted.double.cforgev", "begin": "\"", "end": "\"", "patterns": [{ "name": "constant.character.escape.cforgev", "match": "\\\\." }] }] },
-    "numbers": { "patterns": [{ "name": "constant.numeric.cforgev", "match": "\\b\\d+(?:\\.\\d+)?\\b" }] },
-    "types": { "patterns": [{ "name": "storage.type.cforgev", "match": "\\b(numero|texto|booleano|lista|mapa|tupla|conjunto|opcion|nulo|cualquiera)\\b" }] },
-    "externPython": { "patterns": [{ "name": "meta.embedded.block.python.cforgev", "begin": "\\bextern\\s*\\(\\s*\"python\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.python" }] },
-    "externCpp": { "patterns": [{ "name": "meta.embedded.block.cpp.cforgev", "begin": "\\bextern\\s*\\(\\s*\"cpp\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.cpp" }] },
-    "externJavaScript": { "patterns": [{ "name": "meta.embedded.block.javascript.cforgev", "begin": "\\bextern\\s*\\(\\s*\"(?:javascript|typescript)\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.js" }] },
-    "externJava": { "patterns": [{ "name": "meta.embedded.block.java.cforgev", "begin": "\\bextern\\s*\\(\\s*\"java\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.java" }] },
-    "keywords": { "patterns": [
-      { "name": "keyword.control.test.cforgev", "match": "\\b(test|afirmar)\\b" },
-      { "name": "keyword.control.gpu.cforgev", "match": "\\bgpu\\b" },
-      { "name": "storage.modifier.cluster.cforgev", "match": "\\bcluster\\b" },
-      { "name": "storage.modifier.unsafe.cforgev", "match": "\\b(unsafe|region)\\b" },
-      { "name": "storage.modifier.async.cforgev", "match": "\\b(async|await)\\b" },
-      { "name": "keyword.control.cforgev", "match": "\\b(sea|si|sino|mientras|funcion|retornar|estructura|clase|interfaz|implementa|campo|metodo|este|usar|import|pip|nuget|npm|maven|extern|extern_c|segura|intentar|capturar|verdadero|falso|y|o|no)\\b" }
-    ] },
-    "compatibility": { "patterns": [
-      { "name": "meta.function-call.compatibility.javascript.cforgev", "match": "\\b(console)(\\.)(log)(?=\\s*\\()", "captures": { "1": { "name": "support.class.console.cforgev" }, "2": { "name": "punctuation.accessor.cforgev" }, "3": { "name": "support.function.log.cforgev" } } },
-      { "name": "meta.function-call.compatibility.java.cforgev", "match": "\\b(System)(\\.)(out)(\\.)(println)(?=\\s*\\()", "captures": { "1": { "name": "support.class.system.cforgev" }, "2": { "name": "punctuation.accessor.cforgev" }, "3": { "name": "support.variable.out.cforgev" }, "4": { "name": "punctuation.accessor.cforgev" }, "5": { "name": "support.function.println.cforgev" } } },
-      { "name": "meta.output.compatibility.cpp.cforgev", "match": "\\b(?:std::)?(?:cout|endl)\\b", "captures": { "0": { "name": "support.function.output.cpp.cforgev" } } },
-      { "name": "meta.method.compatibility.collection.cforgev", "match": "(\\.)(append|push|length|len)\\b", "captures": { "1": { "name": "punctuation.accessor.cforgev" }, "2": { "name": "support.function.collection.cforgev" } } }
-    ] },
-    "functions": { "patterns": [
-      { "name": "entity.name.function.connector.cforgev", "match": "\\b(?:ia_|ui_|web_)[A-Za-z_][A-Za-z0-9_]*\\b" },
-      { "name": "support.function.cforgev", "match": "\\b(mostrar|print|leer|leer_archivo|escribir_archivo|existe_archivo|file_read|file_write|file_append|sys_run|sys_info|net_listen|net_send|matrix|array_fast|conjunto|longitud|agregar|a_numero|a_texto|raiz|potencia|absoluto|redondear|tiempo_actual|argumentos|forge_hash|forge_bench|forge_catalogo|forge_arena_estado|json_parse|sys_fetch|use_python|use_csharp|use_native|use_cpp|use_javascript|use_typescript|use_java|cluster_estado|jit_estado|jit_caliente|paralelo|mover|prestar|prestar_mut|soltar_prestamo|destruir|algunos|ninguno|es_algunos|desenvolver|tarea|esperar|cancelar|canal|enviar|recibir|cerrar_canal)\\b" }
-    ] }
+    "comments": {
+      "patterns": [{ "name": "comment.line.double-slash.cforgev", "match": "//.*$" }]
+    },
+    "strings": {
+      "patterns": [{
+        "name": "string.quoted.double.cforgev",
+        "begin": "\"",
+        "end": "\"",
+        "patterns": [
+          { "name": "constant.character.escape.cforgev", "match": "\\\\." },
+          {
+            "name": "meta.interpolation.cforgev",
+            "begin": "\\{",
+            "end": "\\}",
+            "beginCaptures": { "0": { "name": "punctuation.definition.template-expression.begin.cforgev" } },
+            "endCaptures": { "0": { "name": "punctuation.definition.template-expression.end.cforgev" } },
+            "contentName": "meta.embedded.cforgev"
+          }
+        ]
+      }]
+    },
+    "numbers": {
+      "patterns": [{ "name": "constant.numeric.cforgev", "match": "\\b\\d+(?:\\.\\d+)?\\b" }]
+    },
+    "types": {
+      "patterns": [{ "name": "storage.type.cforgev", "match": "\\b(numero|texto|booleano|lista|mapa|tupla|conjunto|opcion|nulo|cualquiera)\\b" }]
+    },
+    "externPython": {
+      "patterns": [{ "name": "meta.embedded.block.python.cforgev", "begin": "\\bextern\\s*\\(\\s*\"python\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.python" }]
+    },
+    "externCpp": {
+      "patterns": [{ "name": "meta.embedded.block.cpp.cforgev", "begin": "\\bextern\\s*\\(\\s*\"cpp\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.cpp" }]
+    },
+    "externJavaScript": {
+      "patterns": [{ "name": "meta.embedded.block.javascript.cforgev", "begin": "\\bextern\\s*\\(\\s*\"(?:javascript|typescript)\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.js" }]
+    },
+    "externJava": {
+      "patterns": [{ "name": "meta.embedded.block.java.cforgev", "begin": "\\bextern\\s*\\(\\s*\"java\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.java" }]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "constant.language.cforgev",
+          "match": "\\b(verdadero|falso|nulo)\\b"
+        },
+        {
+          "name": "keyword.control.cforgev",
+          "match": "\\b(si|sino|mientras|para|en|retornar|romper|continuar|intentar|capturar|finalmente|lanzar|segun|caso|otro|importar)\\b"
+        },
+        {
+          "name": "storage.modifier.cforgev",
+          "match": "\\b(sea|funcion|clase|extiende|super|este|campo|metodo|estatico|privado|publico|estructura|interfaz|implementa|enum|extern|extern_c)\\b"
+        },
+        {
+          "name": "keyword.operator.cforgev",
+          "match": "\\b(es|en|y|o|no|rango)\\b"
+        },
+        {
+          "name": "keyword.control.test.cforgev",
+          "match": "\\b(test|afirmar)\\b"
+        },
+        {
+          "name": "storage.modifier.async.cforgev",
+          "match": "\\b(async|await|tarea|esperar|cancelar|canal|enviar|recibir|cerrar_canal)\\b"
+        },
+        {
+          "name": "storage.modifier.cluster.cforgev",
+          "match": "\\b(cluster|gpu|paralelo)\\b"
+        },
+        {
+          "name": "keyword.import.cforgev",
+          "match": "\\b(usar|import|pip|nuget|npm|maven)\\b"
+        }
+      ]
+    },
+    "compatibility": {
+      "patterns": [
+        { "name": "meta.function-call.compatibility.javascript.cforgev", "match": "\\b(console)(\\.)(log)(?=\\s*\\()", "captures": { "1": { "name": "support.class.console.cforgev" }, "2": { "name": "punctuation.accessor.cforgev" }, "3": { "name": "support.function.log.cforgev" } } },
+        { "name": "meta.function-call.compatibility.java.cforgev", "match": "\\b(System)(\\.)(out)(\\.)(println)(?=\\s*\\()", "captures": { "1": { "name": "support.class.system.cforgev" }, "2": { "name": "punctuation.accessor.cforgev" }, "3": { "name": "support.variable.out.cforgev" }, "4": { "name": "punctuation.accessor.cforgev" }, "5": { "name": "support.function.println.cforgev" } } },
+        { "name": "meta.output.compatibility.cpp.cforgev", "match": "\\b(?:std::)?(?:cout|endl)\\b", "captures": { "0": { "name": "support.function.output.cpp.cforgev" } } },
+        { "name": "meta.method.compatibility.collection.cforgev", "match": "(\\.)(append|push|length|len|agregar|pop|top)\\b", "captures": { "1": { "name": "punctuation.accessor.cforgev" }, "2": { "name": "support.function.collection.cforgev" } } }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        { "name": "entity.name.function.connector.cforgev", "match": "\\b(?:ia_|ui_|web_)[A-Za-z_][A-Za-z0-9_]*\\b" },
+        {
+          "name": "support.function.builtin.cforgev",
+          "match": "\\b(mostrar|print|leer|longitud|agregar|tipo_de|a_numero|a_texto|a_booleano|piso|techo|raiz|potencia|absoluto|redondear|maximo|minimo|max|min)\\b"
+        },
+        {
+          "name": "support.function.io.cforgev",
+          "match": "\\b(leer_archivo|escribir_archivo|existe_archivo|listar_directorio|crear_directorio|eliminar_archivo|file_read|file_write|file_append|http_get|sys_run|sys_info|sys_fetch|net_listen|net_send)\\b"
+        },
+        {
+          "name": "support.function.stdlib.cforgev",
+          "match": "\\b(json_serializar|json_parsear|json_bonito|json_valido|json_get|json_parse|regex_coincidir|regex_buscar|regex_buscar_todos|regex_reemplazar|regex_dividir|es_email|es_url|es_numero_txt|base64_codificar|base64_decodificar|sha256|md5|url_codificar|url_decodificar|codigo_char|hash_simple)\\b"
+        },
+        {
+          "name": "support.function.fecha.cforgev",
+          "match": "\\b(fecha_ahora|fecha_ahora_ms|fecha_formato|fecha_diff_ms|fecha_diff_s|fecha_diff_dias|fecha_nombre_mes|fecha_nombre_dia|es_bisiesto)\\b"
+        },
+        {
+          "name": "support.function.aleatorio.cforgev",
+          "match": "\\b(aleatorio|aleatorio_entero|aleatorio_uniforme|aleatorio_de|aleatorio_bool|mezclar|muestra)\\b"
+        },
+        {
+          "name": "support.function.colecciones.cforgev",
+          "match": "\\b(cola_nueva|cola_encolar|cola_desencolar|cola_frente|cola_vacia|cola_tam|pila_nueva|pila_push|pila_pop|pila_tope|pila_vacia|pila_tam|heap_nuevo|heap_insertar|heap_extraer_min|heap_min|heap_tam|heap_vacio|conjunto_nuevo|conjunto_agregar|conjunto_contiene|conjunto_quitar|conjunto_tam|conjunto_union|conjunto_interseccion|conjunto_diferencia|conjunto_a_lista)\\b"
+        },
+        {
+          "name": "support.function.texto.cforgev",
+          "match": "\\b(texto_reemplazar|texto_dividir|texto_contiene|texto_recortar|texto_repetir|lista_unir|reemplazar|dividir|contiene)\\b"
+        },
+        {
+          "name": "support.function.pkgmgr.cforgev",
+          "match": "\\b(cfpkg_instalar|cfpkg_desinstalar|cfpkg_listar|cfpkg_info|cfpkg_init|cfpkg_dir|cfpkg_ruta)\\b"
+        },
+        {
+          "name": "support.function.interop.cforgev",
+          "match": "\\b(use_python|use_csharp|use_native|use_cpp|use_javascript|use_typescript|use_java|cluster_estado|jit_estado|jit_caliente|matrix|array_fast|forge_hash|forge_bench)\\b"
+        }
+      ]
+    }
   }
 }

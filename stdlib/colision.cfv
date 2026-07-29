@@ -1,0 +1,301 @@
+// stdlib/colision.cfv — Sistema de colisión avanzado
+// C-Forge Standard Library v3.0
+
+// ── Shapes básicas ─────────────────────────────────────────────────────────────
+
+funcion col_rect(x, y, w, h) { retornar {"tipo": "rect", "x": x, "y": y, "w": w, "h": h} }
+funcion col_circulo(x, y, r) { retornar {"tipo": "circulo", "x": x, "y": y, "r": r} }
+funcion col_punto(x, y) { retornar {"tipo": "punto", "x": x, "y": y} }
+funcion col_linea(x1, y1, x2, y2) { retornar {"tipo": "linea", "x1": x1, "y1": y1, "x2": x2, "y2": y2} }
+funcion col_capsule(x, y, radio, altura) { retornar {"tipo": "capsula", "x": x, "y": y, "radio": radio, "altura": altura} }
+
+// ── Detección punto ────────────────────────────────────────────────────────────
+
+funcion col_punto_en_rect(px, py, r) {
+    retornar px >= r["x"] y px <= r["x"] + r["w"] y py >= r["y"] y py <= r["y"] + r["h"]
+}
+
+funcion col_punto_en_circulo(px, py, c) {
+    sea dx = px - c["x"]
+    sea dy = py - c["y"]
+    retornar dx*dx + dy*dy <= c["r"] * c["r"]
+}
+
+funcion col_punto_en_poligono(px, py, vertices) {
+    sea n = longitud(vertices)
+    sea dentro = falso
+    sea j = n - 1
+    para i en rango(0, n) {
+        sea xi = vertices[i]["x"]
+        sea yi = vertices[i]["y"]
+        sea xj = vertices[j]["x"]
+        sea yj = vertices[j]["y"]
+        si ((yi > py) != (yj > py) y px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+            dentro = no dentro
+        }
+        j = i
+    }
+    retornar dentro
+}
+
+// ── Detección rect vs rect ─────────────────────────────────────────────────────
+
+funcion col_rect_rect(a, b) {
+    retornar a["x"] < b["x"] + b["w"] y a["x"] + a["w"] > b["x"] y
+           a["y"] < b["y"] + b["h"] y a["y"] + a["h"] > b["y"]
+}
+
+funcion col_rect_rect_info(a, b) {
+    si (no col_rect_rect(a, b)) { retornar nulo }
+    sea ox = minimo(a["x"]+a["w"], b["x"]+b["w"]) - maximo(a["x"], b["x"])
+    sea oy = minimo(a["y"]+a["h"], b["y"]+b["h"]) - maximo(a["y"], b["y"])
+    sea nx = 0
+    sea ny = 0
+    sea pen = 0
+    si (ox < oy) { nx = si(a["x"] < b["x"], -1, 1); pen = ox }
+    sino { ny = si(a["y"] < b["y"], -1, 1); pen = oy }
+    retornar {"colision": verdadero, "normal_x": nx, "normal_y": ny, "penetracion": pen, "ox": ox, "oy": oy}
+}
+
+// ── Detección círculo vs círculo ───────────────────────────────────────────────
+
+funcion col_circulo_circulo(a, b) {
+    sea dx = a["x"] - b["x"]
+    sea dy = a["y"] - b["y"]
+    sea dist2 = dx*dx + dy*dy
+    sea sr = a["r"] + b["r"]
+    retornar dist2 <= sr * sr
+}
+
+funcion col_circulo_circulo_info(a, b) {
+    sea dx = b["x"] - a["x"]
+    sea dy = b["y"] - a["y"]
+    sea dist2 = dx*dx + dy*dy
+    sea sr = a["r"] + b["r"]
+    si (dist2 > sr * sr) { retornar nulo }
+    sea dist = raiz(dist2)
+    sea nx = si(dist > 0, dx/dist, 1)
+    sea ny = si(dist > 0, dy/dist, 0)
+    retornar {"colision": verdadero, "normal_x": nx, "normal_y": ny, "penetracion": sr - dist, "distancia": dist}
+}
+
+// ── Detección círculo vs rect ──────────────────────────────────────────────────
+
+funcion col_circulo_rect(c, r) {
+    sea clamp_x = maximo(r["x"], minimo(c["x"], r["x"] + r["w"]))
+    sea clamp_y = maximo(r["y"], minimo(c["y"], r["y"] + r["h"]))
+    sea dx = c["x"] - clamp_x
+    sea dy = c["y"] - clamp_y
+    retornar dx*dx + dy*dy <= c["r"] * c["r"]
+}
+
+funcion col_circulo_rect_info(c, r) {
+    sea clamp_x = maximo(r["x"], minimo(c["x"], r["x"] + r["w"]))
+    sea clamp_y = maximo(r["y"], minimo(c["y"], r["y"] + r["h"]))
+    sea dx = c["x"] - clamp_x
+    sea dy = c["y"] - clamp_y
+    sea dist2 = dx*dx + dy*dy
+    si (dist2 > c["r"] * c["r"]) { retornar nulo }
+    sea dist = raiz(dist2)
+    sea nx = si(dist > 0, dx/dist, 0)
+    sea ny = si(dist > 0, dy/dist, 1)
+    retornar {"colision": verdadero, "normal_x": nx, "normal_y": ny, "penetracion": c["r"] - dist}
+}
+
+// ── Detección línea ────────────────────────────────────────────────────────────
+
+funcion col_linea_linea(l1, l2) {
+    sea dx1 = l1["x2"] - l1["x1"]
+    sea dy1 = l1["y2"] - l1["y1"]
+    sea dx2 = l2["x2"] - l2["x1"]
+    sea dy2 = l2["y2"] - l2["y1"]
+    sea denom = dx1 * dy2 - dy1 * dx2
+    si (denom == 0) { retornar falso } // Paralelas
+    sea t = ((l2["x1"] - l1["x1"]) * dy2 - (l2["y1"] - l1["y1"]) * dx2) / denom
+    sea u = ((l2["x1"] - l1["x1"]) * dy1 - (l2["y1"] - l1["y1"]) * dx1) / denom
+    retornar t >= 0 y t <= 1 y u >= 0 y u <= 1
+}
+
+funcion col_linea_linea_punto(l1, l2) {
+    si (no col_linea_linea(l1, l2)) { retornar nulo }
+    sea dx1 = l1["x2"] - l1["x1"]
+    sea dy1 = l1["y2"] - l1["y1"]
+    sea dx2 = l2["x2"] - l2["x1"]
+    sea dy2 = l2["y2"] - l2["y1"]
+    sea denom = dx1 * dy2 - dy1 * dx2
+    sea t = ((l2["x1"] - l1["x1"]) * dy2 - (l2["y1"] - l1["y1"]) * dx2) / denom
+    retornar {"x": l1["x1"] + t * dx1, "y": l1["y1"] + t * dy1, "t": t}
+}
+
+funcion col_linea_rect(l, r) {
+    si (col_punto_en_rect(l["x1"], l["y1"], r)) { retornar verdadero }
+    si (col_punto_en_rect(l["x2"], l["y2"], r)) { retornar verdadero }
+    sea lados = [
+        col_linea(r["x"], r["y"], r["x"]+r["w"], r["y"]),
+        col_linea(r["x"]+r["w"], r["y"], r["x"]+r["w"], r["y"]+r["h"]),
+        col_linea(r["x"]+r["w"], r["y"]+r["h"], r["x"], r["y"]+r["h"]),
+        col_linea(r["x"], r["y"]+r["h"], r["x"], r["y"])
+    ]
+    para lado en lados {
+        si (col_linea_linea(l, lado)) { retornar verdadero }
+    }
+    retornar falso
+}
+
+// ── Raycast 2D ─────────────────────────────────────────────────────────────────
+
+funcion col_raycast_rect(orig_x, orig_y, dir_x, dir_y, r) {
+    sea inv_dx = si(dir_x != 0, 1/dir_x, 999999)
+    sea inv_dy = si(dir_y != 0, 1/dir_y, 999999)
+    sea tx1 = (r["x"] - orig_x) * inv_dx
+    sea tx2 = (r["x"] + r["w"] - orig_x) * inv_dx
+    sea ty1 = (r["y"] - orig_y) * inv_dy
+    sea ty2 = (r["y"] + r["h"] - orig_y) * inv_dy
+    sea t_min = maximo(minimo(tx1, tx2), minimo(ty1, ty2))
+    sea t_max = minimo(maximo(tx1, tx2), maximo(ty1, ty2))
+    si (t_max < 0 o t_min > t_max) { retornar nulo }
+    sea t = si(t_min < 0, t_max, t_min)
+    retornar {
+        "t": t,
+        "x": orig_x + dir_x * t,
+        "y": orig_y + dir_y * t
+    }
+}
+
+// ── Quadtree para detección broadphase ────────────────────────────────────────
+
+funcion quadtree_crear(x, y, w, h, profundidad_max, max_objetos) {
+    retornar {
+        "bounds": col_rect(x, y, w, h),
+        "objetos": [],
+        "hijos": nulo,
+        "profundidad": 0,
+        "prof_max": profundidad_max ?? 5,
+        "max_obj": max_objetos ?? 10
+    }
+}
+
+funcion _qt_subdividir(qt) {
+    sea hw = qt["bounds"]["w"] / 2
+    sea hh = qt["bounds"]["h"] / 2
+    sea x = qt["bounds"]["x"]
+    sea y = qt["bounds"]["y"]
+    sea pd = qt["profundidad"] + 1
+    sea pm = qt["prof_max"]
+    sea mo = qt["max_obj"]
+    qt["hijos"] = [
+        quadtree_crear(x, y, hw, hh, pm, mo),
+        quadtree_crear(x+hw, y, hw, hh, pm, mo),
+        quadtree_crear(x, y+hh, hw, hh, pm, mo),
+        quadtree_crear(x+hw, y+hh, hw, hh, pm, mo)
+    ]
+    para h en qt["hijos"] { h["profundidad"] = pd }
+}
+
+funcion quadtree_insertar(qt, objeto, bx, by, bw, bh) {
+    si (qt["hijos"] != nulo) {
+        para hijo en qt["hijos"] {
+            si (col_rect_rect(col_rect(bx, by, bw, bh), hijo["bounds"])) {
+                quadtree_insertar(hijo, objeto, bx, by, bw, bh)
+            }
+        }
+        retornar
+    }
+    agregar(qt["objetos"], {"obj": objeto, "bx": bx, "by": by, "bw": bw, "bh": bh})
+    si (longitud(qt["objetos"]) > qt["max_obj"] y qt["profundidad"] < qt["prof_max"]) {
+        _qt_subdividir(qt)
+        sea items = qt["objetos"]
+        qt["objetos"] = []
+        para item en items {
+            quadtree_insertar(qt, item["obj"], item["bx"], item["by"], item["bw"], item["bh"])
+        }
+    }
+}
+
+funcion quadtree_consultar(qt, bx, by, bw, bh) {
+    sea resultado = []
+    si (no col_rect_rect(col_rect(bx, by, bw, bh), qt["bounds"])) { retornar resultado }
+    para item en qt["objetos"] {
+        si (col_rect_rect(col_rect(bx, by, bw, bh), col_rect(item["bx"], item["by"], item["bw"], item["bh"]))) {
+            agregar(resultado, item["obj"])
+        }
+    }
+    si (qt["hijos"] != nulo) {
+        para hijo en qt["hijos"] {
+            sea sub = quadtree_consultar(hijo, bx, by, bw, bh)
+            para s en sub { agregar(resultado, s) }
+        }
+    }
+    retornar resultado
+}
+
+funcion quadtree_limpiar(qt) {
+    qt["objetos"] = []
+    qt["hijos"] = nulo
+}
+
+// ── Capas de colisión ──────────────────────────────────────────────────────────
+
+sea _capas_colision = {
+    "default": 0,
+    "jugador": 1,
+    "enemigo": 2,
+    "proyectil": 3,
+    "terreno": 4,
+    "trigger": 5,
+    "ui": 6
+}
+
+sea _matriz_colision = {}
+
+funcion col_definir_capa(nombre, numero) {
+    _capas_colision[nombre] = numero
+}
+
+funcion col_habilitar_entre(capa_a, capa_b) {
+    sea key = a_texto(capa_a) + "_" + a_texto(capa_b)
+    _matriz_colision[key] = verdadero
+    _matriz_colision[a_texto(capa_b) + "_" + a_texto(capa_a)] = verdadero
+}
+
+funcion col_pueden_chocar(capa_a, capa_b) {
+    sea key = a_texto(capa_a) + "_" + a_texto(capa_b)
+    retornar _matriz_colision[key] ?? verdadero
+}
+
+// ── Polygon Clipping (Sutherland-Hodgman) ─────────────────────────────────────
+
+funcion col_poligono_interseccion(sujeto, cortador) {
+    sea salida = sujeto
+    sea n = longitud(cortador)
+    para i en rango(0, n) {
+        si (longitud(salida) == 0) { retornar [] }
+        sea entrada = salida
+        salida = []
+        sea c_a = cortador[(i + n - 1) % n]
+        sea c_b = cortador[i]
+        para j en rango(0, longitud(entrada)) {
+            sea p_a = entrada[(j + longitud(entrada) - 1) % longitud(entrada)]
+            sea p_b = entrada[j]
+            sea dentro_a = (c_b["x"]-c_a["x"])*(p_a["y"]-c_a["y"]) - (c_b["y"]-c_a["y"])*(p_a["x"]-c_a["x"]) >= 0
+            sea dentro_b = (c_b["x"]-c_a["x"])*(p_b["y"]-c_a["y"]) - (c_b["y"]-c_a["y"])*(p_b["x"]-c_a["x"]) >= 0
+            si (dentro_b) {
+                si (no dentro_a) {
+                    sea intersec = col_linea_linea_punto(
+                        {"x1": p_a["x"], "y1": p_a["y"], "x2": p_b["x"], "y2": p_b["y"]},
+                        {"x1": c_a["x"], "y1": c_a["y"], "x2": c_b["x"], "y2": c_b["y"]}
+                    )
+                    si (intersec != nulo) { agregar(salida, {"x": intersec["x"], "y": intersec["y"]}) }
+                }
+                agregar(salida, {"x": p_b["x"], "y": p_b["y"]})
+            } sino si (dentro_a) {
+                sea intersec = col_linea_linea_punto(
+                    {"x1": p_a["x"], "y1": p_a["y"], "x2": p_b["x"], "y2": p_b["y"]},
+                    {"x1": c_a["x"], "y1": c_a["y"], "x2": c_b["x"], "y2": c_b["y"]}
+                )
+                si (intersec != nulo) { agregar(salida, {"x": intersec["x"], "y": intersec["y"]}) }
+            }
+        }
+    }
+    retornar salida
+}

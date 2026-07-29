@@ -1410,7 +1410,7 @@ funcion gen_stmt(st: cualquiera, nodo: cualquiera): texto {
     }
 
     si (k == "import") {
-        // Importaciones — ignorar en el generador nativo por ahora
+        // Ignorar aquí — los imports se procesan en el loop principal
         retornar ""
     }
 
@@ -1493,9 +1493,47 @@ sea main_code: texto = ""
 
 G_STATE["indent"] = 1
 
+// Expandir imports recursivamente antes de la generación de código.
+// Función pura: recibe lista de stmts y devuelve lista con imports aplanados.
+funcion expandir_imports(stmts_in: lista): lista {
+    sea resultado: lista = []
+    sea ei: numero = 0
+    mientras (ei < longitud(stmts_in)) {
+        sea st_ei: cualquiera = stmts_in[ei]
+        si (st_ei["k"] == "import") {
+            sea ruta_imp: texto = st_ei["r"]
+            si (existe_archivo(ruta_imp)) {
+                sea fuente_imp: texto = leer_archivo(ruta_imp)
+                sea toks_prev: cualquiera = G_STATE["toks"]
+                sea pos_prev: numero = G_STATE["pos"]
+                G_STATE["toks"] = tokenizar(fuente_imp)
+                G_STATE["pos"] = 0
+                sea stmts_imp: lista = parse_programa(G_STATE)
+                G_STATE["toks"] = toks_prev
+                G_STATE["pos"] = pos_prev
+                sea expandidos: lista = expandir_imports(stmts_imp)
+                sea ej: numero = 0
+                mientras (ej < longitud(expandidos)) {
+                    agregar(resultado, expandidos[ej])
+                    ej = ej + 1
+                }
+            } sino {
+                mostrar("Advertencia: importar — archivo no encontrado: " + ruta_imp)
+            }
+        } sino {
+            agregar(resultado, st_ei)
+        }
+        ei = ei + 1
+    }
+    retornar resultado
+}
+
+// Expandir todos los imports antes de generar código
+sea programa_expandido: lista = expandir_imports(programa)
+
 sea i: numero = 0
-mientras (i < longitud(programa)) {
-    sea stmt: cualquiera = programa[i]
+mientras (i < longitud(programa_expandido)) {
+    sea stmt: cualquiera = programa_expandido[i]
     si (stmt["k"] == "fun") {
         // Prototipo
         sea nombre_cpp: texto = safe(stmt["n"])

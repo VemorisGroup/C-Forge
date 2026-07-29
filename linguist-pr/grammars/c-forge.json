@@ -1,0 +1,90 @@
+{
+  "name": "C-Forge",
+  "scopeName": "source.cfv",
+  "fileTypes": ["cfv"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#builtins" },
+    { "include": "#functions" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.cfv",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.cfv",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.cfv",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.cfv", "match": "\\\\." }
+          ]
+        },
+        {
+          "name": "string.quoted.single.cfv",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            { "name": "constant.character.escape.cfv", "match": "\\\\." }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "name": "constant.numeric.cfv",
+      "match": "\\b-?[0-9]+(\\.[0-9]+)?\\b"
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.cfv",
+          "match": "\\b(si|sino|mientras|para|en|romper|continuar|retornar|lanzar|intentar|atrapar|con)\\b"
+        },
+        {
+          "name": "keyword.declaration.cfv",
+          "match": "\\b(sea|funcion|estructura|clase|extern|region|unsafe|mover|prestar|importar)\\b"
+        },
+        {
+          "name": "constant.language.cfv",
+          "match": "\\b(verdadero|falso|nulo)\\b"
+        },
+        {
+          "name": "keyword.operator.logical.cfv",
+          "match": "\\b(y|o|no)\\b"
+        }
+      ]
+    },
+    "types": {
+      "name": "storage.type.cfv",
+      "match": "\\b(numero|texto|booleano|lista|mapa|cualquiera|opcion|nunca)\\b"
+    },
+    "builtins": {
+      "name": "support.function.builtin.cfv",
+      "match": "\\b(mostrar|longitud|agregar|a_texto|a_numero|tipo_de|tiene_clave|claves|leer_archivo|escribir_archivo|sys_run|existe_archivo|afirmar|argumentos_programa|subcadena)\\b"
+    },
+    "functions": {
+      "name": "entity.name.function.cfv",
+      "match": "\\b([a-z_][a-zA-Z0-9_]*)(?=\\s*\\()"
+    },
+    "operators": {
+      "name": "keyword.operator.cfv",
+      "match": "(==|!=|<=|>=|<|>|\\+|-|\\*|/|%|=|\\+=|-=|\\*=|/=)"
+    }
+  }
+}

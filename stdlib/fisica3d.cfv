@@ -1,0 +1,290 @@
+// stdlib/fisica3d.cfv — Motor de física 3D
+// C-Forge Standard Library v3.0
+
+// ── Vectores 3D ────────────────────────────────────────────────────────────────
+
+funcion vec3(x, y, z) { retornar {"x": x ?? 0, "y": y ?? 0, "z": z ?? 0} }
+funcion vec3_suma(a, b) { retornar vec3(a["x"]+b["x"], a["y"]+b["y"], a["z"]+b["z"]) }
+funcion vec3_resta(a, b) { retornar vec3(a["x"]-b["x"], a["y"]-b["y"], a["z"]-b["z"]) }
+funcion vec3_escalar(v, s) { retornar vec3(v["x"]*s, v["y"]*s, v["z"]*s) }
+funcion vec3_magnitud(v) { retornar raiz(v["x"]*v["x"] + v["y"]*v["y"] + v["z"]*v["z"]) }
+funcion vec3_normalizar(v) {
+    sea m = vec3_magnitud(v)
+    si (m == 0) { retornar vec3(0, 0, 0) }
+    retornar vec3(v["x"]/m, v["y"]/m, v["z"]/m)
+}
+funcion vec3_punto(a, b) { retornar a["x"]*b["x"] + a["y"]*b["y"] + a["z"]*b["z"] }
+funcion vec3_cruzado(a, b) {
+    retornar vec3(
+        a["y"]*b["z"] - a["z"]*b["y"],
+        a["z"]*b["x"] - a["x"]*b["z"],
+        a["x"]*b["y"] - a["y"]*b["x"]
+    )
+}
+funcion vec3_distancia(a, b) { retornar vec3_magnitud(vec3_resta(b, a)) }
+funcion vec3_lerp(a, b, t) {
+    retornar vec3(
+        a["x"] + (b["x"] - a["x"]) * t,
+        a["y"] + (b["y"] - a["y"]) * t,
+        a["z"] + (b["z"] - a["z"]) * t
+    )
+}
+funcion vec3_negativo(v) { retornar vec3(-v["x"], -v["y"], -v["z"]) }
+funcion vec3_angulo(a, b) {
+    sea dot = vec3_punto(vec3_normalizar(a), vec3_normalizar(b))
+    retornar arccoseno(maximo(-1, minimo(1, dot)))
+}
+
+// ── Cuaterniones ───────────────────────────────────────────────────────────────
+
+funcion quat(w, x, y, z) { retornar {"w": w ?? 1, "x": x ?? 0, "y": y ?? 0, "z": z ?? 0} }
+funcion quat_identidad() { retornar quat(1, 0, 0, 0) }
+funcion quat_magnitud(q) { retornar raiz(q["w"]*q["w"] + q["x"]*q["x"] + q["y"]*q["y"] + q["z"]*q["z"]) }
+funcion quat_normalizar(q) {
+    sea m = quat_magnitud(q)
+    si (m == 0) { retornar quat_identidad() }
+    retornar quat(q["w"]/m, q["x"]/m, q["y"]/m, q["z"]/m)
+}
+funcion quat_conjugado(q) { retornar quat(q["w"], -q["x"], -q["y"], -q["z"]) }
+funcion quat_multiplicar(a, b) {
+    retornar quat(
+        a["w"]*b["w"] - a["x"]*b["x"] - a["y"]*b["y"] - a["z"]*b["z"],
+        a["w"]*b["x"] + a["x"]*b["w"] + a["y"]*b["z"] - a["z"]*b["y"],
+        a["w"]*b["y"] - a["x"]*b["z"] + a["y"]*b["w"] + a["z"]*b["x"],
+        a["w"]*b["z"] + a["x"]*b["y"] - a["y"]*b["x"] + a["z"]*b["w"]
+    )
+}
+funcion quat_desde_angulo_eje(angulo, eje) {
+    sea n = vec3_normalizar(eje)
+    sea s = seno(angulo / 2)
+    retornar quat(coseno(angulo / 2), n["x"]*s, n["y"]*s, n["z"]*s)
+}
+funcion quat_rotar_vec3(q, v) {
+    sea qv = quat(0, v["x"], v["y"], v["z"])
+    sea r = quat_multiplicar(quat_multiplicar(q, qv), quat_conjugado(q))
+    retornar vec3(r["x"], r["y"], r["z"])
+}
+funcion quat_slerp(a, b, t) {
+    sea dot = a["w"]*b["w"] + a["x"]*b["x"] + a["y"]*b["y"] + a["z"]*b["z"]
+    si (absoluto(dot) > 0.9995) {
+        retornar quat_normalizar(quat(
+            a["w"] + t*(b["w"]-a["w"]), a["x"] + t*(b["x"]-a["x"]),
+            a["y"] + t*(b["y"]-a["y"]), a["z"] + t*(b["z"]-a["z"])
+        ))
+    }
+    sea theta0 = arccoseno(dot)
+    sea theta = theta0 * t
+    sea sin_theta = seno(theta)
+    sea sin_theta0 = seno(theta0)
+    sea s0 = coseno(theta) - dot * sin_theta / sin_theta0
+    sea s1 = sin_theta / sin_theta0
+    retornar quat(s0*a["w"]+s1*b["w"], s0*a["x"]+s1*b["x"], s0*a["y"]+s1*b["y"], s0*a["z"]+s1*b["z"])
+}
+
+// ── Matrices 4x4 ───────────────────────────────────────────────────────────────
+
+funcion mat4_identidad() {
+    retornar {
+        "m": [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]
+    }
+}
+
+funcion mat4_traslacion(x, y, z) {
+    retornar {"m": [1,0,0,x, 0,1,0,y, 0,0,1,z, 0,0,0,1]}
+}
+
+funcion mat4_escala(x, y, z) {
+    retornar {"m": [x,0,0,0, 0,y,0,0, 0,0,z,0, 0,0,0,1]}
+}
+
+funcion mat4_desde_quat(q) {
+    sea xx = q["x"]*q["x"]
+    sea yy = q["y"]*q["y"]
+    sea zz = q["z"]*q["z"]
+    sea xy = q["x"]*q["y"]
+    sea xz = q["x"]*q["z"]
+    sea yz = q["y"]*q["z"]
+    sea wx = q["w"]*q["x"]
+    sea wy = q["w"]*q["y"]
+    sea wz = q["w"]*q["z"]
+    retornar {"m": [
+        1-2*(yy+zz), 2*(xy-wz), 2*(xz+wy), 0,
+        2*(xy+wz), 1-2*(xx+zz), 2*(yz-wx), 0,
+        2*(xz-wy), 2*(yz+wx), 1-2*(xx+yy), 0,
+        0, 0, 0, 1
+    ]}
+}
+
+funcion mat4_perspectiva(fov, aspecto, cerca, lejos) {
+    sea f = 1.0 / tangente(fov / 2)
+    sea rango = cerca - lejos
+    retornar {"m": [
+        f/aspecto, 0, 0, 0,
+        0, f, 0, 0,
+        0, 0, (cerca+lejos)/rango, (2*cerca*lejos)/rango,
+        0, 0, -1, 0
+    ]}
+}
+
+funcion mat4_vista(pos, objetivo, arriba) {
+    sea z = vec3_normalizar(vec3_resta(pos, objetivo))
+    sea x = vec3_normalizar(vec3_cruzado(arriba, z))
+    sea y = vec3_cruzado(z, x)
+    retornar {"m": [
+        x["x"], x["y"], x["z"], -vec3_punto(x, pos),
+        y["x"], y["y"], y["z"], -vec3_punto(y, pos),
+        z["x"], z["y"], z["z"], -vec3_punto(z, pos),
+        0, 0, 0, 1
+    ]}
+}
+
+// ── Transform 3D ───────────────────────────────────────────────────────────────
+
+funcion transform3d(pos_x, pos_y, pos_z) {
+    retornar {
+        "pos": vec3(pos_x ?? 0, pos_y ?? 0, pos_z ?? 0),
+        "rotacion": quat_identidad(),
+        "escala": vec3(1, 1, 1),
+        "padre": nulo
+    }
+}
+
+funcion transform3d_adelante(t) {
+    retornar quat_rotar_vec3(t["rotacion"], vec3(0, 0, -1))
+}
+
+funcion transform3d_derecha(t) {
+    retornar quat_rotar_vec3(t["rotacion"], vec3(1, 0, 0))
+}
+
+funcion transform3d_arriba(t) {
+    retornar quat_rotar_vec3(t["rotacion"], vec3(0, 1, 0))
+}
+
+funcion transform3d_rotar(t, angulo, eje) {
+    sea q = quat_desde_angulo_eje(angulo, eje)
+    t["rotacion"] = quat_normalizar(quat_multiplicar(t["rotacion"], q))
+}
+
+funcion transform3d_mover(t, dx, dy, dz) {
+    t["pos"]["x"] = t["pos"]["x"] + dx
+    t["pos"]["y"] = t["pos"]["y"] + dy
+    t["pos"]["z"] = t["pos"]["z"] + dz
+}
+
+// ── Cuerpo rígido 3D ───────────────────────────────────────────────────────────
+
+funcion f3d_cuerpo_crear(pos_x, pos_y, pos_z, masa) {
+    sea m = masa ?? 1.0
+    retornar {
+        "transform": transform3d(pos_x, pos_y, pos_z),
+        "vel": vec3(0, 0, 0),
+        "vel_angular": vec3(0, 0, 0),
+        "fuerza": vec3(0, 0, 0),
+        "torque": vec3(0, 0, 0),
+        "masa": m,
+        "masa_inv": si(m == 0, 0, 1/m),
+        "tipo": "dinamico",
+        "friccion": 0.3,
+        "rebote": 0.2,
+        "id": aleatorio_entero(100000, 999999)
+    }
+}
+
+funcion f3d_aplicar_fuerza(cuerpo, fx, fy, fz) {
+    cuerpo["fuerza"]["x"] = cuerpo["fuerza"]["x"] + fx
+    cuerpo["fuerza"]["y"] = cuerpo["fuerza"]["y"] + fy
+    cuerpo["fuerza"]["z"] = cuerpo["fuerza"]["z"] + fz
+}
+
+funcion f3d_aplicar_impulso(cuerpo, ix, iy, iz) {
+    cuerpo["vel"]["x"] = cuerpo["vel"]["x"] + ix * cuerpo["masa_inv"]
+    cuerpo["vel"]["y"] = cuerpo["vel"]["y"] + iy * cuerpo["masa_inv"]
+    cuerpo["vel"]["z"] = cuerpo["vel"]["z"] + iz * cuerpo["masa_inv"]
+}
+
+funcion f3d_integrar(cuerpo, delta, gravedad) {
+    si (cuerpo["tipo"] != "dinamico") { retornar }
+    sea g = gravedad ?? vec3(0, -9.8, 0)
+    cuerpo["vel"]["x"] = cuerpo["vel"]["x"] + (cuerpo["fuerza"]["x"] * cuerpo["masa_inv"] + g["x"]) * delta
+    cuerpo["vel"]["y"] = cuerpo["vel"]["y"] + (cuerpo["fuerza"]["y"] * cuerpo["masa_inv"] + g["y"]) * delta
+    cuerpo["vel"]["z"] = cuerpo["vel"]["z"] + (cuerpo["fuerza"]["z"] * cuerpo["masa_inv"] + g["z"]) * delta
+    cuerpo["transform"]["pos"]["x"] = cuerpo["transform"]["pos"]["x"] + cuerpo["vel"]["x"] * delta
+    cuerpo["transform"]["pos"]["y"] = cuerpo["transform"]["pos"]["y"] + cuerpo["vel"]["y"] * delta
+    cuerpo["transform"]["pos"]["z"] = cuerpo["transform"]["pos"]["z"] + cuerpo["vel"]["z"] * delta
+    cuerpo["fuerza"] = vec3(0, 0, 0)
+    cuerpo["vel"]["x"] = cuerpo["vel"]["x"] * 0.999
+    cuerpo["vel"]["y"] = cuerpo["vel"]["y"] * 0.999
+    cuerpo["vel"]["z"] = cuerpo["vel"]["z"] * 0.999
+}
+
+// ── Colisiones 3D ─────────────────────────────────────────────────────────────
+
+funcion f3d_colision_esfera_esfera(pos_a, ra, pos_b, rb) {
+    sea dx = pos_b["x"] - pos_a["x"]
+    sea dy = pos_b["y"] - pos_a["y"]
+    sea dz = pos_b["z"] - pos_a["z"]
+    sea dist2 = dx*dx + dy*dy + dz*dz
+    sea sum_r = ra + rb
+    si (dist2 >= sum_r * sum_r) { retornar nulo }
+    sea dist = raiz(dist2)
+    sea nx = si(dist > 0, dx/dist, 1)
+    sea ny = si(dist > 0, dy/dist, 0)
+    sea nz = si(dist > 0, dz/dist, 0)
+    retornar {"colision": verdadero, "normal": vec3(nx,ny,nz), "penetracion": sum_r - dist}
+}
+
+funcion f3d_colision_aabb_aabb(pos_a, hs_a, pos_b, hs_b) {
+    sea dx = absoluto(pos_a["x"] - pos_b["x"])
+    sea dy = absoluto(pos_a["y"] - pos_b["y"])
+    sea dz = absoluto(pos_a["z"] - pos_b["z"])
+    si (dx > hs_a["x"] + hs_b["x"]) { retornar nulo }
+    si (dy > hs_a["y"] + hs_b["y"]) { retornar nulo }
+    si (dz > hs_a["z"] + hs_b["z"]) { retornar nulo }
+    retornar {"colision": verdadero, "penetracion": minimo(hs_a["x"]+hs_b["x"]-dx, minimo(hs_a["y"]+hs_b["y"]-dy, hs_a["z"]+hs_b["z"]-dz))}
+}
+
+// ── Mundo físico 3D ────────────────────────────────────────────────────────────
+
+funcion f3d_mundo_crear() {
+    retornar {
+        "cuerpos": [],
+        "gravedad": vec3(0, -9.8, 0),
+        "iteraciones": 6
+    }
+}
+
+funcion f3d_agregar_cuerpo(mundo, cuerpo) {
+    agregar(mundo["cuerpos"], cuerpo)
+    retornar cuerpo
+}
+
+funcion f3d_paso(mundo, delta) {
+    para cuerpo en mundo["cuerpos"] {
+        f3d_integrar(cuerpo, delta, mundo["gravedad"])
+    }
+}
+
+// ── Raycast 3D ─────────────────────────────────────────────────────────────────
+
+funcion f3d_raycast(origen, direccion, cuerpos, dist_max) {
+    sea mejor = nulo
+    sea mejor_dist = dist_max ?? 10000
+    para cuerpo en cuerpos {
+        sea p = cuerpo["transform"]["pos"]
+        sea oc = vec3_resta(origen, p)
+        sea a = vec3_punto(direccion, direccion)
+        sea b = 2 * vec3_punto(oc, direccion)
+        sea c = vec3_punto(oc, oc) - 16  // radio 4 por defecto
+        sea discriminante = b*b - 4*a*c
+        si (discriminante >= 0) {
+            sea t = (-b - raiz(discriminante)) / (2*a)
+            si (t > 0 y t < mejor_dist) {
+                mejor_dist = t
+                sea punto = vec3(origen["x"]+direccion["x"]*t, origen["y"]+direccion["y"]*t, origen["z"]+direccion["z"]*t)
+                mejor = {"cuerpo": cuerpo, "distancia": t, "punto": punto}
+            }
+        }
+    }
+    retornar mejor
+}

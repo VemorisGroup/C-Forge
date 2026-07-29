@@ -1,0 +1,51 @@
+importar "stdlib/lista.cfv"
+importar "stdlib/texto.cfv"
+importar "stdlib/matematica.cfv"
+importar "stdlib/errores.cfv"
+importar "stdlib/mapa.cfv"
+importar "stdlib/io.cfv"
+importar "stdlib/tipos.cfv"
+
+// ── Lista ──────────────────────────────────────────────────────
+sea nums: lista = [5, 2, 8, 1, 9, 3]
+mostrar("suma: " + a_texto(lst_suma(nums)))
+mostrar("max: " + a_texto(lst_max(nums)))
+mostrar("min: " + a_texto(lst_min(nums)))
+mostrar("promedio: " + a_texto(lst_promedio(nums)))
+mostrar("rango 1-5: " + a_texto(lst_suma(rango(1, 6))))
+
+// ── Texto ──────────────────────────────────────────────────────
+mostrar(txt_capitalizar("hola mundo"))
+mostrar(txt_titulo("el zorro veloz"))
+mostrar(txt_relleno_izq("42", 6, "0"))
+mostrar(txt_formato("{0} + {1} = {2}", [3, 4, 7]))
+mostrar(a_texto(txt_contar("banana", "a")))
+
+// ── Matemática ─────────────────────────────────────────────────
+mostrar("pi: " + a_texto(MAT_PI))
+mostrar("factorial(10): " + a_texto(mat_factorial(10)))
+mostrar("fibonacci(10): " + a_texto(mat_fibonacci(10)))
+mostrar("primo 17: " + a_texto(mat_es_primo(17)))
+mostrar("mcd(48,18): " + a_texto(mat_mcd(48, 18)))
+mostrar("clamp(15,0,10): " + a_texto(mat_clamp(15, 0, 10)))
+
+// ── Errores (Result) ───────────────────────────────────────────
+sea r1: cualquiera = ok(42)
+sea r2: cualquiera = err("divide by zero")
+mostrar("ok: " + a_texto(es_ok(r1)))
+mostrar("err: " + a_texto(es_err(r2)))
+mostrar("valor: " + a_texto(desenvolver(r1)))
+mostrar("or: " + a_texto(desenvolver_o(r2, -1)))
+
+// ── Mapa ───────────────────────────────────────────────────────
+sea m: cualquiera = {"a": 1, "b": 2, "c": 3}
+mostrar("tamaño: " + a_texto(mapa_tamano(m)))
+mostrar("get d: " + a_texto(mapa_get(m, "d", 99)))
+sea freq: cualquiera = mapa_frecuencia(["x", "y", "x", "z", "x"])
+mostrar("freq x: " + a_texto(freq["x"]))
+
+// ── Tipos ──────────────────────────────────────────────────────
+mostrar("es_numero: " + a_texto(es_numero(3.14)))
+mostrar("es_texto: " + a_texto(es_texto("hola")))
+mostrar("es_entero: " + a_texto(es_entero(5.0)))
+mostrar("a_numero_o: " + a_texto(a_numero_o("abc", -1)))

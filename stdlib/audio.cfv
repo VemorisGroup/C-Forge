@@ -1,0 +1,236 @@
+// stdlib/audio.cfv — Sistema de audio para videojuegos
+// C-Forge Standard Library v3.0
+
+// ── Contexto de audio ──────────────────────────────────────────────────────────
+
+sea _audio_ctx = {
+    "activo": verdadero,
+    "volumen_master": 1.0,
+    "volumen_sfx": 1.0,
+    "volumen_musica": 0.7,
+    "volumen_ui": 0.8,
+    "musica_actual": nulo,
+    "canales": {},
+    "buffers": {},
+    "grupos": {}
+}
+
+// ── Gestión de buffers/clips ───────────────────────────────────────────────────
+
+/// @doc Registrar un clip de audio
+funcion audio_registrar(nombre, ruta, tipo) {
+    _audio_ctx["buffers"][nombre] = {
+        "nombre": nombre,
+        "ruta": ruta,
+        "tipo": tipo ?? "sfx",  // "sfx", "musica", "ui", "ambiente"
+        "cargado": verdadero,
+        "duracion": 0
+    }
+}
+
+/// @doc Registrar múltiples sonidos
+funcion audio_registrar_varios(lista) {
+    para item en lista {
+        audio_registrar(item["nombre"], item["ruta"], item["tipo"] ?? "sfx")
+    }
+}
+
+// ── Reproducción ───────────────────────────────────────────────────────────────
+
+funcion _audio_volumen_grupo(tipo) {
+    si (tipo == "musica") { retornar _audio_ctx["volumen_musica"] }
+    si (tipo == "ui") { retornar _audio_ctx["volumen_ui"] }
+    retornar _audio_ctx["volumen_sfx"]
+}
+
+/// @doc Reproducir efecto de sonido
+funcion audio_reproducir(nombre, config) {
+    si (no _audio_ctx["activo"]) { retornar nulo }
+    si (no tiene_clave(_audio_ctx["buffers"], nombre)) {
+        retornar {"error": "Audio no encontrado: " + nombre}
+    }
+    sea c = config ?? {}
+    sea clip = _audio_ctx["buffers"][nombre]
+    sea canal_id = nombre + "_" + a_texto(aleatorio_entero(10000, 99999))
+    sea canal = {
+        "id": canal_id,
+        "nombre": nombre,
+        "activo": verdadero,
+        "pausado": falso,
+        "volumen": (c["volumen"] ?? 1.0) * _audio_volumen_grupo(clip["tipo"]) * _audio_ctx["volumen_master"],
+        "pan": c["pan"] ?? 0,         // -1 izq, 0 centro, 1 der
+        "pitch": c["pitch"] ?? 1.0,
+        "loop": c["loop"] ?? falso,
+        "tiempo": 0,
+        "grupo": clip["tipo"],
+        "fade_duracion": c["fade_in"] ?? 0,
+        "fade_tiempo": 0,
+        "3d": c["3d"] ?? falso,
+        "pos_x": c["pos_x"] ?? 0,
+        "pos_y": c["pos_y"] ?? 0,
+        "pos_z": c["pos_z"] ?? 0,
+        "distancia_max": c["distancia_max"] ?? 500
+    }
+    _audio_ctx["canales"][canal_id] = canal
+    retornar canal_id
+}
+
+/// @doc Reproducir música (con crossfade)
+funcion audio_musica(nombre, fade_duracion) {
+    si (_audio_ctx["musica_actual"] != nulo) {
+        audio_parar(_audio_ctx["musica_actual"])
+    }
+    sea id = audio_reproducir(nombre, {
+        "loop": verdadero,
+        "volumen": 1.0,
+        "fade_in": fade_duracion ?? 1.0
+    })
+    _audio_ctx["musica_actual"] = id
+    retornar id
+}
+
+/// @doc Parar canal
+funcion audio_parar(canal_id) {
+    si (tiene_clave(_audio_ctx["canales"], canal_id)) {
+        _audio_ctx["canales"][canal_id]["activo"] = falso
+        eliminar_clave(_audio_ctx["canales"], canal_id)
+    }
+}
+
+/// @doc Pausar canal
+funcion audio_pausar(canal_id) {
+    si (tiene_clave(_audio_ctx["canales"], canal_id)) {
+        _audio_ctx["canales"][canal_id]["pausado"] = verdadero
+    }
+}
+
+/// @doc Reanudar canal
+funcion audio_reanudar(canal_id) {
+    si (tiene_clave(_audio_ctx["canales"], canal_id)) {
+        _audio_ctx["canales"][canal_id]["pausado"] = falso
+    }
+}
+
+/// @doc Fade out y parar
+funcion audio_fade_out(canal_id, duracion) {
+    si (tiene_clave(_audio_ctx["canales"], canal_id)) {
+        _audio_ctx["canales"][canal_id]["fade_out"] = verdadero
+        _audio_ctx["canales"][canal_id]["fade_duracion"] = duracion ?? 1.0
+        _audio_ctx["canales"][canal_id]["fade_tiempo"] = 0
+    }
+}
+
+/// @doc Parar todos los canales de un grupo
+funcion audio_parar_grupo(grupo) {
+    para id en mapa_claves(_audio_ctx["canales"]) {
+        si (_audio_ctx["canales"][id]["grupo"] == grupo) {
+            audio_parar(id)
+        }
+    }
+}
+
+/// @doc Parar todo
+funcion audio_parar_todo() {
+    _audio_ctx["canales"] = {}
+    _audio_ctx["musica_actual"] = nulo
+}
+
+// ── Control de volumen ─────────────────────────────────────────────────────────
+
+funcion audio_volumen_master(vol) { _audio_ctx["volumen_master"] = maximo(0, minimo(1, vol)) }
+funcion audio_volumen_sfx(vol) { _audio_ctx["volumen_sfx"] = maximo(0, minimo(1, vol)) }
+funcion audio_volumen_musica(vol) { _audio_ctx["volumen_musica"] = maximo(0, minimo(1, vol)) }
+funcion audio_volumen_ui(vol) { _audio_ctx["volumen_ui"] = maximo(0, minimo(1, vol)) }
+
+funcion audio_silenciar(silencio) { _audio_ctx["activo"] = no silencio }
+
+/// @doc Obtener volumen actual de canal
+funcion audio_get_volumen(canal_id) {
+    retornar _audio_ctx["canales"][canal_id]["volumen"] ?? 0
+}
+
+/// @doc Cambiar volumen de canal en tiempo real
+funcion audio_set_volumen(canal_id, vol) {
+    si (tiene_clave(_audio_ctx["canales"], canal_id)) {
+        _audio_ctx["canales"][canal_id]["volumen"] = vol
+    }
+}
+
+// ── Audio 3D (posicional) ──────────────────────────────────────────────────────
+
+/// @doc Actualizar posición de audio 3D
+funcion audio_set_posicion(canal_id, x, y, z) {
+    si (tiene_clave(_audio_ctx["canales"], canal_id)) {
+        _audio_ctx["canales"][canal_id]["pos_x"] = x
+        _audio_ctx["canales"][canal_id]["pos_y"] = y
+        _audio_ctx["canales"][canal_id]["pos_z"] = z ?? 0
+    }
+}
+
+/// @doc Calcular pan automático desde posición y posición del oyente
+funcion audio_calcular_pan(canal_id, oyente_x, oyente_y) {
+    si (no tiene_clave(_audio_ctx["canales"], canal_id)) { retornar }
+    sea canal = _audio_ctx["canales"][canal_id]
+    si (no canal["3d"]) { retornar }
+    sea dx = canal["pos_x"] - oyente_x
+    sea dist = raiz(dx * dx + (canal["pos_y"] - oyente_y) * (canal["pos_y"] - oyente_y))
+    // Volumen por distancia
+    sea vol_dist = maximo(0, 1 - dist / canal["distancia_max"])
+    canal["volumen"] = vol_dist * _audio_ctx["volumen_sfx"] * _audio_ctx["volumen_master"]
+    // Pan
+    canal["pan"] = maximo(-1, minimo(1, dx / canal["distancia_max"] * 2))
+}
+
+// ── Actualización ──────────────────────────────────────────────────────────────
+
+funcion audio_actualizar(delta) {
+    sea a_eliminar = []
+    para id en mapa_claves(_audio_ctx["canales"]) {
+        sea canal = _audio_ctx["canales"][id]
+        si (canal["pausado"]) { continuar }
+        canal["tiempo"] = canal["tiempo"] + delta
+        // Fade out
+        si (canal["fade_out"] ?? falso) {
+            canal["fade_tiempo"] = canal["fade_tiempo"] + delta
+            si (canal["fade_tiempo"] >= canal["fade_duracion"]) {
+                agregar(a_eliminar, id)
+            }
+        }
+    }
+    para id en a_eliminar { audio_parar(id) }
+}
+
+// ── Efectos de audio ───────────────────────────────────────────────────────────
+
+funcion audio_registrar_efectos_juego() {
+    audio_registrar("salto", "sfx/salto.wav", "sfx")
+    audio_registrar("aterrizaje", "sfx/aterrizaje.wav", "sfx")
+    audio_registrar("disparo", "sfx/disparo.wav", "sfx")
+    audio_registrar("explosion", "sfx/explosion.wav", "sfx")
+    audio_registrar("recolectar", "sfx/recolectar.wav", "sfx")
+    audio_registrar("dano", "sfx/dano.wav", "sfx")
+    audio_registrar("morir", "sfx/morir.wav", "sfx")
+    audio_registrar("nivel_completado", "sfx/nivel_ok.wav", "sfx")
+    audio_registrar("ui_click", "sfx/ui_click.wav", "ui")
+    audio_registrar("ui_hover", "sfx/ui_hover.wav", "ui")
+    audio_registrar("musica_menu", "musica/menu.ogg", "musica")
+    audio_registrar("musica_juego", "musica/juego.ogg", "musica")
+    audio_registrar("musica_jefe", "musica/jefe.ogg", "musica")
+    audio_registrar("ambiente_bosque", "ambiente/bosque.ogg", "ambiente")
+    audio_registrar("ambiente_cueva", "ambiente/cueva.ogg", "ambiente")
+}
+
+// ── Pool de sonidos ────────────────────────────────────────────────────────────
+
+/// @doc Reproducir sfx con pool (evita solapamiento excesivo)
+sea _pool_cooldowns = {}
+
+funcion audio_sfx(nombre, cooldown_ms) {
+    sea ahora = reloj_ms()
+    sea cd = cooldown_ms ?? 50
+    si (tiene_clave(_pool_cooldowns, nombre)) {
+        si (ahora - _pool_cooldowns[nombre] < cd) { retornar nulo }
+    }
+    _pool_cooldowns[nombre] = ahora
+    retornar audio_reproducir(nombre, {})
+}

@@ -1,0 +1,280 @@
+// ejemplos/scraper.cfv — Web scraper en C-Forge
+// Extrae, filtra y guarda contenido de paginas web
+// Demuestra: HTTP, Regex, JSON, archivos, procesamiento de texto
+//
+// Compilar: g++ -std=c++20 -O2 cforgev.cpp -DCFV_WITH_OPENSSL -lpthread -o cforgev
+// Correr:   ./cforgev ejemplos/scraper.cfv
+
+importar "stdlib/http.cfv"
+importar "stdlib/log.cfv"
+importar "stdlib/archivo.cfv"
+
+log_configurar({"nivel": "info", "color": verdadero, "timestamp": verdadero})
+
+// ── Funciones de extraccion ────────────────────────────────────────────────────
+
+// Extraer texto entre dos marcadores
+funcion extraer_entre(html: texto, inicio: texto, fin: texto): lista {
+    sea resultados = []
+    sea pos = 0
+    sea len_html = longitud(html)
+    sea len_ini  = longitud(inicio)
+    sea len_fin  = longitud(fin)
+
+    mientras (pos < len_html - len_ini) {
+        sea idx_ini = -1
+        sea i = pos
+        mientras (i <= len_html - len_ini) {
+            si (subcadena(html, i, i + len_ini) == inicio) {
+                idx_ini = i
+                romper
+            }
+            i = i + 1
+        }
+        si (idx_ini < 0) { romper }
+
+        sea buscar_desde = idx_ini + len_ini
+        sea idx_fin = -1
+        sea j = buscar_desde
+        mientras (j <= len_html - len_fin) {
+            si (subcadena(html, j, j + len_fin) == fin) {
+                idx_fin = j
+                romper
+            }
+            j = j + 1
+        }
+        si (idx_fin < 0) { romper }
+
+        sea extraido = subcadena(html, buscar_desde, idx_fin)
+        agregar(resultados, extraido)
+        pos = idx_fin + len_fin
+    }
+
+    retornar resultados
+}
+
+// Limpiar HTML: remover tags, normalizar espacios
+funcion limpiar_html(texto_html: texto): texto {
+    sea resultado = regex_reemplazar(texto_html, "<[^>]+>", "")
+    resultado = regex_reemplazar(resultado, "&amp;", "&")
+    resultado = regex_reemplazar(resultado, "&lt;",  "<")
+    resultado = regex_reemplazar(resultado, "&gt;",  ">")
+    resultado = regex_reemplazar(resultado, "&quot;", "\"")
+    resultado = regex_reemplazar(resultado, "&#39;", "'")
+    resultado = regex_reemplazar(resultado, "&nbsp;", " ")
+    resultado = regex_reemplazar(resultado, "\\s+", " ")
+    retornar texto_recortar_cfv(resultado)
+}
+
+funcion texto_recortar_cfv(t: texto): texto {
+    sea i = 0
+    mientras (i < longitud(t) y subcadena(t, i, i+1) == " ") {
+        i = i + 1
+    }
+    sea j = longitud(t)
+    mientras (j > i y subcadena(t, j-1, j) == " ") {
+        j = j - 1
+    }
+    retornar subcadena(t, i, j)
+}
+
+// Extraer todos los hrefs
+funcion extraer_links(html: texto, url_base: texto): lista {
+    sea hrefs = extraer_entre(html, "href=\"", "\"")
+    sea links = []
+    para h en hrefs {
+        si (texto_empieza_con(h, "http://") o texto_empieza_con(h, "https://")) {
+            agregar(links, h)
+        } sino si (texto_empieza_con(h, "/") y url_base != "") {
+            agregar(links, url_base + h)
+        }
+    }
+    retornar links
+}
+
+// Extraer titulos de pagina
+funcion extraer_titulo(html: texto): texto {
+    sea titulos = extraer_entre(html, "<title>", "</title>")
+    si (longitud(titulos) > 0) {
+        retornar limpiar_html(titulos[0])
+    }
+    sea h1s = extraer_entre(html, "<h1>", "</h1>")
+    si (longitud(h1s) > 0) {
+        retornar limpiar_html(h1s[0])
+    }
+    retornar "(sin titulo)"
+}
+
+// Extraer meta descripcion
+funcion extraer_meta_desc(html: texto): texto {
+    sea metas = extraer_entre(html, "name=\"description\" content=\"", "\"")
+    si (longitud(metas) > 0) { retornar metas[0] }
+    sea metas2 = extraer_entre(html, "content=\"", "\" name=\"description\"")
+    si (longitud(metas2) > 0) { retornar metas2[0] }
+    retornar ""
+}
+
+// Extraer parrafos de texto
+funcion extraer_parrafos(html: texto): lista {
+    sea raw = extraer_entre(html, "<p", "</p>")
+    sea parrafos = []
+    para p en raw {
+        // Quitar atributos del tag de apertura
+        sea contenido = p
+        si (texto_contiene(contenido, ">")) {
+            sea idx = texto_indice(contenido, ">")
+            contenido = subcadena(contenido, idx + 1, longitud(contenido))
+        }
+        sea limpio = limpiar_html(contenido)
+        si (longitud(limpio) > 20) {
+            agregar(parrafos, limpio)
+        }
+    }
+    retornar parrafos
+}
+
+// Extraer emails del HTML
+funcion extraer_emails(html: texto): lista {
+    retornar regex_buscar_todos(html, "[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}")
+}
+
+// ── Scraper principal ──────────────────────────────────────────────────────────
+
+funcion scrape_pagina(url: texto): mapa {
+    log_info("Scrapeando: " + url)
+    sea t0 = tiempo_ms()
+
+    intentar {
+        sea resp = http_get(url)
+        sea t1 = tiempo_ms()
+
+        si (resp["codigo"] != 200) {
+            log_error("Error HTTP " + resp["codigo"] + " para " + url)
+            retornar {"ok": falso, "url": url, "error": "HTTP " + resp["codigo"]}
+        }
+
+        sea html = resp["cuerpo"]
+        sea titulo   = extraer_titulo(html)
+        sea desc     = extraer_meta_desc(html)
+        sea parrafos = extraer_parrafos(html)
+        sea links    = extraer_links(html, "")
+        sea emails   = extraer_emails(html)
+
+        // Estadisticas basicas
+        sea palabras = texto_dividir(limpiar_html(html), " ")
+        sea n_palabras = longitud(palabras)
+
+        sea resultado = {
+            "ok":        verdadero,
+            "url":       url,
+            "titulo":    titulo,
+            "descripcion": desc,
+            "parrafos":  longitud(parrafos),
+            "palabras":  n_palabras,
+            "links":     longitud(links),
+            "emails":    emails,
+            "ms":        t1 - t0,
+            "texto":     lista_slice(parrafos, 0, 3),
+            "links_lista": lista_slice(links, 0, 10)
+        }
+
+        log_ok("OK: " + titulo + " (" + (t1 - t0) + "ms)")
+        retornar resultado
+
+    } capturar (e) {
+        log_error("Excepcion scrapeando " + url + ": " + e)
+        retornar {"ok": falso, "url": url, "error": e}
+    }
+}
+
+// ── Crawl multiple URLs ────────────────────────────────────────────────────────
+
+funcion scrape_lista(urls: lista, salida: texto): nulo {
+    sea resultados = []
+    sea ok = 0
+    sea errores = 0
+
+    para url en urls {
+        sea r = scrape_pagina(url)
+        agregar(resultados, r)
+        si (r["ok"]) {
+            ok = ok + 1
+        } sino {
+            errores = errores + 1
+        }
+        // Pequeña pausa para no saturar el servidor
+        dormir(500)
+    }
+
+    // Guardar resultados
+    sea reporte = {
+        "fecha":    fecha_ahora()["iso"],
+        "total":    longitud(urls),
+        "ok":       ok,
+        "errores":  errores,
+        "paginas":  resultados
+    }
+
+    escribir_archivo(salida, json_bonito(reporte))
+    log_ok("Reporte guardado en " + salida)
+    log_info("Total: " + longitud(urls) + " | OK: " + ok + " | Errores: " + errores)
+}
+
+// ── Modo demo: scrape de example.com ─────────────────────────────────────────
+
+mostrar("")
+mostrar("=== Scraper C-Forge v2.3 ===")
+mostrar("")
+
+// Demo con URLs publicas de ejemplo
+sea urls_demo = [
+    "http://example.com",
+    "http://example.org",
+    "http://httpbin.org/html"
+]
+
+mostrar("URLs a scrapear:")
+para url en urls_demo {
+    mostrar("  - " + url)
+}
+mostrar("")
+
+// En modo demo real solo scrapeamos example.com para no depender de red
+log_info("Iniciando scrape de ejemplo...")
+
+sea resultado = scrape_pagina("http://example.com")
+
+si (resultado["ok"]) {
+    mostrar("")
+    mostrar("Titulo:      " + resultado["titulo"])
+    mostrar("Descripcion: " + resultado["descripcion"])
+    mostrar("Parrafos:    " + resultado["parrafos"])
+    mostrar("Palabras:    " + resultado["palabras"])
+    mostrar("Links:       " + resultado["links"])
+    mostrar("Emails:      " + longitud(resultado["emails"]))
+    mostrar("Tiempo:      " + resultado["ms"] + "ms")
+
+    si (longitud(resultado["texto"]) > 0) {
+        mostrar("")
+        mostrar("Extracto:")
+        para p en resultado["texto"] {
+            sea corto = si (longitud(p) > 200) { subcadena(p, 0, 197) + "..." } sino { p }
+            mostrar("  " + corto)
+        }
+    }
+
+    si (longitud(resultado["links_lista"]) > 0) {
+        mostrar("")
+        mostrar("Links encontrados:")
+        para l en resultado["links_lista"] {
+            mostrar("  → " + l)
+        }
+    }
+} sino {
+    mostrar("Error: " + resultado["error"])
+    mostrar("(Asegurate de tener conexion a internet)")
+}
+
+mostrar("")
+mostrar("Para scrape de multiples URLs:")
+mostrar('  scrape_lista(["http://url1.com", "http://url2.com"], "resultados.json")')

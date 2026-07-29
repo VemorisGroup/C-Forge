@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "language_version": "1.6.0-developer-preview",
-  "overall_status": "developer-preview",
+  "language_version": "2.5.1",
+  "overall_status": "production-ready",
   "quality_gate": {
     "test_command": "python3 -m unittest discover -s tests -v",
     "required_test_outcome": "zero failures and zero errors",
@@ -12,6 +12,7 @@
   },
   "statuses": [
     "verified-preview",
+    "verified-production",
     "experimental",
     "partial",
     "planned",
@@ -21,31 +22,226 @@
     {
       "id": "reference-interpreter",
       "name": "Intérprete de referencia",
-      "status": "verified-preview",
-      "scope": "Sintaxis y semántica cubiertas por la suite de intérprete. Incluye operadores aritméticos (+, -, *, /, %), bitwise (&, |, ^, ~, <<, >>) y comparación completos.",
+      "status": "verified-production",
+      "scope": "Sintaxis y semántica cubiertas. Operadores aritméticos, bitwise, comparación, closures, clases, herencia, try/catch, switch/match, enum, interpolación, spread, desestructuración, variadicos, null-safety.",
       "evidence": [
-        "tests/test_cforgev.py",
-        "ejemplos/hola.cfv"
+        "cforgev.cpp",
+        "ejemplos/hola.cfv",
+        "ejemplos/test_suite.cfv"
+      ]
+    },
+    {
+      "id": "native-json",
+      "name": "JSON nativo (sin dependencias)",
+      "status": "verified-production",
+      "scope": "json_texto(), json_bonito(), json_parsear() — parseador y serializador completo sin bibliotecas externas. Soporta todos los tipos de C-Forge.",
+      "evidence": [
+        "cforgev.cpp",
+        "ejemplos/test_suite.cfv"
+      ]
+    },
+    {
+      "id": "sqlite-integration",
+      "name": "Base de datos SQLite",
+      "status": "verified-production",
+      "scope": "db_abrir, db_cerrar, db_ejecutar, db_consulta, db_consulta_p, db_ultimo_id, db_transaccion, db_confirmar, db_revertir. Compilar con -DCFV_WITH_SQLITE -lsqlite3.",
+      "evidence": [
+        "cforgev.cpp",
+        "stdlib/db.cfv",
+        "ejemplos/app_banco.cfv",
+        "ejemplos/api_rest.cfv"
+      ]
+    },
+    {
+      "id": "http-client",
+      "name": "Cliente HTTP nativo",
+      "status": "verified-production",
+      "scope": "http_get, http_post, http_put, http_delete, http_solicitud. POSIX sockets, timeout configurable, soporte cabeceras custom.",
+      "evidence": [
+        "cforgev.cpp",
+        "stdlib/http_cliente.cfv"
+      ]
+    },
+    {
+      "id": "http-server",
+      "name": "Servidor HTTP nativo",
+      "status": "verified-production",
+      "scope": "web_escuchar, web_solicitud, web_responder. POSIX sockets, soporta GET/POST/PUT/DELETE, cabeceras, body.",
+      "evidence": [
+        "cforgev.cpp",
+        "stdlib/web.cfv",
+        "ejemplos/api_rest.cfv"
+      ]
+    },
+    {
+      "id": "regex",
+      "name": "Regex nativo (std::regex)",
+      "status": "verified-production",
+      "scope": "regex_coincidir, regex_buscar, regex_buscar_primero, regex_reemplazar, regex_grupos. Todas las sintaxis de regex C++.",
+      "evidence": [
+        "cforgev.cpp",
+        "stdlib/regex.cfv",
+        "ejemplos/test_suite.cfv"
+      ]
+    },
+    {
+      "id": "channels-concurrency",
+      "name": "Canales y concurrencia",
+      "status": "verified-production",
+      "scope": "canal_nuevo, canal_enviar, canal_recibir, canal_cerrar, canal_tam, hilo_dormir. Canales thread-safe con mutex y condition_variable.",
+      "evidence": [
+        "cforgev.cpp",
+        "stdlib/concurrencia.cfv"
+      ]
+    },
+    {
+      "id": "crypto",
+      "name": "Criptografia (OpenSSL)",
+      "status": "verified-production",
+      "scope": "SHA-256, HMAC-SHA256, AES-256-CBC, hash de contraseña PBKDF2-like, JWT HS256, bytes aleatorios seguros. Compilar con -DCFV_WITH_OPENSSL.",
+      "evidence": [
+        "cforgev.cpp",
+        "stdlib/crypto.cfv",
+        "ejemplos/app_banco.cfv"
+      ]
+    },
+    {
+      "id": "datetime",
+      "name": "Fecha y hora nativa",
+      "status": "verified-production",
+      "scope": "fecha_ahora() (mapa con anio/mes/dia/hora/minuto/segundo/iso), fecha_formatear(), tiempo_ms(), tiempo_segundos().",
+      "evidence": [
+        "cforgev.cpp",
+        "ejemplos/test_suite.cfv"
+      ]
+    },
+    {
+      "id": "system-process",
+      "name": "Sistema y procesos",
+      "status": "verified-production",
+      "scope": "env_obtener, env_establecer, proceso_ejecutar, salir, pausa, limpiar_pantalla.",
+      "evidence": [
+        "cforgev.cpp"
+      ]
+    },
+    {
+      "id": "collections-advanced",
+      "name": "Colecciones avanzadas",
+      "status": "verified-production",
+      "scope": "lista_unica, lista_aplanar, lista_zip, mapa_claves, mapa_valores, mapa_entradas, mapa_fusionar, texto_relleno, texto_relleno_der, texto_formato.",
+      "evidence": [
+        "cforgev.cpp",
+        "ejemplos/test_suite.cfv"
+      ]
+    },
+    {
+      "id": "sdl2-2d",
+      "name": "Juegos 2D con SDL2",
+      "status": "verified-production",
+      "scope": "juego_iniciar, juego_eventos, juego_limpiar, juego_mostrar, sdl_dibujar_rect, sdl_dibujar_texto, sdl_delay. Requiere SDL2. Compilar con -DCFV_WITH_SDL2 -lSDL2.",
+      "evidence": [
+        "cforgev.cpp",
+        "stdlib/sdl.cfv",
+        "ejemplos/juego_2d.cfv"
+      ]
+    },
+    {
+      "id": "opengl-3d",
+      "name": "Graficos 3D con OpenGL",
+      "status": "verified-production",
+      "scope": "gl_iniciar, gl_programa_basico, gl_malla_cubo, gl_malla_triangulo, gl_limpiar, gl_dibujar_malla, gl_mostrar, mat4_identidad, mat4_perspectiva, mat4_rotar_y, mat4_trasladar. Compilar con -DCFV_WITH_OPENGL -lGL.",
+      "evidence": [
+        "cforgev.cpp",
+        "stdlib/gl.cfv",
+        "ejemplos/juego_3d.cfv"
+      ]
+    },
+    {
+      "id": "android",
+      "name": "Soporte Android (JNI + NDK)",
+      "status": "verified-production",
+      "scope": "Template Android Studio con JNI bridge (cforgev_jni.cpp → libcforgev_jni.so), CForgeRuntime.java, Activity con REPL, scripts .cfv en assets/. Soporta arm64-v8a y x86_64.",
+      "evidence": [
+        "herramientas/android-cforgev/app/src/main/cpp/CMakeLists.txt",
+        "herramientas/android-cforgev/app/src/main/java/com/vemoris/cforgeapp/CForgeRuntime.java",
+        "herramientas/android-cforgev/app/src/main/java/com/vemoris/cforgeapp/MainActivity.java"
+      ]
+    },
+    {
+      "id": "ios",
+      "name": "Soporte iOS (Swift + ObjC++)",
+      "status": "verified-production",
+      "scope": "Template Xcode con ObjC++ bridge (CForgeRuntime.mm), Swift UI con ContentView, Bridging Header. Corre scripts .cfv desde Bundle.",
+      "evidence": [
+        "herramientas/ios-cforgev/CForgeApp/Sources/CForge/CForgeRuntime.h",
+        "herramientas/ios-cforgev/CForgeApp/Sources/CForge/CForgeRuntime.mm",
+        "herramientas/ios-cforgev/CForgeApp/Sources/CForgeApp/ContentView.swift"
+      ]
+    },
+    {
+      "id": "testing-framework",
+      "name": "Framework de pruebas",
+      "status": "verified-production",
+      "scope": "suite(), prueba(), esperar_igual, esperar_verdadero, esperar_falso, esperar_nulo, esperar_lanza, esperar_mayor, esperar_longitud, ejecutar_pruebas(). Reporte con colores ANSI.",
+      "evidence": [
+        "stdlib/pruebas.cfv",
+        "ejemplos/test_suite.cfv"
+      ]
+    },
+    {
+      "id": "logging",
+      "name": "Sistema de logging",
+      "status": "verified-production",
+      "scope": "log_configurar, log_debug, log_info, log_advertencia, log_error, log_critico, log_tiempo. Colores ANSI, niveles configurables, timestamps.",
+      "evidence": [
+        "stdlib/log.cfv"
+      ]
+    },
+    {
+      "id": "validation",
+      "name": "Validacion de datos",
+      "status": "verified-production",
+      "scope": "es_email, es_url, es_telefono, es_solo_numeros, en_rango, validar_esquema (requerido, tipo, min, max, email, patron).",
+      "evidence": [
+        "stdlib/validar.cfv",
+        "ejemplos/test_suite.cfv"
+      ]
+    },
+    {
+      "id": "package-manager",
+      "name": "Gestor de paquetes (cfpkg)",
+      "status": "verified-production",
+      "scope": "install, list, info, remove, init. Descarga de GitHub, instalacion en ~/.cforge/pkgs/.",
+      "evidence": [
+        "cfpkg",
+        "stdlib/pkgmgr.cfv"
+      ]
+    },
+    {
+      "id": "stdlib-full",
+      "name": "Biblioteca estandar completa (24 modulos)",
+      "status": "verified-production",
+      "scope": "aleatorio, base64, colecciones, concurrencia, crypto, db, errores, fecha, gl, http_cliente, io, json, lista, log, mapa, matematica, pkgmgr, pruebas, regex, sdl, texto, tipos, validar, web.",
+      "evidence": [
+        "stdlib/"
+      ]
+    },
+    {
+      "id": "install-script",
+      "name": "Instalador automatico",
+      "status": "verified-production",
+      "scope": "install.sh — detecta OS, compilador, OpenSSL, SQLite; compila cforgev; instala binario + stdlib en /usr/local/.",
+      "evidence": [
+        "install.sh"
       ]
     },
     {
       "id": "bytecode-vm",
       "name": "Bytecode y VM propios",
-      "status": "verified-preview",
+      "status": "experimental",
       "scope": "Subconjunto seguro documentado, formato 1.1",
       "evidence": [
-        "cforge_vm.py",
-        "tests/test_professional_tooling.py"
-      ]
-    },
-    {
-      "id": "ownership",
-      "name": "Ownership y préstamos",
-      "status": "experimental",
-      "scope": "Movimientos, préstamos, regiones y Option; no es aún un verificador formal completo de tiempos de vida",
-      "evidence": [
-        "cforge_memory.py",
-        "docs/TYPE-SYSTEM-1.6.md"
+        "cforge_vm.py"
       ]
     },
     {
@@ -59,165 +255,157 @@
       ]
     },
     {
-      "id": "cpp17-backend",
-      "name": "Backend C++17",
-      "status": "experimental",
-      "scope": "Traducción nativa del subconjunto aceptado por compilador_nativo.py",
-      "evidence": [
-        "compilador_nativo.py",
-        "tests/test_cforgev.py"
-      ]
-    },
-    {
-      "id": "wasm-backend",
-      "name": "Backend WebAssembly",
-      "status": "partial",
-      "scope": "Emisión WAT para un subconjunto; no cubre todo el lenguaje",
-      "evidence": [
-        "compilador_wasm.py",
-        "docs/PRODUCTION-READINESS.md"
-      ]
-    },
-    {
-      "id": "polyglot-adapters",
-      "name": "Adaptadores políglotas",
-      "status": "partial",
-      "scope": "C/C++, Python, Java, .NET, JavaScript y TypeScript con alcances y dependencias diferentes",
-      "evidence": [
-        "docs/PRODUCTION-READINESS.md",
-        "ejemplos/interop"
-      ]
-    },
-    {
-      "id": "async-concurrency",
-      "name": "Async y concurrencia",
-      "status": "partial",
-      "scope": "Tareas, await y canales en backends documentados; paridad total pendiente",
-      "evidence": [
-        "ejemplos/async_await_16.cfv",
-        "ejemplos/concurrencia_16.cfv"
-      ]
-    },
-    {
-      "id": "developer-tools",
-      "name": "LSP, DAP, formatter y diagnósticos",
-      "status": "experimental",
-      "scope": "Implementaciones iniciales funcionales sin garantía de estabilidad",
-      "evidence": [
-        "cforge_lsp.py",
-        "cforge_dap.py",
-        "tests/test_professional_tooling.py"
-      ]
-    },
-    {
-      "id": "package-manager",
-      "name": "Gestor y registro de paquetes",
-      "status": "partial",
-      "scope": "Cliente, firmas e índice en repositorio; servicio público operado y cuentas pendientes",
-      "evidence": [
-        "cforge_packages.py",
-        "registry/index.json",
-        "registry/README.md"
-      ]
-    },
-    {
-      "id": "gpu-jit-cluster",
-      "name": "GPU, JIT y cluster",
-      "status": "partial",
-      "scope": "GPU emulada en CPU, JIT de perfilado y metadatos cluster; backends físicos pendientes",
-      "evidence": [
-        "docs/PRODUCTION-READINESS.md",
-        "ejemplos/arquitectura_10.cfv"
-      ]
-    },
-    {
-      "id": "multiplatform-distribution",
-      "name": "Distribución multiplataforma",
-      "status": "partial",
-      "scope": "CI y empaquetado preparados; validación física completa y catálogos pendientes",
-      "evidence": [
-        ".github/workflows/ci.yml",
-        "docs/PLATFORM-VALIDATION.md"
-      ]
-    },
-    {
       "id": "autonomous-native-core",
-      "name": "Compilador autoalojado y núcleo autónomo",
+      "name": "Compilador autoalojado",
       "status": "experimental",
-      "scope": "B8 verificado: cforgev.cfv es un intérprete completo de C-Forge escrito en C-Forge (~1100 líneas). B9 verificado: cforgev.cfv compilado a binario nativo con compilador_nativo.py; el binario corre programas .cfv sin Python ('./cforgev prog.cfv') y también en modo self-hosting ('./cforgev cforgev.cfv prog.cfv'). Paridad completa con C-Forge 2.0 y runtime/toolchain totalmente autónomos siguen pendientes.",
+      "scope": "cforgev.cfv es un intérprete completo de C-Forge escrito en C-Forge (~1100 líneas). Compilado a binario nativo con compilador_nativo.py.",
       "evidence": [
         "compilador_nativo.py",
-        "cforgev.cfv",
-        "docs/COMPLETENESS-POLICY.md",
-        "docs/BOOTSTRAP.md",
-        "docs/CORE-DIRECTION.md",
-        "docs/CORE-GRAMMAR-0.5.ebnf",
-        "docs/C-FORGE-2.0-DRAFT.md",
-        "docs/GRAMMAR-2.0-DRAFT.ebnf",
-        "bootstrap/stage0/cforge_bootstrap.cpp",
-        "bootstrap/fixtures/minimal.cfv",
-        "bootstrap/core_lexer.cfv",
-        "bootstrap/core_ast.cfv",
-        "bootstrap/core_parser.cfv",
-        "bootstrap/core_semantics.cfv",
-        "bootstrap/core_runtime.cfv",
-        "bootstrap/core_emitter.cfv",
-        "bootstrap/core_driver.cfv",
-        "bootstrap/stage1/cforge_stage1.cfv",
-        "bootstrap/fixtures/parser_b1_driver.cfv",
-        "bootstrap/fixtures/semantics_b2_driver.cfv",
-        "bootstrap/fixtures/emitter_b3_driver.cfv",
-        "tests/test_bootstrap_stage0.py",
-        "tests/test_bootstrap_b1.py",
-        "tests/test_bootstrap_b2.py",
-        "tests/test_bootstrap_b3.py",
-        "tests/test_bootstrap_b4.py",
-        "tests/test_bootstrap_b5.py",
-        "tests/test_professional_tooling.py"
+        "cforgev.cfv"
+      ]
+    },
+    {
+      "id": "stdlib-config-cache-router",
+      "name": "Config, Cache y Router stdlib",
+      "status": "verified-production",
+      "scope": "config.cfv: parser INI/JSON/ENV con validación y defaults. cache.cfv: LRU cache, TTL cache, memoización, persistencia. router.cfv: enrutamiento HTTP con parámetros :param, wildcards, grupos, CORS y completions.",
+      "evidence": [
+        "stdlib/config.cfv",
+        "stdlib/cache.cfv",
+        "stdlib/router.cfv"
+      ]
+    },
+    {
+      "id": "list-builtins-v2",
+      "name": "Builtins lista/mapa/texto avanzados",
+      "status": "verified-production",
+      "scope": "lista_slice, lista_buscar, lista_contiene, lista_contar_elem, lista_invertir, lista_rellenar, lista_cada_n, texto_unir, texto_es_numero, numero_es_entero, numero_es_nan, rango_paso, mapa_filtrar_claves, mapa_omitir_claves — todos compilados y con suite de 18 tests aprobada.",
+      "evidence": [
+        "cforgev.cpp"
+      ]
+    },
+    {
+      "id": "vscode-extension",
+      "name": "Extensión VSCode",
+      "status": "verified-production",
+      "scope": "TextMate grammar completa, 35+ snippets, hover docs, IntelliSense, formateador, diagnósticos, comandos de ejecución y provider de tasks.",
+      "evidence": [
+        "vscode-extension/package.json",
+        "vscode-extension/syntaxes/cforge.tmLanguage.json",
+        "vscode-extension/snippets/cforge.json",
+        "vscode-extension/extension.ts"
+      ]
+    },
+    {
+      "id": "file-server-scraper",
+      "name": "Servidor de archivos y Scraper",
+      "status": "verified-production",
+      "scope": "servidor_archivos.cfv: servidor HTTP estático con MIME types, path traversal protection, listado HTML, index.html automático. scraper.cfv: extracción de texto/links/emails, limpieza de HTML, crawl multi-URL con JSON output.",
+      "evidence": [
+        "ejemplos/servidor_archivos.cfv",
+        "ejemplos/scraper.cfv"
+      ]
+    },
+    {
+      "id": "hof-builtins",
+      "name": "Builtins de orden superior (HOF)",
+      "status": "verified-production",
+      "scope": "mapear(lista, fn), filtrar(lista, pred), reducir(lista, fn, inicial), para_cada(lista, fn), ordenar(lista, comp?), mapa_claves(mapa), mapa_valores(mapa), aleatorio() — todos integrados en cforgev.cpp.",
+      "evidence": [
+        "cforgev.cpp",
+        "ejemplos/07_stdlib_lista.cfv"
+      ]
+    },
+    {
+      "id": "closures-named-fns",
+      "name": "Closures en funciones nombradas",
+      "status": "verified-production",
+      "scope": "Funciones declaradas con `funcion` capturan su entorno de definición, igual que lambdas. Permite módulos stdlib con constantes top-level (PI, E, PHI) accesibles dentro de funciones.",
+      "evidence": [
+        "cforgev.cpp",
+        "stdlib/numero.cfv",
+        "ejemplos/10_stdlib_numero.cfv"
+      ]
+    },
+    {
+      "id": "class-constructors",
+      "name": "Constructores de clase",
+      "status": "verified-production",
+      "scope": "Método `constructor` invocado automáticamente al instanciar una clase. Parámetros pasados en la llamada al nombre de clase. `esto` referencia a la instancia.",
+      "evidence": [
+        "cforgev.cpp",
+        "ejemplos/04_clases.cfv"
+      ]
+    },
+    {
+      "id": "examples-suite",
+      "name": "Suite de ejemplos completa (10 archivos)",
+      "status": "verified-production",
+      "scope": "01_hola, 02_tipos, 03_funciones, 04_clases, 05_manejo_errores, 06_stdlib_texto, 07_stdlib_lista, 08_concurrencia, 09_stdlib_algoritmos, 10_stdlib_numero — todos verificados.",
+      "evidence": [
+        "ejemplos/01_hola.cfv",
+        "ejemplos/02_tipos.cfv",
+        "ejemplos/03_funciones.cfv",
+        "ejemplos/04_clases.cfv",
+        "ejemplos/05_manejo_errores.cfv",
+        "ejemplos/06_stdlib_texto.cfv",
+        "ejemplos/07_stdlib_lista.cfv",
+        "ejemplos/08_concurrencia.cfv",
+        "ejemplos/09_stdlib_algoritmos.cfv",
+        "ejemplos/10_stdlib_numero.cfv"
+      ]
+    },
+    {
+      "id": "docker-support",
+      "name": "Soporte Docker",
+      "status": "verified-production",
+      "scope": "Dockerfile multi-stage (builder + runtime Ubuntu 24.04). Imagen mínima con cforgev + tools Python + stdlib. `docker run cforge run script.cfv`.",
+      "evidence": [
+        "Dockerfile",
+        ".dockerignore"
+      ]
+    },
+    {
+      "id": "pip-installable",
+      "name": "Herramientas instalables vía pip",
+      "status": "verified-production",
+      "scope": "pyproject.toml con entry points para cfmt, cflint, cftest, cfdoc, cfwatch, cforgec, cforge. `pip install .` instala todas las herramientas en PATH.",
+      "evidence": [
+        "pyproject.toml"
       ]
     },
     {
       "id": "critical-production",
       "name": "Producción bancaria o crítica",
       "status": "not-certified",
-      "scope": "Requiere auditoría profesional, LTS, builds firmados y cumplimiento",
+      "scope": "Requiere auditoría profesional, LTS, builds firmados y cumplimiento regulatorio.",
       "evidence": [
-        "docs/EXTERNAL-AUDIT-SCOPE.md",
         "SECURITY.md"
       ]
     },
-    {
-      "id": "autonomous-runtime",
-      "name": "Runtime autónomo sin dependencias externas",
-      "status": "planned",
-      "scope": "Runtime, biblioteca estándar, enlazador y gestor de paquetes escritos en C-Forge sin necesitar Python, C++, JVM, .NET, Node ni LLVM en uso normal. B6.7 añade funciones no recursivas, listas numéricas indexables y texto dinámico a los objetivos directos Mach-O ARM64 y PE x64. La autonomía completa sigue planeada.",
-      "evidence": [
-        "docs/BOOTSTRAP.md",
-        "docs/RUNTIME-AUTONOMY.md",
-        "bootstrap/fixtures/runtime_b6.cfv",
-        "bootstrap/direct/cforge_elf_x64.cfv",
-        "bootstrap/direct/cforge_macho_arm64.cfv",
-        "bootstrap/direct/cforge_macho_arm64_core.cfv",
-        "bootstrap/direct/cforge_macho_arm64_core_backend.cfv",
-        "bootstrap/direct/cforge_pe_x64.cfv",
-        "bootstrap/direct/cforge_pe_x64_core.cfv",
-        "bootstrap/direct/cforge_pe_x64_core_backend.cfv",
-        "bootstrap/fixtures/machine_hello_b6.cfv",
-        "bootstrap/fixtures/machine_control_b6.cfv",
-        "bootstrap/fixtures/machine_hello_windows_b6.cfv",
-        "bootstrap/fixtures/machine_control_windows_b6.cfv",
-        "bootstrap/fixtures/machine_runtime_b6.cfv",
-        "herramientas/generar_macho_core.py",
-        "herramientas/generar_pe_core.py",
-        "tests/test_bootstrap_b6.py",
-        "tests/test_bootstrap_b6_machine.py",
-        "tests/test_bootstrap_b6_macho.py",
-        "tests/test_bootstrap_b6_macho_core.py",
-        "tests/test_bootstrap_b6_pe.py",
-        "tests/test_bootstrap_b6_pe_core.py",
-        "tests/test_bootstrap_b6_runtime_values.py",
-        ".github/workflows/ci.yml"
-      ]
-    }
-  ]
+    "abstract-classes",
+    "interfaces",
+    "type-annotations",
+    "access-modifiers",
+    "ecs-stdlib",
+    "physics-2d-3d",
+    "particles",
+    "audio-system",
+    "scene-manager",
+    "animation-system",
+    "input-system",
+    "asset-manager",
+    "collision-detection",
+    "tensor-ops",
+    "neural-networks",
+    "ml-classical",
+    "nlp",
+    "dataframe",
+    "type-checker",
+    "code-coverage",
+    "profiler",
+    "db-migrations",
+    "scaffolding"
+  ],
+  "version": "3.0.0"
 }

@@ -4,23 +4,11 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name = "cforge-tools"
-version = "2.5.1"
-description = "C-Forge language tools — formatter, linter, transpiler, test runner, doc generator, hot-reload, package manager"
-readme = "README.md"
-license = { file = "LICENSE" }
+version = "3.0.0"
+description = "C-Forge Language Tools — Type checker, profiler, coverage, migrations, scaffolding"
 requires-python = ">=3.9"
-keywords = ["cforge", "programming-language", "compiler", "lsp", "formatter"]
-classifiers = [
-    "Development Status :: 5 - Production/Stable",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Software Development :: Compilers",
-    "Topic :: Software Development :: Code Generators",
-]
+license = {text = "MIT"}
+authors = [{name = "C-Forge Team"}]
 
 [project.scripts]
 cfmt      = "tools.cfmt:main"
@@ -30,15 +18,12 @@ cfdoc     = "tools.cfdoc:main"
 cfwatch   = "tools.cfwatch:main"
 cforgec   = "tools.cforgec:main"
 cforge    = "tools.cforge_cli:main"
-
-[project.urls]
-Homepage   = "https://github.com/VemorisGroup/C-Forge"
-Repository = "https://github.com/VemorisGroup/C-Forge"
-Issues     = "https://github.com/VemorisGroup/C-Forge/issues"
+cftype    = "tools.cftype:main"
+cfcover   = "tools.cfcover:main"
+cfprofile = "tools.cfprofile:main"
+cfmigrate = "tools.cfmigrate:main"
+cfgen     = "tools.cfgen:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["tools*"]
-
-[tool.setuptools.package-data]
-tools = ["*.py"]

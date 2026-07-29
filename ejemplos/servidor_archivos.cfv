@@ -1,0 +1,197 @@
+// ejemplos/servidor_archivos.cfv — Servidor de archivos estáticos en C-Forge
+// Sirve archivos desde un directorio, con listado, descarga y subida
+//
+// Compilar: g++ -std=c++20 -O2 cforgev.cpp -DCFV_WITH_OPENSSL -lpthread -o cforgev
+// Correr:   ./cforgev ejemplos/servidor_archivos.cfv
+
+importar "stdlib/web.cfv"
+importar "stdlib/log.cfv"
+importar "stdlib/archivo.cfv"
+importar "stdlib/plantilla.cfv"
+
+// ── Configuracion ─────────────────────────────────────────────────────────────
+sea PUERTO      = 8080
+sea DIR_RAIZ    = "."       // directorio a servir
+sea MAX_ARCHIVO = 50        // MB maximo para subida
+
+log_configurar({"nivel": "info", "color": verdadero, "timestamp": verdadero})
+
+// ── MIME types ────────────────────────────────────────────────────────────────
+funcion mime_type(ext: texto): texto {
+    segun ext {
+        caso ".html": retornar "text/html; charset=utf-8"
+        caso ".htm":  retornar "text/html; charset=utf-8"
+        caso ".css":  retornar "text/css"
+        caso ".js":   retornar "application/javascript"
+        caso ".json": retornar "application/json"
+        caso ".png":  retornar "image/png"
+        caso ".jpg":  retornar "image/jpeg"
+        caso ".jpeg": retornar "image/jpeg"
+        caso ".gif":  retornar "image/gif"
+        caso ".svg":  retornar "image/svg+xml"
+        caso ".ico":  retornar "image/x-icon"
+        caso ".pdf":  retornar "application/pdf"
+        caso ".txt":  retornar "text/plain; charset=utf-8"
+        caso ".md":   retornar "text/markdown"
+        caso ".xml":  retornar "application/xml"
+        caso ".csv":  retornar "text/csv"
+        caso ".zip":  retornar "application/zip"
+        caso ".cfv":  retornar "text/plain"
+        caso ".cpp":  retornar "text/plain"
+        caso ".py":   retornar "text/plain"
+        caso ".sh":   retornar "text/plain"
+    }
+    retornar "application/octet-stream"
+}
+
+// ── Seguridad de rutas ────────────────────────────────────────────────────────
+funcion ruta_segura(ruta_req: texto): texto {
+    // Bloquear path traversal (../../etc/passwd)
+    si (texto_contiene(ruta_req, "..")) {
+        retornar ""
+    }
+    // Quitar query string
+    sea ruta = ruta_req
+    si (texto_contiene(ruta, "?")) {
+        sea idx = texto_indice(ruta, "?")
+        ruta = subcadena(ruta, 0, idx)
+    }
+    // Quitar slash inicial
+    si (texto_empieza_con(ruta, "/")) {
+        ruta = subcadena(ruta, 1, longitud(ruta))
+    }
+    retornar ruta
+}
+
+// ── Generar listado HTML ──────────────────────────────────────────────────────
+funcion html_listado(dir: texto, ruta_web: texto): texto {
+    sea archivos = directorio_listar(ruta_unir([DIR_RAIZ, dir]))
+    sea titulo = "Indice de /" + dir
+    sea filas = ""
+
+    // Link al padre
+    si (dir != "" y dir != ".") {
+        sea parent = ruta_directorio(dir)
+        filas = filas + "<tr><td><a href='/" + parent + "'>📁 ..</a></td><td>-</td><td>-</td></tr>\n"
+    }
+
+    para a en archivos {
+        sea nombre = ruta_nombre(a)
+        sea es_dir  = es_directorio(a)
+        sea icono   = si (es_dir) { "📁" } sino { "📄" }
+        sea enlace  = si (dir == "" o dir == ".") {
+            nombre
+        } sino {
+            dir + "/" + nombre
+        }
+        sea tam_str = si (es_dir) { "-" } sino {
+            intentar { tam_legible(archivo_tam(a)) } capturar (e) { "?" }
+        }
+        sea ext_str = si (es_dir) { "directorio" } sino { ruta_extension(a) }
+        filas = filas +
+            "<tr>" +
+            "<td><a href='/" + enlace + "'>" + icono + " " + nombre + "</a></td>" +
+            "<td>" + ext_str + "</td>" +
+            "<td>" + tam_str + "</td>" +
+            "</tr>\n"
+    }
+
+    retornar "<!DOCTYPE html><html lang='es'><head>" +
+        "<meta charset='UTF-8'>" +
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>" +
+        "<title>" + titulo + "</title>" +
+        "<style>" +
+        "body{font-family:monospace;max-width:900px;margin:2rem auto;padding:0 1rem;}" +
+        "h1{color:#333;border-bottom:2px solid #eee;padding-bottom:.5rem}" +
+        "table{width:100%;border-collapse:collapse}" +
+        "th{background:#f5f5f5;text-align:left;padding:.5rem;}" +
+        "td{padding:.4rem .5rem;border-bottom:1px solid #eee}" +
+        "a{color:#0066cc;text-decoration:none}" +
+        "a:hover{text-decoration:underline}" +
+        ".badge{background:#eee;border-radius:3px;padding:2px 6px;font-size:.8em}" +
+        "</style></head><body>" +
+        "<h1>" + titulo + "</h1>" +
+        "<p><span class='badge'>C-Forge File Server v2.3</span></p>" +
+        "<table><thead><tr><th>Nombre</th><th>Tipo</th><th>Tamano</th></tr></thead>" +
+        "<tbody>" + filas + "</tbody></table>" +
+        "<hr><small>Servidor de archivos C-Forge — " + fecha_ahora()["iso"] + "</small>" +
+        "</body></html>"
+}
+
+// ── Servidor principal ────────────────────────────────────────────────────────
+log_info("Servidor de archivos C-Forge iniciando...")
+log_info("Directorio raiz: " + ruta_absoluta(DIR_RAIZ))
+log_info("Puerto: " + PUERTO)
+
+sea srv = web_escuchar(PUERTO)
+mostrar("Servidor de archivos en http://localhost:" + PUERTO)
+mostrar("Sirviendo: " + ruta_absoluta(DIR_RAIZ))
+mostrar("Presiona Ctrl+C para detener")
+mostrar("")
+
+mientras (verdadero) {
+    sea req = web_solicitud(srv)
+    sea metodo = req["metodo"]
+    sea ruta_req = req["ruta"]
+
+    log_info(metodo + " " + ruta_req)
+
+    // Solo GET y HEAD
+    si (metodo != "GET" y metodo != "HEAD") {
+        web_responder(srv, 405, "Metodo no permitido", "text/plain")
+        continuar
+    }
+
+    // Ruta raiz → listar directorio raiz
+    si (ruta_req == "/" o ruta_req == "") {
+        sea html_idx = html_listado("", "/")
+        web_responder(srv, 200, html_idx, "text/html; charset=utf-8")
+        continuar
+    }
+
+    sea segmento = ruta_segura(ruta_req)
+    si (segmento == "") {
+        web_responder(srv, 403, "Acceso denegado", "text/plain")
+        continuar
+    }
+
+    sea ruta_fisica = ruta_unir([DIR_RAIZ, segmento])
+
+    // Verificar si existe
+    si (!existe_archivo(ruta_fisica) y !es_directorio(ruta_fisica)) {
+        web_responder(srv, 404,
+            "<h1>404 — No encontrado</h1><p>" + segmento + "</p>",
+            "text/html")
+        continuar
+    }
+
+    // Es directorio → listar
+    si (es_directorio(ruta_fisica)) {
+        // Buscar index.html
+        sea idx_path = ruta_unir([ruta_fisica, "index.html"])
+        si (existe_archivo(idx_path)) {
+            intentar {
+                sea contenido = leer_archivo(idx_path)
+                web_responder(srv, 200, contenido, "text/html; charset=utf-8")
+            } capturar (e) {
+                web_responder(srv, 500, "Error leyendo index.html", "text/plain")
+            }
+        } sino {
+            sea html_dir = html_listado(segmento, ruta_req)
+            web_responder(srv, 200, html_dir, "text/html; charset=utf-8")
+        }
+        continuar
+    }
+
+    // Es archivo — servir
+    intentar {
+        sea contenido = leer_archivo(ruta_fisica)
+        sea ext = ruta_extension(ruta_fisica)
+        sea mime = mime_type(ext)
+        web_responder(srv, 200, contenido, mime)
+        log_info("  → " + mime + " (" + tam_legible(longitud(contenido)) + ")")
+    } capturar (e) {
+        log_error("Error sirviendo " + ruta_fisica + ": " + e)
+        web_responder(srv, 500, "Error interno del servidor", "text/plain")
+    }
+}

@@ -1,0 +1,214 @@
+// stdlib/metricas.cfv — Sistema de métricas Prometheus-compatible
+// C-Forge Standard Library v3.0
+
+importar "fecha"
+
+// ── Registro de métricas ───────────────────────────────────────────────────────
+
+sea _metricas_contadores = {}
+sea _metricas_gauges = {}
+sea _metricas_histogramas = {}
+sea _metricas_summaries = {}
+sea _metricas_meta = {}
+
+// ── Contadores ─────────────────────────────────────────────────────────────────
+
+/// @doc Registrar contador (solo sube)
+funcion metrica_contador(nombre, descripcion) {
+    _metricas_contadores[nombre] = {"valor": 0, "etiquetas": {}}
+    _metricas_meta[nombre] = {"tipo": "counter", "descripcion": descripcion ?? ""}
+    retornar nombre
+}
+
+/// @doc Incrementar contador
+funcion contador_inc(nombre, etiquetas, valor) {
+    sea v = valor ?? 1
+    sea clave = _etiqueta_clave(nombre, etiquetas)
+    si (no tiene_clave(_metricas_contadores[nombre]["etiquetas"], clave)) {
+        _metricas_contadores[nombre]["etiquetas"][clave] = {"valor": 0, "etiquetas": etiquetas ?? {}}
+    }
+    _metricas_contadores[nombre]["etiquetas"][clave]["valor"] = _metricas_contadores[nombre]["etiquetas"][clave]["valor"] + v
+}
+
+funcion contador_inc_simple(nombre, valor) {
+    contador_inc(nombre, {}, valor)
+}
+
+// ── Gauges ─────────────────────────────────────────────────────────────────────
+
+/// @doc Registrar gauge (sube y baja)
+funcion metrica_gauge(nombre, descripcion) {
+    _metricas_gauges[nombre] = {"valor": 0, "etiquetas": {}}
+    _metricas_meta[nombre] = {"tipo": "gauge", "descripcion": descripcion ?? ""}
+    retornar nombre
+}
+
+funcion gauge_set(nombre, valor, etiquetas) {
+    sea clave = _etiqueta_clave(nombre, etiquetas)
+    si (no tiene_clave(_metricas_gauges[nombre], "etiquetas")) { _metricas_gauges[nombre]["etiquetas"] = {} }
+    _metricas_gauges[nombre]["etiquetas"][clave] = {"valor": valor, "etiquetas": etiquetas ?? {}}
+}
+
+funcion gauge_inc(nombre, valor, etiquetas) {
+    sea clave = _etiqueta_clave(nombre, etiquetas)
+    sea bucket = _metricas_gauges[nombre]["etiquetas"][clave] ?? {"valor": 0}
+    gauge_set(nombre, bucket["valor"] + (valor ?? 1), etiquetas)
+}
+
+funcion gauge_dec(nombre, valor, etiquetas) {
+    gauge_inc(nombre, -(valor ?? 1), etiquetas)
+}
+
+// ── Histogramas ────────────────────────────────────────────────────────────────
+
+/// @doc Registrar histograma (distribución de valores)
+funcion metrica_histograma(nombre, descripcion, buckets) {
+    sea bs = buckets ?? [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+    _metricas_histogramas[nombre] = {
+        "buckets": bs,
+        "datos": [],
+        "suma": 0,
+        "conteo": 0
+    }
+    _metricas_meta[nombre] = {"tipo": "histogram", "descripcion": descripcion ?? ""}
+    retornar nombre
+}
+
+funcion histograma_observar(nombre, valor) {
+    sea hist = _metricas_histogramas[nombre]
+    agregar(hist["datos"], valor)
+    _metricas_histogramas[nombre]["suma"] = hist["suma"] + valor
+    _metricas_histogramas[nombre]["conteo"] = hist["conteo"] + 1
+}
+
+// ── Timer helper ───────────────────────────────────────────────────────────────
+
+/// @doc Medir tiempo de ejecución y registrar en histograma
+funcion metrica_medir(nombre_histograma, fn) {
+    sea inicio = tiempo_ms()
+    sea resultado = fn()
+    sea duracion = (tiempo_ms() - inicio) / 1000.0
+    histograma_observar(nombre_histograma, duracion)
+    retornar resultado
+}
+
+/// @doc Decorador de función con métricas (retorna función instrumentada)
+funcion metrica_instrumentar(fn, nombre_base) {
+    metrica_contador(nombre_base + "_total", "Total de llamadas")
+    metrica_contador(nombre_base + "_errores", "Total de errores")
+    metrica_histograma(nombre_base + "_duracion", "Duración en segundos")
+    retornar funcion() {
+        contador_inc_simple(nombre_base + "_total", 1)
+        sea inicio = tiempo_ms()
+        intentar {
+            sea r = fn()
+            histograma_observar(nombre_base + "_duracion", (tiempo_ms() - inicio) / 1000.0)
+            retornar r
+        } capturar(e) {
+            contador_inc_simple(nombre_base + "_errores", 1)
+            lanzar e
+        }
+    }
+}
+
+// ── Exportar formato Prometheus ────────────────────────────────────────────────
+
+funcion _etiqueta_clave(nombre, etiquetas) {
+    si (etiquetas == nulo o mapa_claves(etiquetas) == []) { retornar "__default__" }
+    sea partes = []
+    para k en mapa_claves(etiquetas) {
+        agregar(partes, k + "=" + a_texto(etiquetas[k]))
+    }
+    retornar texto_unir(partes, ",")
+}
+
+funcion _formato_etiquetas(etiquetas) {
+    si (etiquetas == nulo o mapa_claves(etiquetas) == []) { retornar "" }
+    sea partes = []
+    para k en mapa_claves(etiquetas) {
+        agregar(partes, k + "=\"" + a_texto(etiquetas[k]) + "\"")
+    }
+    retornar "{" + texto_unir(partes, ",") + "}"
+}
+
+/// @doc Exportar todas las métricas en formato Prometheus text
+funcion metricas_exportar_prometheus() {
+    sea output = ""
+    // Contadores
+    para nombre en mapa_claves(_metricas_contadores) {
+        sea meta = _metricas_meta[nombre] ?? {}
+        sea desc = meta["descripcion"] ?? ""
+        output = output + "# HELP " + nombre + " " + desc + "\n"
+        output = output + "# TYPE " + nombre + " counter\n"
+        para clave en mapa_claves(_metricas_contadores[nombre]["etiquetas"]) {
+            sea entry = _metricas_contadores[nombre]["etiquetas"][clave]
+            output = output + nombre + _formato_etiquetas(entry["etiquetas"]) + " " + a_texto(entry["valor"]) + "\n"
+        }
+    }
+    // Gauges
+    para nombre en mapa_claves(_metricas_gauges) {
+        sea meta = _metricas_meta[nombre] ?? {}
+        output = output + "# HELP " + nombre + " " + (meta["descripcion"] ?? "") + "\n"
+        output = output + "# TYPE " + nombre + " gauge\n"
+        si (tiene_clave(_metricas_gauges[nombre], "etiquetas")) {
+            para clave en mapa_claves(_metricas_gauges[nombre]["etiquetas"]) {
+                sea entry = _metricas_gauges[nombre]["etiquetas"][clave]
+                output = output + nombre + _formato_etiquetas(entry["etiquetas"]) + " " + a_texto(entry["valor"]) + "\n"
+            }
+        }
+    }
+    // Histogramas
+    para nombre en mapa_claves(_metricas_histogramas) {
+        sea meta = _metricas_meta[nombre] ?? {}
+        sea hist = _metricas_histogramas[nombre]
+        output = output + "# HELP " + nombre + " " + (meta["descripcion"] ?? "") + "\n"
+        output = output + "# TYPE " + nombre + " histogram\n"
+        para bucket en hist["buckets"] {
+            sea count_le = longitud(filtrar(hist["datos"], funcion(v) { retornar v <= bucket }))
+            output = output + nombre + "_bucket{le=\"" + a_texto(bucket) + "\"} " + a_texto(count_le) + "\n"
+        }
+        output = output + nombre + "_bucket{le=\"+Inf\"} " + a_texto(hist["conteo"]) + "\n"
+        output = output + nombre + "_sum " + a_texto(hist["suma"]) + "\n"
+        output = output + nombre + "_count " + a_texto(hist["conteo"]) + "\n"
+    }
+    retornar output
+}
+
+/// @doc Exportar métricas como JSON
+funcion metricas_exportar_json() {
+    retornar json_texto({
+        "contadores": _metricas_contadores,
+        "gauges": _metricas_gauges,
+        "histogramas": _metricas_histogramas,
+        "timestamp": tiempo_ms()
+    })
+}
+
+// ── Health checks ──────────────────────────────────────────────────────────────
+
+sea _health_checks = {}
+
+/// @doc Registrar health check
+funcion health_check_registrar(nombre, fn) {
+    _health_checks[nombre] = fn
+}
+
+/// @doc Ejecutar todos los health checks
+funcion health_check_ejecutar() {
+    sea resultados = {}
+    sea todos_ok = verdadero
+    para nombre en mapa_claves(_health_checks) {
+        intentar {
+            sea r = _health_checks[nombre]()
+            resultados[nombre] = {"estado": "ok", "detalle": r}
+        } capturar(e) {
+            resultados[nombre] = {"estado": "error", "error": e}
+            todos_ok = falso
+        }
+    }
+    retornar {
+        "estado": todos_ok ? "saludable" : "degradado",
+        "checks": resultados,
+        "timestamp": tiempo_ms()
+    }
+}

@@ -1,0 +1,283 @@
+// ejemplos/cli/cforgecli.cfv
+// Herramienta CLI completa con C-Forge v3.0
+
+importar "io"
+importar "texto"
+importar "colecciones"
+importar "fecha"
+
+sea VERSION = "1.0.0"
+
+// ── Utilidades de consola ──────────────────────────────────────────────────────
+
+funcion color(texto_str, codigo) {
+    retornar "\033[" + a_texto(codigo) + "m" + texto_str + "\033[0m"
+}
+funcion verde(t) { retornar color(t, 32) }
+funcion rojo(t) { retornar color(t, 31) }
+funcion amarillo(t) { retornar color(t, 33) }
+funcion azul(t) { retornar color(t, 34) }
+funcion negrita(t) { retornar color(t, 1) }
+funcion gris(t) { retornar color(t, 90) }
+
+funcion tabla(cabeceras, filas) {
+    sea anchos = lista_mapear(cabeceras, funcion(h) { retornar longitud(h) })
+    para fila en filas {
+        sea i = 0
+        para cel en fila {
+            anchos[i] = maximo(anchos[i], longitud(a_texto(cel)))
+            i = i + 1
+        }
+    }
+    sea linea_sep = "+" + unir(lista_mapear(anchos, funcion(a) { retornar texto_repetir("-", a + 2) }), "+") + "+"
+    mostrar(gris(linea_sep))
+    sea header_str = "|"
+    sea i = 0
+    para h en cabeceras {
+        sea padding = texto_repetir(" ", anchos[i] - longitud(h))
+        header_str = header_str + " " + negrita(azul(h)) + padding + " |"
+        i = i + 1
+    }
+    mostrar(header_str)
+    mostrar(gris(linea_sep))
+    para fila en filas {
+        sea row_str = "|"
+        sea i2 = 0
+        para cel en fila {
+            sea s = a_texto(cel)
+            sea padding = texto_repetir(" ", anchos[i2] - longitud(s))
+            row_str = row_str + " " + s + padding + " |"
+            i2 = i2 + 1
+        }
+        mostrar(row_str)
+    }
+    mostrar(gris(linea_sep))
+}
+
+funcion barra_progreso(actual, total, ancho) {
+    sea w = ancho ?? 40
+    sea pct = si(total > 0, actual / total, 0)
+    sea relleno = piso(pct * w)
+    sea vacio = w - relleno
+    retornar "[" + verde(texto_repetir("█", relleno)) + gris(texto_repetir("░", vacio)) + "] " + a_texto(piso(pct * 100)) + "%"
+}
+
+// ── Parser de argumentos ───────────────────────────────────────────────────────
+
+funcion cli_crear(nombre, version, descripcion) {
+    retornar {
+        "nombre": nombre,
+        "version": version ?? "1.0.0",
+        "descripcion": descripcion ?? "",
+        "comandos": {},
+        "global_flags": {
+            "--help": {"desc": "Mostrar ayuda", "short": "-h"},
+            "--version": {"desc": "Mostrar versión", "short": "-v"},
+            "--verbose": {"desc": "Modo detallado", "short": "-V"}
+        }
+    }
+}
+
+funcion cli_comando(cli, nombre, descripcion, fn) {
+    cli["comandos"][nombre] = {
+        "nombre": nombre,
+        "desc": descripcion,
+        "fn": fn,
+        "flags": {},
+        "args": []
+    }
+    retornar cli["comandos"][nombre]
+}
+
+funcion cmd_flag(cmd, nombre, descripcion, por_defecto) {
+    cmd["flags"][nombre] = {"desc": descripcion, "default": por_defecto}
+}
+
+funcion cli_ejecutar(cli, args_lista) {
+    si (longitud(args_lista) == 0 o args_lista[0] == "--help" o args_lista[0] == "-h") {
+        cli_mostrar_ayuda(cli)
+        retornar
+    }
+    si (args_lista[0] == "--version" o args_lista[0] == "-v") {
+        mostrar(cli["nombre"] + " v" + cli["version"])
+        retornar
+    }
+    sea cmd_nombre = args_lista[0]
+    si (no tiene_clave(cli["comandos"], cmd_nombre)) {
+        mostrar(rojo("Error: Comando desconocido '" + cmd_nombre + "'"))
+        mostrar("Usa '" + cli["nombre"] + " --help' para ver comandos disponibles")
+        retornar
+    }
+    sea cmd = cli["comandos"][cmd_nombre]
+    sea flags = {}
+    sea positional = []
+    sea i = 1
+    mientras (i < longitud(args_lista)) {
+        sea arg = args_lista[i]
+        si (texto_empieza_con(arg, "--")) {
+            sea clave = subcadena(arg, 2, longitud(arg))
+            si (i + 1 < longitud(args_lista) y no texto_empieza_con(args_lista[i+1], "--")) {
+                flags[clave] = args_lista[i+1]
+                i = i + 1
+            } sino {
+                flags[clave] = verdadero
+            }
+        } sino {
+            agregar(positional, arg)
+        }
+        i = i + 1
+    }
+    // Defaults
+    para f en mapa_claves(cmd["flags"]) {
+        si (no tiene_clave(flags, f)) {
+            flags[f] = cmd["flags"][f]["default"]
+        }
+    }
+    cmd["fn"]({"flags": flags, "args": positional})
+}
+
+funcion cli_mostrar_ayuda(cli) {
+    mostrar("\n" + negrita(azul(cli["nombre"])) + " v" + cli["version"])
+    mostrar(gris(cli["descripcion"]))
+    mostrar("\n" + negrita("USO:"))
+    mostrar("  " + cli["nombre"] + " <comando> [opciones]\n")
+    mostrar(negrita("COMANDOS:"))
+    para cmd_nombre en mapa_claves(cli["comandos"]) {
+        sea cmd = cli["comandos"][cmd_nombre]
+        mostrar("  " + verde(a_texto_ancho(cmd_nombre, 15)) + " " + cmd["desc"])
+    }
+    mostrar("\n" + negrita("OPCIONES GLOBALES:"))
+    mostrar("  " + verde(a_texto_ancho("--help", 15)) + " Mostrar esta ayuda")
+    mostrar("  " + verde(a_texto_ancho("--version", 15)) + " Mostrar versión")
+}
+
+funcion a_texto_ancho(s, ancho) {
+    retornar s + texto_repetir(" ", maximo(0, ancho - longitud(s)))
+}
+
+// ── App de gestión de tareas ───────────────────────────────────────────────────
+
+sea tareas = []
+sea _siguiente_id = 1
+
+funcion tarea_agregar(titulo, prioridad) {
+    sea id = _siguiente_id
+    _siguiente_id = _siguiente_id + 1
+    agregar(tareas, {
+        "id": id,
+        "titulo": titulo,
+        "prioridad": prioridad ?? "media",
+        "estado": "pendiente",
+        "creada": reloj_ms()
+    })
+    retornar id
+}
+
+// ── Main CLI ───────────────────────────────────────────────────────────────────
+
+funcion main() {
+    sea app = cli_crear("gestor", VERSION, "Gestor de tareas C-Forge — ejemplo de CLI completa")
+
+    // Comando: add
+    sea cmd_add = cli_comando(app, "add", "Agregar nueva tarea", funcion(ctx) {
+        si (longitud(ctx["args"]) == 0) {
+            mostrar(rojo("Error: se requiere el título de la tarea"))
+            retornar
+        }
+        sea titulo = unir(ctx["args"], " ")
+        sea prioridad = ctx["flags"]["prioridad"] ?? "media"
+        sea id = tarea_agregar(titulo, prioridad)
+        mostrar(verde("✓ Tarea #" + a_texto(id) + " agregada: ") + titulo)
+    })
+    cmd_flag(cmd_add, "prioridad", "alta/media/baja", "media")
+
+    // Comando: list
+    cli_comando(app, "list", "Listar todas las tareas", funcion(ctx) {
+        si (longitud(tareas) == 0) {
+            mostrar(gris("  Sin tareas. Usa 'add <título>' para crear una."))
+            retornar
+        }
+        sea filtro = ctx["flags"]["estado"] ?? nulo
+        sea lista_filtrada = si(filtro != nulo,
+            lista_filtrar(tareas, funcion(t) { retornar t["estado"] == filtro }),
+            tareas
+        )
+        sea filas = lista_mapear(lista_filtrada, funcion(t) {
+            sea estado_col = si(t["estado"] == "completada", verde("✓ completada"), si(t["estado"] == "pendiente", amarillo("● pendiente"), azul("→ en progreso")))
+            sea prio_col = si(t["prioridad"] == "alta", rojo("alta"), si(t["prioridad"] == "media", amarillo("media"), gris("baja")))
+            retornar [a_texto(t["id"]), t["titulo"], estado_col, prio_col]
+        })
+        tabla(["ID", "Título", "Estado", "Prioridad"], filas)
+        mostrar(gris("\n  " + a_texto(longitud(lista_filtrada)) + " tarea(s)"))
+    })
+
+    // Comando: done
+    cli_comando(app, "done", "Marcar tarea como completada", funcion(ctx) {
+        si (longitud(ctx["args"]) == 0) { mostrar(rojo("Error: se requiere ID")); retornar }
+        sea id = a_numero(ctx["args"][0])
+        sea encontrada = falso
+        para t en tareas {
+            si (t["id"] == id) {
+                t["estado"] = "completada"
+                encontrada = verdadero
+                mostrar(verde("✓ Tarea #" + a_texto(id) + " completada"))
+            }
+        }
+        si (no encontrada) { mostrar(rojo("Error: Tarea #" + a_texto(id) + " no encontrada")) }
+    })
+
+    // Comando: stats
+    cli_comando(app, "stats", "Mostrar estadísticas", funcion(ctx) {
+        sea total = longitud(tareas)
+        sea completadas = longitud(lista_filtrar(tareas, funcion(t) { retornar t["estado"] == "completada" }))
+        sea pendientes = total - completadas
+        sea pct = si(total > 0, completadas / total, 0)
+
+        mostrar("\n" + negrita("ESTADÍSTICAS DE TAREAS"))
+        mostrar("  Total:      " + a_texto(total))
+        mostrar("  Completadas:" + verde(" " + a_texto(completadas)))
+        mostrar("  Pendientes: " + amarillo(" " + a_texto(pendientes)))
+        mostrar("\n  Progreso general:")
+        mostrar("  " + barra_progreso(completadas, total, 30))
+
+        sea por_prio = {"alta": 0, "media": 0, "baja": 0}
+        para t en tareas {
+            por_prio[t["prioridad"]] = por_prio[t["prioridad"]] + 1
+        }
+        mostrar("\n  Por prioridad:")
+        mostrar("  Alta:  " + rojo(a_texto(por_prio["alta"])))
+        mostrar("  Media: " + amarillo(a_texto(por_prio["media"])))
+        mostrar("  Baja:  " + gris(a_texto(por_prio["baja"])))
+    })
+
+    // Comando: demo
+    cli_comando(app, "demo", "Correr demo con datos de ejemplo", funcion(ctx) {
+        mostrar(azul("\n▶ Ejecutando demo con datos de ejemplo...\n"))
+        tarea_agregar("Implementar autenticación OAuth2", "alta")
+        tarea_agregar("Escribir tests unitarios", "alta")
+        tarea_agregar("Optimizar queries de base de datos", "media")
+        tarea_agregar("Actualizar documentación API", "media")
+        tarea_agregar("Configurar CI/CD", "baja")
+        tarea_agregar("Revisar dependencias", "baja")
+        tareas[0]["estado"] = "completada"
+        tareas[2]["estado"] = "completada"
+        mostrar(verde("✓ 6 tareas de ejemplo creadas"))
+    })
+
+    // Simular argumentos (en uso real, vendrían del sistema)
+    sea args_test = [
+        ["demo"],
+        ["list"],
+        ["done", "1"],
+        ["add", "Desplegar", "a", "producción", "--prioridad", "alta"],
+        ["stats"],
+        ["--help"]
+    ]
+
+    para args_sim en args_test {
+        mostrar("\n" + gris("$ gestor " + unir(args_sim, " ")))
+        cli_ejecutar(app, args_sim)
+    }
+}
+
+main()

@@ -1,0 +1,305 @@
+// stdlib/ecs.cfv — Entity Component System para videojuegos
+// C-Forge Standard Library v3.0
+
+// ── World ──────────────────────────────────────────────────────────────────────
+
+/// @doc Crear mundo ECS
+funcion ecs_mundo_crear() {
+    retornar {
+        "entidades": {},
+        "componentes": {},
+        "sistemas": [],
+        "siguente_id": 1,
+        "entidades_eliminadas": [],
+        "tiempo": 0,
+        "delta": 0
+    }
+}
+
+// ── Entidades ──────────────────────────────────────────────────────────────────
+
+/// @doc Crear nueva entidad
+funcion ecs_crear_entidad(mundo) {
+    sea id = mundo["siguiente_id"]
+    mundo["siguiente_id"] = id + 1
+    mundo["entidades"][a_texto(id)] = {"id": id, "activa": verdadero, "etiquetas": []}
+    retornar id
+}
+
+/// @doc Eliminar entidad
+funcion ecs_eliminar_entidad(mundo, id) {
+    sea sid = a_texto(id)
+    si (tiene_clave(mundo["entidades"], sid)) {
+        mundo["entidades"][sid]["activa"] = falso
+        agregar(mundo["entidades_eliminadas"], id)
+    }
+    // Limpiar componentes
+    para tipo_comp en mapa_claves(mundo["componentes"]) {
+        si (tiene_clave(mundo["componentes"][tipo_comp], sid)) {
+            eliminar_clave(mundo["componentes"][tipo_comp], sid)
+        }
+    }
+}
+
+/// @doc Verificar si entidad está activa
+funcion ecs_activa(mundo, id) {
+    sea sid = a_texto(id)
+    retornar tiene_clave(mundo["entidades"], sid) y mundo["entidades"][sid]["activa"]
+}
+
+/// @doc Agregar etiqueta a entidad
+funcion ecs_etiquetar(mundo, id, etiqueta) {
+    sea sid = a_texto(id)
+    si (tiene_clave(mundo["entidades"], sid)) {
+        si (no lista_contiene(mundo["entidades"][sid]["etiquetas"], etiqueta)) {
+            agregar(mundo["entidades"][sid]["etiquetas"], etiqueta)
+        }
+    }
+}
+
+/// @doc Buscar entidades por etiqueta
+funcion ecs_buscar_etiqueta(mundo, etiqueta) {
+    sea resultado = []
+    para sid en mapa_claves(mundo["entidades"]) {
+        sea ent = mundo["entidades"][sid]
+        si (ent["activa"] y lista_contiene(ent["etiquetas"], etiqueta)) {
+            agregar(resultado, ent["id"])
+        }
+    }
+    retornar resultado
+}
+
+// ── Componentes ────────────────────────────────────────────────────────────────
+
+/// @doc Agregar componente a entidad
+funcion ecs_agregar_componente(mundo, id, tipo, datos) {
+    si (no tiene_clave(mundo["componentes"], tipo)) {
+        mundo["componentes"][tipo] = {}
+    }
+    mundo["componentes"][tipo][a_texto(id)] = datos ?? {}
+}
+
+/// @doc Obtener componente de entidad
+funcion ecs_obtener_componente(mundo, id, tipo) {
+    si (no tiene_clave(mundo["componentes"], tipo)) { retornar nulo }
+    retornar mundo["componentes"][tipo][a_texto(id)] ?? nulo
+}
+
+/// @doc Verificar si entidad tiene componente
+funcion ecs_tiene_componente(mundo, id, tipo) {
+    retornar tiene_clave(mundo["componentes"], tipo) y tiene_clave(mundo["componentes"][tipo], a_texto(id))
+}
+
+/// @doc Eliminar componente de entidad
+funcion ecs_eliminar_componente(mundo, id, tipo) {
+    si (ecs_tiene_componente(mundo, id, tipo)) {
+        eliminar_clave(mundo["componentes"][tipo], a_texto(id))
+    }
+}
+
+/// @doc Obtener todas las entidades que tienen ciertos componentes
+funcion ecs_consultar(mundo, tipos_requeridos) {
+    sea resultado = []
+    para sid en mapa_claves(mundo["entidades"]) {
+        si (no mundo["entidades"][sid]["activa"]) { continuar }
+        sea id = mundo["entidades"][sid]["id"]
+        sea tiene_todos = verdadero
+        para tipo en tipos_requeridos {
+            si (no ecs_tiene_componente(mundo, id, tipo)) {
+                tiene_todos = falso
+                romper
+            }
+        }
+        si (tiene_todos) { agregar(resultado, id) }
+    }
+    retornar resultado
+}
+
+// ── Componentes estándar ───────────────────────────────────────────────────────
+
+/// @doc Componente Transform (posición, rotación, escala)
+funcion comp_transform(x, y, z, rotacion, escala) {
+    retornar {
+        "x": x ?? 0, "y": y ?? 0, "z": z ?? 0,
+        "rotacion": rotacion ?? 0,
+        "escala_x": (escala ?? 1), "escala_y": (escala ?? 1), "escala_z": (escala ?? 1)
+    }
+}
+
+/// @doc Componente RigidBody (física)
+funcion comp_rigidbody(masa, vel_x, vel_y, vel_z, usa_gravedad) {
+    retornar {
+        "masa": masa ?? 1,
+        "vel_x": vel_x ?? 0, "vel_y": vel_y ?? 0, "vel_z": vel_z ?? 0,
+        "fuerza_x": 0, "fuerza_y": 0, "fuerza_z": 0,
+        "usa_gravedad": usa_gravedad ?? verdadero,
+        "es_cinematico": falso,
+        "friccion": 0.1,
+        "restitución": 0.3
+    }
+}
+
+/// @doc Componente Sprite
+funcion comp_sprite(textura, ancho, alto, capa) {
+    retornar {
+        "textura": textura ?? "",
+        "ancho": ancho ?? 32, "alto": alto ?? 32,
+        "capa": capa ?? 0,
+        "visible": verdadero,
+        "opacidad": 1.0,
+        "color": "#FFFFFF",
+        "flip_x": falso, "flip_y": falso
+    }
+}
+
+/// @doc Componente Collider (colisión AABB)
+funcion comp_collider(ancho, alto, offset_x, offset_y, es_trigger) {
+    retornar {
+        "ancho": ancho ?? 32, "alto": alto ?? 32,
+        "offset_x": offset_x ?? 0, "offset_y": offset_y ?? 0,
+        "es_trigger": es_trigger ?? falso,
+        "capa": 0,
+        "mascara": 0xFFFFFFFF
+    }
+}
+
+/// @doc Componente HealthPoints
+funcion comp_health(hp_max, hp_actual) {
+    sea max = hp_max ?? 100
+    retornar {
+        "max": max,
+        "actual": hp_actual ?? max,
+        "invencible": falso,
+        "tiempo_invencible": 0
+    }
+}
+
+/// @doc Componente Script (comportamiento)
+funcion comp_script(inicio_fn, actualizar_fn, destruir_fn) {
+    retornar {
+        "inicio": inicio_fn,
+        "actualizar": actualizar_fn,
+        "destruir": destruir_fn,
+        "iniciado": falso
+    }
+}
+
+// ── Sistemas ───────────────────────────────────────────────────────────────────
+
+/// @doc Registrar sistema
+funcion ecs_registrar_sistema(mundo, nombre, fn, prioridad) {
+    agregar(mundo["sistemas"], {
+        "nombre": nombre,
+        "fn": fn,
+        "prioridad": prioridad ?? 0,
+        "activo": verdadero
+    })
+    // Ordenar por prioridad
+    mundo["sistemas"] = mergesort(mundo["sistemas"], funcion(a, b) { retornar a["prioridad"] - b["prioridad"] })
+}
+
+/// @doc Actualizar el mundo ECS
+funcion ecs_actualizar(mundo, delta) {
+    mundo["delta"] = delta
+    mundo["tiempo"] = mundo["tiempo"] + delta
+    para sistema en mundo["sistemas"] {
+        si (sistema["activo"]) {
+            sistema["fn"](mundo, delta)
+        }
+    }
+    // Limpiar entidades eliminadas
+    mundo["entidades_eliminadas"] = []
+}
+
+// ── Sistemas built-in ──────────────────────────────────────────────────────────
+
+/// @doc Sistema de movimiento
+funcion sistema_movimiento(mundo, delta) {
+    sea entidades = ecs_consultar(mundo, ["Transform", "RigidBody"])
+    para id en entidades {
+        sea transform = ecs_obtener_componente(mundo, id, "Transform")
+        sea rb = ecs_obtener_componente(mundo, id, "RigidBody")
+        si (no rb["es_cinematico"]) {
+            si (rb["usa_gravedad"]) {
+                rb["vel_y"] = rb["vel_y"] - 9.8 * delta
+            }
+            // Aplicar fuerzas
+            rb["vel_x"] = rb["vel_x"] + (rb["fuerza_x"] / rb["masa"]) * delta
+            rb["vel_y"] = rb["vel_y"] + (rb["fuerza_y"] / rb["masa"]) * delta
+            rb["fuerza_x"] = 0
+            rb["fuerza_y"] = 0
+            // Mover
+            transform["x"] = transform["x"] + rb["vel_x"] * delta
+            transform["y"] = transform["y"] + rb["vel_y"] * delta
+            // Aplicar fricción
+            rb["vel_x"] = rb["vel_x"] * (1 - rb["friccion"])
+        }
+    }
+}
+
+/// @doc Sistema de scripts
+funcion sistema_scripts(mundo, delta) {
+    sea entidades = ecs_consultar(mundo, ["Script"])
+    para id en entidades {
+        sea script = ecs_obtener_componente(mundo, id, "Script")
+        si (no script["iniciado"] y script["inicio"] != nulo) {
+            script["inicio"](id, mundo)
+            script["iniciado"] = verdadero
+        }
+        si (script["actualizar"] != nulo) {
+            script["actualizar"](id, mundo, delta)
+        }
+    }
+}
+
+/// @doc Sistema de colisiones AABB
+funcion sistema_colisiones(mundo, delta) {
+    sea entidades = ecs_consultar(mundo, ["Transform", "Collider"])
+    sea colisiones = []
+    sea i = 0
+    mientras (i < longitud(entidades)) {
+        sea id_a = entidades[i]
+        sea ta = ecs_obtener_componente(mundo, id_a, "Transform")
+        sea ca = ecs_obtener_componente(mundo, id_a, "Collider")
+        sea j = i + 1
+        mientras (j < longitud(entidades)) {
+            sea id_b = entidades[j]
+            sea tb = ecs_obtener_componente(mundo, id_b, "Transform")
+            sea cb = ecs_obtener_componente(mundo, id_b, "Collider")
+            // AABB check
+            sea ax1 = ta["x"] + ca["offset_x"]
+            sea ay1 = ta["y"] + ca["offset_y"]
+            sea ax2 = ax1 + ca["ancho"]
+            sea ay2 = ay1 + ca["alto"]
+            sea bx1 = tb["x"] + cb["offset_x"]
+            sea by1 = tb["y"] + cb["offset_y"]
+            sea bx2 = bx1 + cb["ancho"]
+            sea by2 = by1 + cb["alto"]
+            si (ax1 < bx2 y ax2 > bx1 y ay1 < by2 y ay2 > by1) {
+                agregar(colisiones, {"a": id_a, "b": id_b})
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    retornar colisiones
+}
+
+// ── Prefabs ────────────────────────────────────────────────────────────────────
+
+sea _prefabs = {}
+
+/// @doc Registrar prefab (plantilla de entidad)
+funcion ecs_definir_prefab(nombre, fn) {
+    _prefabs[nombre] = fn
+}
+
+/// @doc Instanciar prefab
+funcion ecs_instanciar(mundo, nombre, pos_x, pos_y) {
+    sea id = ecs_crear_entidad(mundo)
+    ecs_agregar_componente(mundo, id, "Transform", comp_transform(pos_x, pos_y))
+    si (tiene_clave(_prefabs, nombre)) {
+        _prefabs[nombre](mundo, id)
+    }
+    retornar id
+}

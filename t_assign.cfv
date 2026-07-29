@@ -1,0 +1,8 @@
+sea z: numero = 10
+sea w: numero = 3
+mientras (w != 0) {
+    sea temp: numero = w
+    w = z - piso(z / w) * w
+    z = temp
+}
+mostrar(a_texto(z))

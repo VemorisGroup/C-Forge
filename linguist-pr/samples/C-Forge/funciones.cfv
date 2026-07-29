@@ -1,0 +1,24 @@
+// Funciones y control de flujo en C-Forge
+
+funcion factorial(n: numero): numero {
+    si (n <= 1) {
+        retornar 1
+    }
+    retornar n * factorial(n - 1)
+}
+
+funcion es_par(n: numero): booleano {
+    retornar (n % 2) == 0
+}
+
+funcion suma_lista(nums: lista): numero {
+    sea total: numero = 0
+    para num en nums {
+        total = total + num
+    }
+    retornar total
+}
+
+mostrar(factorial(10))
+mostrar(es_par(42))
+mostrar(suma_lista([1, 2, 3, 4, 5]))

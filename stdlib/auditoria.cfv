@@ -1,0 +1,166 @@
+// stdlib/auditoria.cfv — Audit trail y trazabilidad empresarial
+// C-Forge Standard Library v3.0
+
+importar "fecha"
+
+// ── Registro de auditoría ──────────────────────────────────────────────────────
+
+sea _audit_log = []
+sea _audit_config = {
+    "max_entradas": 100000,
+    "retener_dias": 365,
+    "nivel": "info"
+}
+
+/// @doc Configurar auditoría
+funcion auditoria_configurar(config) {
+    para k en mapa_claves(config) { _audit_config[k] = config[k] }
+}
+
+/// @doc Registrar evento de auditoría
+funcion audit_log(accion, usuario_id, recurso, datos, resultado) {
+    sea entrada = {
+        "id": _audit_id_generar(),
+        "timestamp": tiempo_ms(),
+        "fecha": fecha_ahora()["iso"],
+        "accion": accion,
+        "usuario_id": usuario_id,
+        "recurso": recurso,
+        "datos": datos ?? {},
+        "resultado": resultado ?? "ok",
+        "ip": "0.0.0.0",
+        "sesion_id": nulo
+    }
+    agregar(_audit_log, entrada)
+    // Rotar si excede máximo
+    si (longitud(_audit_log) > _audit_config["max_entradas"]) {
+        eliminar(_audit_log, 0)
+    }
+    retornar entrada["id"]
+}
+
+funcion _audit_id_generar() {
+    sea t = tiempo_ms()
+    sea r = piso(aleatorio() * 999999)
+    retornar a_texto(t) + "-" + a_texto(r)
+}
+
+/// @doc Registrar acceso a datos sensibles
+funcion audit_acceso_datos(usuario_id, tabla, operacion, filtros, registros_afectados) {
+    retornar audit_log(
+        "acceso_datos",
+        usuario_id,
+        tabla,
+        {
+            "operacion": operacion,
+            "filtros": filtros ?? {},
+            "registros_afectados": registros_afectados ?? 0
+        },
+        "ok"
+    )
+}
+
+/// @doc Registrar cambio de configuración
+funcion audit_cambio_config(usuario_id, parametro, valor_anterior, valor_nuevo) {
+    retornar audit_log("cambio_configuracion", usuario_id, "configuracion", {
+        "parametro": parametro,
+        "anterior": valor_anterior,
+        "nuevo": valor_nuevo
+    })
+}
+
+/// @doc Registrar intento de autenticación
+funcion audit_autenticacion(usuario_id, exitoso, ip, metodo) {
+    retornar audit_log(
+        exitoso ? "login_exitoso" : "login_fallido",
+        usuario_id,
+        "autenticacion",
+        {"ip": ip ?? "unknown", "metodo": metodo ?? "password"},
+        exitoso ? "ok" : "fallo"
+    )
+}
+
+/// @doc Registrar transacción financiera
+funcion audit_transaccion(usuario_id, tipo, monto, moneda, desde, hacia, referencia) {
+    retornar audit_log("transaccion_financiera", usuario_id, "cuenta", {
+        "tipo": tipo,
+        "monto": monto,
+        "moneda": moneda ?? "USD",
+        "desde": desde,
+        "hacia": hacia,
+        "referencia": referencia ?? _audit_id_generar()
+    })
+}
+
+/// @doc Registrar exportación de datos (GDPR)
+funcion audit_exportacion_datos(usuario_id, tipo_datos, formato, cantidad_registros) {
+    retornar audit_log("exportacion_datos", usuario_id, "datos_personales", {
+        "tipo_datos": tipo_datos,
+        "formato": formato,
+        "registros": cantidad_registros
+    })
+}
+
+/// @doc Consultar log de auditoría con filtros
+funcion audit_consultar(filtros) {
+    sea f = filtros ?? {}
+    sea resultado = _audit_log
+    si (tiene_clave(f, "usuario_id")) {
+        resultado = filtrar(resultado, funcion(e) { retornar e["usuario_id"] == f["usuario_id"] })
+    }
+    si (tiene_clave(f, "accion")) {
+        resultado = filtrar(resultado, funcion(e) { retornar e["accion"] == f["accion"] })
+    }
+    si (tiene_clave(f, "recurso")) {
+        resultado = filtrar(resultado, funcion(e) { retornar e["recurso"] == f["recurso"] })
+    }
+    si (tiene_clave(f, "desde_ts")) {
+        resultado = filtrar(resultado, funcion(e) { retornar e["timestamp"] >= f["desde_ts"] })
+    }
+    si (tiene_clave(f, "hasta_ts")) {
+        resultado = filtrar(resultado, funcion(e) { retornar e["timestamp"] <= f["hasta_ts"] })
+    }
+    si (tiene_clave(f, "resultado")) {
+        resultado = filtrar(resultado, funcion(e) { retornar e["resultado"] == f["resultado"] })
+    }
+    // Ordenar por timestamp desc
+    sea cmp = funcion(a, b) { retornar b["timestamp"] - a["timestamp"] }
+    resultado = mergesort(resultado, cmp)
+    sea limite = f["limite"] ?? 100
+    si (longitud(resultado) > limite) {
+        sea recortado = []
+        sea i = 0
+        mientras (i < limite) { agregar(recortado, resultado[i]); i = i + 1 }
+        retornar recortado
+    }
+    retornar resultado
+}
+
+/// @doc Exportar audit log como CSV
+funcion audit_exportar_csv() {
+    sea header = "id,timestamp,fecha,accion,usuario_id,recurso,resultado\n"
+    sea rows = mapear(_audit_log, funcion(e) {
+        retornar e["id"] + "," + a_texto(e["timestamp"]) + "," + e["fecha"] + ","
+            + e["accion"] + "," + a_texto(e["usuario_id"]) + "," + e["recurso"] + "," + e["resultado"]
+    })
+    retornar header + texto_unir(rows, "\n")
+}
+
+/// @doc Generar reporte de seguridad
+funcion audit_reporte_seguridad(horas) {
+    sea desde = tiempo_ms() - ((horas ?? 24) * 3600 * 1000)
+    sea recientes = filtrar(_audit_log, funcion(e) { retornar e["timestamp"] >= desde })
+    sea logins_fallidos = longitud(filtrar(recientes, funcion(e) { retornar e["accion"] == "login_fallido" }))
+    sea cambios_config = longitud(filtrar(recientes, funcion(e) { retornar e["accion"] == "cambio_configuracion" }))
+    sea transacciones = longitud(filtrar(recientes, funcion(e) { retornar e["accion"] == "transaccion_financiera" }))
+    sea exportaciones = longitud(filtrar(recientes, funcion(e) { retornar e["accion"] == "exportacion_datos" }))
+    retornar {
+        "periodo_horas": horas ?? 24,
+        "total_eventos": longitud(recientes),
+        "logins_fallidos": logins_fallidos,
+        "cambios_configuracion": cambios_config,
+        "transacciones": transacciones,
+        "exportaciones_datos": exportaciones,
+        "alerta": logins_fallidos > 10 o exportaciones > 5
+    }
+}

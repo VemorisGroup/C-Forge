@@ -1,0 +1,2 @@
+importar "stdlib/mapa.cfv"
+mostrar("mapa ok")

@@ -1,0 +1,146 @@
+// stdlib/graphql.cfv — Servidor GraphQL para C-Forge
+// C-Forge Standard Library v3.0
+
+// ── Schema ─────────────────────────────────────────────────────────────────────
+
+sea _gql_tipos = {}
+sea _gql_query_resolvers = {}
+sea _gql_mutation_resolvers = {}
+sea _gql_subscription_resolvers = {}
+
+/// @doc Definir tipo GraphQL
+funcion gql_tipo(nombre, campos) {
+    _gql_tipos[nombre] = campos
+    retornar nombre
+}
+
+/// @doc Registrar resolver de Query
+funcion gql_query(nombre, resolver) {
+    _gql_query_resolvers[nombre] = resolver
+}
+
+/// @doc Registrar resolver de Mutation
+funcion gql_mutation(nombre, resolver) {
+    _gql_mutation_resolvers[nombre] = resolver
+}
+
+// ── Parser GraphQL simplificado ────────────────────────────────────────────────
+
+funcion _gql_parsear_op(query) {
+    sea q = texto_recortar(query)
+    sea es_mutation = texto_empieza_con(q, "mutation")
+    sea es_query = texto_empieza_con(q, "query") o texto_empieza_con(q, "{")
+    // Extraer nombre de operación y campos
+    sea inicio_llave = texto_buscar(q, "{")
+    si (inicio_llave < 0) { lanzar "GraphQL: se esperaba '{'" }
+    sea fin_llave = longitud(q) - 1
+    mientras (fin_llave > 0 y q[fin_llave] != "}") { fin_llave = fin_llave - 1 }
+    sea cuerpo = texto_subcadena(q, inicio_llave + 1, fin_llave)
+    retornar {
+        "tipo": es_mutation ? "mutation" : "query",
+        "cuerpo": cuerpo,
+        "raw": q
+    }
+}
+
+funcion _gql_parsear_campos(cuerpo) {
+    sea campos = []
+    sea partes = texto_dividir(texto_recortar(cuerpo), "\n")
+    para parte en partes {
+        sea l = texto_recortar(parte)
+        si (longitud(l) == 0 o l[0] == "#") { continuar }
+        // Campo con argumentos: nombre(arg: val) { subcampos }
+        sea paren = texto_buscar(l, "(")
+        sea nombre_campo = paren >= 0 ? texto_subcadena(l, 0, paren) : l
+        si (texto_buscar(nombre_campo, "{") >= 0) { nombre_campo = texto_subcadena(nombre_campo, 0, texto_buscar(nombre_campo, "{")) }
+        nombre_campo = texto_recortar(nombre_campo)
+        si (longitud(nombre_campo) > 0) {
+            agregar(campos, {"nombre": nombre_campo})
+        }
+    }
+    retornar campos
+}
+
+// ── Ejecución ──────────────────────────────────────────────────────────────────
+
+/// @doc Ejecutar query GraphQL
+funcion gql_ejecutar(query, variables, contexto) {
+    intentar {
+        sea op = _gql_parsear_op(query)
+        sea campos = _gql_parsear_campos(op["cuerpo"])
+        sea resolvers = op["tipo"] == "mutation" ? _gql_mutation_resolvers : _gql_query_resolvers
+        sea datos = {}
+        para campo en campos {
+            sea nombre = campo["nombre"]
+            si (tiene_clave(resolvers, nombre)) {
+                sea args = variables != nulo ? (variables[nombre] ?? {}) : {}
+                sea ctx = contexto ?? {}
+                datos[nombre] = resolvers[nombre](args, ctx)
+            } sino {
+                datos[nombre] = nulo
+            }
+        }
+        retornar {"datos": datos, "errores": nulo}
+    } capturar(e) {
+        retornar {"datos": nulo, "errores": [{"mensaje": e}]}
+    }
+}
+
+/// @doc Middleware HTTP para GraphQL
+funcion gql_handler(req) {
+    sea cuerpo = json_parsear(req["cuerpo"] ?? "{}")
+    sea query = cuerpo["query"] ?? ""
+    sea variables = cuerpo["variables"] ?? {}
+    sea resultado = gql_ejecutar(query, variables, {"req": req})
+    retornar {
+        "estado": 200,
+        "cuerpo": json_texto(resultado),
+        "cabeceras": {"Content-Type": "application/json"}
+    }
+}
+
+/// @doc Generar GraphQL Playground HTML
+funcion gql_playground(endpoint) {
+    sea ep = endpoint ?? "/graphql"
+    retornar {
+        "estado": 200,
+        "cuerpo": "<!DOCTYPE html><html><head><title>C-Forge GraphQL</title>"
+            + "<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/graphiql/graphiql.min.css\"/>"
+            + "</head><body style=\"margin:0\"><div id=\"graphiql\" style=\"height:100vh\"></div>"
+            + "<script crossorigin src=\"https://cdn.jsdelivr.net/npm/react/umd/react.production.min.js\"></script>"
+            + "<script crossorigin src=\"https://cdn.jsdelivr.net/npm/react-dom/umd/react-dom.production.min.js\"></script>"
+            + "<script crossorigin src=\"https://cdn.jsdelivr.net/npm/graphiql/graphiql.min.js\"></script>"
+            + "<script>const fetcher=GraphiQL.createFetcher({url:'" + ep + "'});"
+            + "ReactDOM.render(React.createElement(GraphiQL,{fetcher}),document.getElementById('graphiql'));</script>"
+            + "</body></html>",
+        "cabeceras": {"Content-Type": "text/html"}
+    }
+}
+
+// ── Schema SDL simplificado ────────────────────────────────────────────────────
+
+/// @doc Generar schema SDL desde tipos registrados
+funcion gql_schema_sdl() {
+    sea sdl = ""
+    para nombre_tipo en mapa_claves(_gql_tipos) {
+        sea campos = _gql_tipos[nombre_tipo]
+        sdl = sdl + "type " + nombre_tipo + " {\n"
+        para campo en mapa_claves(campos) {
+            sdl = sdl + "  " + campo + ": " + campos[campo] + "\n"
+        }
+        sdl = sdl + "}\n\n"
+    }
+    sdl = sdl + "type Query {\n"
+    para nombre en mapa_claves(_gql_query_resolvers) {
+        sdl = sdl + "  " + nombre + ": JSON\n"
+    }
+    sdl = sdl + "}\n\n"
+    si (longitud(mapa_claves(_gql_mutation_resolvers)) > 0) {
+        sdl = sdl + "type Mutation {\n"
+        para nombre en mapa_claves(_gql_mutation_resolvers) {
+            sdl = sdl + "  " + nombre + ": JSON\n"
+        }
+        sdl = sdl + "}\n"
+    }
+    retornar sdl
+}

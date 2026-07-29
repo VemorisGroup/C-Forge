@@ -1,0 +1,2 @@
+importar "stdlib/matematica.cfv"
+mostrar("matematica ok")

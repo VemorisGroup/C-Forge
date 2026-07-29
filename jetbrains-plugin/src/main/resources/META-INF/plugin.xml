@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<idea-plugin>
+    <id>com.cforge.intellij</id>
+    <name>C-Forge Language Support</name>
+    <vendor email="soporte@cforge.dev" url="https://cforge.dev">C-Forge</vendor>
+    <version>2.5.0</version>
+
+    <description><![CDATA[
+        <b>C-Forge Language Support</b> para IntelliJ IDEA, PyCharm, WebStorm y todos los IDEs JetBrains.
+        <br><br>
+        <b>Características:</b>
+        <ul>
+            <li>Resaltado de sintaxis completo para archivos .cfv</li>
+            <li>Autocompletado de palabras clave, builtins y funciones stdlib</li>
+            <li>Navegación a definición (Ctrl+Click)</li>
+            <li>Estructura del archivo (panel de estructura)</li>
+            <li>Comentarios inteligentes (Ctrl+/)</li>
+            <li>Configuración de ejecución (Run/Debug .cfv)</li>
+            <li>Soporte para proyectos multi-archivo (cforge.toml)</li>
+            <li>Integración con cftest y cfbuild</li>
+            <li>Linting en tiempo real (integración con cflint)</li>
+        </ul>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <b>2.5.0</b>
+        <ul>
+            <li>Soporte para operadores ?. y ??</li>
+            <li>Destructuring sea [a,b] = lista y sea {x} = mapa</li>
+            <li>Integración con nuevo REPL y hot reload</li>
+            <li>Autocompletado mejorado con tipos</li>
+        </ul>
+    ]]></change-notes>
+
+    <idea-version since-build="233"/>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Tipo de archivo -->
+        <fileType
+            name="C-Forge"
+            implementationClass="com.cforge.plugin.CForgeFileType"
+            fieldName="INSTANCE"
+            language="CForge"
+            extensions="cfv"/>
+
+        <!-- Lenguaje -->
+        <lang.parserDefinition
+            language="CForge"
+            implementationClass="com.cforge.plugin.CForgeParserDefinition"/>
+
+        <!-- Syntax highlighting -->
+        <lang.syntaxHighlighterFactory
+            language="CForge"
+            implementationClass="com.cforge.plugin.CForgeSyntaxHighlighterFactory"/>
+
+        <!-- Estructura del archivo -->
+        <lang.psiStructureViewFactory
+            language="CForge"
+            implementationClass="com.cforge.plugin.CForgeStructureViewFactory"/>
+
+        <!-- Autocompletado -->
+        <completion.contributor
+            language="CForge"
+            implementationClass="com.cforge.plugin.CForgeCompletionContributor"/>
+
+        <!-- Comentarios -->
+        <lang.commenter
+            language="CForge"
+            implementationClass="com.cforge.plugin.CForgeCommenter"/>
+
+        <!-- Breadcrumbs / navegación -->
+        <lang.braceMatcher
+            language="CForge"
+            implementationClass="com.cforge.plugin.CForgeBraceMatcher"/>
+
+        <!-- Configuración del plugin -->
+        <applicationConfigurable
+            parentId="tools"
+            instance="com.cforge.plugin.CForgeConfigurable"
+            id="com.cforge.plugin.CForgeConfigurable"
+            displayName="C-Forge"/>
+
+        <!-- Anotador (linting) -->
+        <annotator
+            language="CForge"
+            implementationClass="com.cforge.plugin.CForgeAnnotator"/>
+
+        <!-- Folding de código -->
+        <lang.foldingBuilder
+            language="CForge"
+            implementationClass="com.cforge.plugin.CForgeFoldingBuilder"/>
+
+        <!-- Color settings -->
+        <colorSettingsPage implementation="com.cforge.plugin.CForgeColorSettingsPage"/>
+    </extensions>
+
+    <actions>
+        <!-- Ejecutar archivo actual -->
+        <action
+            id="CForge.RunFile"
+            class="com.cforge.plugin.actions.RunCForgeFileAction"
+            text="Ejecutar archivo C-Forge"
+            description="Ejecuta el archivo .cfv actual con cforgev"
+            icon="/icons/cforge_run.svg">
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="shift ctrl F10"/>
+        </action>
+
+        <!-- REPL -->
+        <action
+            id="CForge.OpenREPL"
+            class="com.cforge.plugin.actions.OpenCForgeREPLAction"
+            text="Abrir C-Forge REPL"
+            description="Abre la consola REPL interactiva de C-Forge">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="shift ctrl R"/>
+        </action>
+
+        <!-- Run tests -->
+        <action
+            id="CForge.RunTests"
+            class="com.cforge.plugin.actions.RunCForgeTestsAction"
+            text="Ejecutar Tests C-Forge"
+            description="Corre los tests del proyecto con cftest">
+            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="CForge.RunFile"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="shift ctrl T"/>
+        </action>
+
+        <!-- Build -->
+        <action
+            id="CForge.Build"
+            class="com.cforge.plugin.actions.BuildCForgeProjectAction"
+            text="Build proyecto C-Forge"
+            description="Ejecuta cfbuild en el proyecto">
+            <add-to-group group-id="BuildMenu" anchor="first"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="shift ctrl B"/>
+        </action>
+    </actions>
+</idea-plugin>

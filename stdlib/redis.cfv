@@ -1,0 +1,253 @@
+// stdlib/redis.cfv — Cliente Redis (protocolo RESP)
+// C-Forge Standard Library v3.0
+
+// ── Conexión ───────────────────────────────────────────────────────────────────
+
+sea _redis_conexiones = {}
+sea _redis_id_counter = 0
+
+/// @doc Conectar a Redis
+funcion redis_conectar(host, puerto, password) {
+    sea h = host ?? "127.0.0.1"
+    sea p = puerto ?? 6379
+    sea conn_id = _redis_id_counter
+    _redis_id_counter = _redis_id_counter + 1
+    // Usar net_conectar del runtime
+    sea sock = net_conectar(h, p)
+    _redis_conexiones[conn_id] = {
+        "socket": sock,
+        "host": h,
+        "puerto": p
+    }
+    si (password != nulo) {
+        redis_cmd(conn_id, ["AUTH", password])
+    }
+    retornar conn_id
+}
+
+/// @doc Desconectar
+funcion redis_desconectar(conn_id) {
+    si (tiene_clave(_redis_conexiones, conn_id)) {
+        eliminar_clave(_redis_conexiones, conn_id)
+    }
+}
+
+// ── Protocolo RESP ─────────────────────────────────────────────────────────────
+
+funcion _resp_serializar(args) {
+    sea resultado = "*" + a_texto(longitud(args)) + "\r\n"
+    para arg en args {
+        sea s = a_texto(arg)
+        resultado = resultado + "$" + a_texto(longitud(s)) + "\r\n" + s + "\r\n"
+    }
+    retornar resultado
+}
+
+funcion _resp_parsear(respuesta) {
+    si (longitud(respuesta) == 0) { retornar nulo }
+    sea tipo = respuesta[0]
+    sea resto = texto_subcadena(respuesta, 1)
+    si (tipo == "+") { retornar resto }
+    si (tipo == "-") { lanzar "Redis error: " + resto }
+    si (tipo == ":") { retornar texto_a_numero(resto) }
+    si (tipo == "$") {
+        sea lineas = texto_dividir(respuesta, "\r\n")
+        si (longitud(lineas) < 2) { retornar nulo }
+        sea len = texto_a_numero(texto_subcadena(lineas[0], 1))
+        si (len < 0) { retornar nulo }
+        retornar lineas[1]
+    }
+    si (tipo == "*") {
+        sea lineas = texto_dividir(respuesta, "\r\n")
+        sea count = texto_a_numero(texto_subcadena(lineas[0], 1))
+        sea resultado = []
+        sea i = 1
+        sea j = 0
+        mientras (j < count) {
+            si (i >= longitud(lineas)) { romper }
+            sea l = lineas[i]
+            si (longitud(l) > 0 y l[0] == "$") {
+                sea len2 = texto_a_numero(texto_subcadena(l, 1))
+                si (len2 < 0) { agregar(resultado, nulo) }
+                sino {
+                    i = i + 1
+                    si (i < longitud(lineas)) { agregar(resultado, lineas[i]) }
+                }
+            } sino si (longitud(l) > 0 y l[0] == ":") {
+                agregar(resultado, texto_a_numero(texto_subcadena(l, 1)))
+            } sino si (l != "") {
+                agregar(resultado, l)
+            }
+            i = i + 1
+            j = j + 1
+        }
+        retornar resultado
+    }
+    retornar respuesta
+}
+
+/// @doc Ejecutar comando Redis raw
+funcion redis_cmd(conn_id, args) {
+    sea conn = _redis_conexiones[conn_id]
+    sea req = _resp_serializar(args)
+    sea resp = net_enviar_recibir(conn["socket"], req, conn["host"], conn["puerto"])
+    retornar _resp_parsear(resp)
+}
+
+// ── Comandos clave-valor ───────────────────────────────────────────────────────
+
+/// @doc SET key value [EX segundos]
+funcion redis_set(conn, clave, valor, expiracion) {
+    sea cmd = ["SET", clave, a_texto(valor)]
+    si (expiracion != nulo) {
+        agregar(cmd, "EX")
+        agregar(cmd, a_texto(piso(expiracion)))
+    }
+    retornar redis_cmd(conn, cmd)
+}
+
+/// @doc GET key
+funcion redis_get(conn, clave) {
+    retornar redis_cmd(conn, ["GET", clave])
+}
+
+/// @doc DELETE key
+funcion redis_del(conn, clave) {
+    retornar redis_cmd(conn, ["DEL", clave])
+}
+
+/// @doc Verificar si existe clave
+funcion redis_existe(conn, clave) {
+    retornar redis_cmd(conn, ["EXISTS", clave]) == 1
+}
+
+/// @doc TTL de una clave
+funcion redis_ttl(conn, clave) {
+    retornar redis_cmd(conn, ["TTL", clave])
+}
+
+/// @doc SET si no existe (atómico)
+funcion redis_setnx(conn, clave, valor) {
+    retornar redis_cmd(conn, ["SETNX", clave, a_texto(valor)]) == 1
+}
+
+/// @doc Incrementar contador atómico
+funcion redis_incr(conn, clave) {
+    retornar redis_cmd(conn, ["INCR", clave])
+}
+
+/// @doc Incrementar por valor
+funcion redis_incrby(conn, clave, valor) {
+    retornar redis_cmd(conn, ["INCRBY", clave, a_texto(piso(valor))])
+}
+
+// ── Hash ───────────────────────────────────────────────────────────────────────
+
+funcion redis_hset(conn, clave, campo, valor) {
+    retornar redis_cmd(conn, ["HSET", clave, campo, a_texto(valor)])
+}
+
+funcion redis_hget(conn, clave, campo) {
+    retornar redis_cmd(conn, ["HGET", clave, campo])
+}
+
+funcion redis_hgetall(conn, clave) {
+    sea lista = redis_cmd(conn, ["HGETALL", clave])
+    sea resultado = {}
+    sea i = 0
+    mientras (i + 1 < longitud(lista)) {
+        resultado[lista[i]] = lista[i + 1]
+        i = i + 2
+    }
+    retornar resultado
+}
+
+funcion redis_hdel(conn, clave, campo) {
+    retornar redis_cmd(conn, ["HDEL", clave, campo])
+}
+
+funcion redis_hmset(conn, clave, mapa) {
+    sea cmd = ["HMSET", clave]
+    para k en mapa_claves(mapa) {
+        agregar(cmd, k)
+        agregar(cmd, a_texto(mapa[k]))
+    }
+    retornar redis_cmd(conn, cmd)
+}
+
+// ── Listas ─────────────────────────────────────────────────────────────────────
+
+funcion redis_lpush(conn, clave, valor) {
+    retornar redis_cmd(conn, ["LPUSH", clave, a_texto(valor)])
+}
+
+funcion redis_rpush(conn, clave, valor) {
+    retornar redis_cmd(conn, ["RPUSH", clave, a_texto(valor)])
+}
+
+funcion redis_lpop(conn, clave) {
+    retornar redis_cmd(conn, ["LPOP", clave])
+}
+
+funcion redis_rpop(conn, clave) {
+    retornar redis_cmd(conn, ["RPOP", clave])
+}
+
+funcion redis_lrange(conn, clave, inicio, fin) {
+    retornar redis_cmd(conn, ["LRANGE", clave, a_texto(inicio), a_texto(fin ?? -1)])
+}
+
+funcion redis_llen(conn, clave) {
+    retornar redis_cmd(conn, ["LLEN", clave])
+}
+
+// ── Sets ────────────────────────────────────────────────────────────────────────
+
+funcion redis_sadd(conn, clave, miembro) {
+    retornar redis_cmd(conn, ["SADD", clave, a_texto(miembro)])
+}
+
+funcion redis_smembers(conn, clave) {
+    retornar redis_cmd(conn, ["SMEMBERS", clave])
+}
+
+funcion redis_sismember(conn, clave, miembro) {
+    retornar redis_cmd(conn, ["SISMEMBER", clave, a_texto(miembro)]) == 1
+}
+
+// ── Pub/Sub ────────────────────────────────────────────────────────────────────
+
+funcion redis_publicar(conn, canal, mensaje) {
+    retornar redis_cmd(conn, ["PUBLISH", canal, a_texto(mensaje)])
+}
+
+// ── Cache helper ───────────────────────────────────────────────────────────────
+
+/// @doc Memoizar resultado con Redis — ejecuta fn si no hay cache
+funcion redis_memoizar(conn, clave, fn, ttl_seg) {
+    sea cached = redis_get(conn, clave)
+    si (cached != nulo) { retornar json_parsear(cached) }
+    sea valor = fn()
+    redis_set(conn, clave, json_texto(valor), ttl_seg ?? 300)
+    retornar valor
+}
+
+/// @doc Implementar lock distribuido
+funcion redis_lock(conn, clave, ttl_seg) {
+    sea lock_clave = "__lock__" + clave
+    sea token = a_texto(tiempo_ms()) + a_texto(aleatorio())
+    sea adquirido = redis_setnx(conn, lock_clave, token)
+    si (adquirido) {
+        redis_cmd(conn, ["EXPIRE", lock_clave, a_texto(piso(ttl_seg ?? 30))])
+    }
+    retornar {"adquirido": adquirido, "token": token, "clave": lock_clave}
+}
+
+funcion redis_unlock(conn, lock_info) {
+    sea actual = redis_get(conn, lock_info["clave"])
+    si (actual == lock_info["token"]) {
+        redis_del(conn, lock_info["clave"])
+        retornar verdadero
+    }
+    retornar falso
+}
