@@ -1,0 +1,192 @@
+// stdlib/benchmark.cfv — Herramienta de benchmarks para C-Forge
+// Mide tiempo de ejecución, throughput, comparación de implementaciones
+
+// ── Benchmark simple ───────────────────────────────────────────────────────────
+funcion bench(nombre: texto, fn: cualquiera, iteraciones: numero): mapa {
+    sea n = si (iteraciones == nulo) { 1000 } sino { iteraciones }
+
+    // Warm-up (10% de iteraciones)
+    sea warmup = piso(n * 0.1)
+    si (warmup < 5) { warmup = 5 }
+    para _ en rango(warmup) { fn() }
+
+    // Medir
+    sea tiempos = []
+    sea t_total = tiempo_ms()
+    para _ en rango(n) {
+        sea t0 = tiempo_ms()
+        fn()
+        agregar(tiempos, tiempo_ms() - t0)
+    }
+    sea t_fin = tiempo_ms() - t_total
+
+    // Estadísticas
+    ordenar(tiempos)
+    sea suma = lista_suma(tiempos)
+    sea promedio = suma / n
+    sea p50 = tiempos[piso(n * 0.5)]
+    sea p90 = tiempos[piso(n * 0.9)]
+    sea p99 = tiempos[piso(n * 0.99)]
+    sea ops_por_seg = si (t_fin > 0) { piso(n / (t_fin / 1000)) } sino { 0 }
+
+    retornar {
+        "nombre": nombre,
+        "iteraciones": n,
+        "total_ms": t_fin,
+        "promedio_ms": promedio,
+        "min_ms": tiempos[0],
+        "max_ms": tiempos[longitud(tiempos) - 1],
+        "p50_ms": p50,
+        "p90_ms": p90,
+        "p99_ms": p99,
+        "ops_por_seg": ops_por_seg
+    }
+}
+
+// ── Suite de benchmarks ────────────────────────────────────────────────────────
+funcion bench_suite(nombre: texto): mapa {
+    retornar {
+        "nombre": nombre,
+        "casos": [],
+        "resultados": []
+    }
+}
+
+funcion bench_add(suite: mapa, nombre: texto, fn: cualquiera, iteraciones: numero): nulo {
+    agregar(suite["casos"], {
+        "nombre": nombre,
+        "fn": fn,
+        "iteraciones": si (iteraciones == nulo) { 1000 } sino { iteraciones }
+    })
+}
+
+funcion bench_run(suite: mapa): lista {
+    mostrar("\n⚡ Benchmark: " + suite["nombre"])
+    mostrar(texto_repetir("─", 60))
+
+    sea resultados = []
+    para caso en suite["casos"] {
+        mostrar("  Ejecutando: " + caso["nombre"] + "...")
+        sea r = bench(caso["nombre"], caso["fn"], caso["iteraciones"])
+        agregar(resultados, r)
+        bench_imprimir(r)
+    }
+    suite["resultados"] = resultados
+
+    // Ganador
+    si (longitud(resultados) > 1) {
+        bench_comparar(resultados)
+    }
+
+    retornar resultados
+}
+
+funcion bench_imprimir(r: mapa): nulo {
+    mostrar("  ├── " + r["nombre"])
+    mostrar("  │   iter:    " + r["iteraciones"])
+    mostrar("  │   total:   " + r["total_ms"] + "ms")
+    mostrar("  │   prom:    " + numero_formato(r["promedio_ms"], 3) + "ms")
+    mostrar("  │   p50:     " + r["p50_ms"] + "ms")
+    mostrar("  │   p90:     " + r["p90_ms"] + "ms")
+    mostrar("  │   p99:     " + r["p99_ms"] + "ms")
+    mostrar("  │   ops/s:   " + r["ops_por_seg"])
+    mostrar("  │")
+}
+
+funcion bench_comparar(resultados: lista): nulo {
+    mostrar(texto_repetir("─", 60))
+    mostrar("  📊 Comparación:")
+
+    sea mejor = resultados[0]
+    para r en resultados {
+        si (r["promedio_ms"] < mejor["promedio_ms"]) {
+            mejor = r
+        }
+    }
+
+    para r en resultados {
+        sea ratio = si (r["promedio_ms"] > 0) {
+            numero_formato(r["promedio_ms"] / mejor["promedio_ms"], 2)
+        } sino { "1.00" }
+        sea emoji = si (r["nombre"] == mejor["nombre"]) { "🏆" } sino { "  " }
+        mostrar("  " + emoji + " " + r["nombre"] + " — " + ratio + "x (" + numero_formato(r["promedio_ms"], 3) + "ms prom)")
+    }
+    mostrar("  🏆 Ganador: " + mejor["nombre"])
+    mostrar(texto_repetir("─", 60))
+}
+
+// ── Benchmark de memoria (aproximado) ─────────────────────────────────────────
+funcion bench_memoria(fn: cualquiera): mapa {
+    // Aproximación: mide tiempo antes/después de crear estructuras grandes
+    sea t0 = tiempo_ms()
+    sea resultado = fn()
+    sea t1 = tiempo_ms()
+    retornar {
+        "tiempo_ms": t1 - t0,
+        "resultado": resultado
+    }
+}
+
+// ── Perfilado de funciones ─────────────────────────────────────────────────────
+sea _perfil_datos = {}
+
+funcion perfil_inicio(nombre: texto): nulo {
+    si (!tiene_clave(_perfil_datos, nombre)) {
+        _perfil_datos[nombre] = {"llamadas": 0, "total_ms": 0, "min_ms": 99999, "max_ms": 0}
+    }
+    _perfil_datos[nombre]["_t0"] = tiempo_ms()
+}
+
+funcion perfil_fin(nombre: texto): nulo {
+    si (!tiene_clave(_perfil_datos, nombre)) { retornar nulo }
+    sea dt = tiempo_ms() - _perfil_datos[nombre]["_t0"]
+    _perfil_datos[nombre]["llamadas"] = _perfil_datos[nombre]["llamadas"] + 1
+    _perfil_datos[nombre]["total_ms"] = _perfil_datos[nombre]["total_ms"] + dt
+    si (dt < _perfil_datos[nombre]["min_ms"]) { _perfil_datos[nombre]["min_ms"] = dt }
+    si (dt > _perfil_datos[nombre]["max_ms"]) { _perfil_datos[nombre]["max_ms"] = dt }
+}
+
+funcion perfil_reporte(): nulo {
+    mostrar("\n📈 Reporte de perfilado:")
+    mostrar(texto_repetir("─", 60))
+    para kv en mapa_entradas(_perfil_datos) {
+        sea n = kv[0]
+        sea d = kv[1]
+        si (d["llamadas"] == 0) { continuar }
+        sea prom = d["total_ms"] / d["llamadas"]
+        mostrar("  " + n + ":")
+        mostrar("    llamadas: " + d["llamadas"])
+        mostrar("    total: " + d["total_ms"] + "ms | prom: " + numero_formato(prom, 2) + "ms | min: " + d["min_ms"] + "ms | max: " + d["max_ms"] + "ms")
+    }
+}
+
+funcion perfil_limpiar(): nulo {
+    _perfil_datos = {}
+}
+
+// ── Throttle y Debounce ────────────────────────────────────────────────────────
+// Limitar frecuencia de llamadas (útil para optimización)
+
+funcion throttle(fn: cualquiera, ms: numero): cualquiera {
+    sea ultimo = 0
+    retornar funcion(): cualquiera {
+        sea ahora = tiempo_ms()
+        si (ahora - ultimo >= ms) {
+            ultimo = ahora
+            retornar fn()
+        }
+        retornar nulo
+    }
+}
+
+funcion debounce(fn: cualquiera, ms: numero): cualquiera {
+    sea ultimo_llamado = 0
+    retornar funcion(): cualquiera {
+        ultimo_llamado = tiempo_ms()
+        dormir(ms)
+        si (tiempo_ms() - ultimo_llamado >= ms) {
+            retornar fn()
+        }
+        retornar nulo
+    }
+}

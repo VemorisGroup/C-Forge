@@ -84,6 +84,16 @@
 #include <SDL2/SDL_opengl.h>
 #endif
 #endif
+// PostgreSQL (opcional — compilar con -DCFV_WITH_PGSQL -lpq)
+#ifdef CFV_WITH_PGSQL
+#include <libpq-fe.h>
+#endif
+// MySQL (opcional — compilar con -DCFV_WITH_MYSQL -lmysqlclient)
+#ifdef CFV_WITH_MYSQL
+#include <mysql/mysql.h>
+#endif
+// WebSocket — usa sockets POSIX + SHA1 para handshake (sin deps extra)
+#include <unordered_map>
 struct ForgeValue;struct CfvDenseMatrix;struct CfvTuple;struct CfvSet;
 using Value=ForgeValue;using Lista=std::shared_ptr<std::vector<ForgeValue>>;using Mapa=std::shared_ptr<std::map<std::string,ForgeValue>>;using FastArray=std::shared_ptr<std::vector<double>>;using DenseMatrix=std::shared_ptr<CfvDenseMatrix>;using Tupla=std::shared_ptr<CfvTuple>;using Conjunto=std::shared_ptr<CfvSet>;
 struct CfvDenseMatrix{size_t rows=0,columns=0;std::vector<double>values;};
@@ -3612,6 +3622,355 @@ static Value cfv_texto_unir_fn(const Value& lv, const Value& sv){
 }
 // ── end lista/mapa/texto extra helpers ────────────────────────────────────────
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ── PostgreSQL bindings (CFV_WITH_PGSQL) ──────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+#ifdef CFV_WITH_PGSQL
+// Pool de conexiones PG indexado por handle entero
+static std::unordered_map<int, PGconn*> cfv_pg_pool;
+static int cfv_pg_next_id = 1;
+
+static Value cfv_pg_conectar_fn(const Value& conn_str_v) {
+  std::string cs = conn_str_v.index()==2 ? std::get<std::string>(conn_str_v.data) : "";
+  PGconn* conn = PQconnectdb(cs.c_str());
+  if (PQstatus(conn) != CONNECTION_OK) {
+    std::string err = PQerrorMessage(conn);
+    PQfinish(conn);
+    throw std::runtime_error("pg_conectar: " + err);
+  }
+  int id = cfv_pg_next_id++;
+  cfv_pg_pool[id] = conn;
+  return Value{(double)id};
+}
+
+static Value cfv_pg_cerrar_fn(const Value& id_v) {
+  int id = (int)std::get<double>(id_v.data);
+  if (cfv_pg_pool.count(id)) { PQfinish(cfv_pg_pool[id]); cfv_pg_pool.erase(id); }
+  return Value{};
+}
+
+static Value cfv_pg_query_fn(const Value& id_v, const Value& sql_v) {
+  int id = (int)std::get<double>(id_v.data);
+  if (!cfv_pg_pool.count(id)) throw std::runtime_error("pg_query: conexión inválida");
+  std::string sql = std::get<std::string>(sql_v.data);
+  PGresult* res = PQexec(cfv_pg_pool[id], sql.c_str());
+  ExecStatusType st = PQresultStatus(res);
+  if (st == PGRES_COMMAND_OK) {
+    std::string cmd = PQcmdTuples(res);
+    PQclear(res);
+    auto m = std::make_shared<std::map<std::string,Value>>();
+    (*m)["ok"] = Value{true};
+    (*m)["filas_afectadas"] = Value{cmd.empty()?0.0:(double)std::stoi(cmd)};
+    return Value{m};
+  }
+  if (st != PGRES_TUPLES_OK) {
+    std::string err = PQresultErrorMessage(res);
+    PQclear(res);
+    throw std::runtime_error("pg_query: " + err);
+  }
+  int nrows = PQntuples(res);
+  int ncols = PQnfields(res);
+  auto rows = std::make_shared<std::vector<Value>>();
+  for (int r = 0; r < nrows; r++) {
+    auto row = std::make_shared<std::map<std::string,Value>>();
+    for (int c = 0; c < ncols; c++) {
+      std::string col = PQfname(res, c);
+      std::string val = PQgetisnull(res,r,c) ? "" : PQgetvalue(res,r,c);
+      (*row)[col] = Value{val};
+    }
+    rows->push_back(Value{row});
+  }
+  PQclear(res);
+  auto ret = std::make_shared<std::map<std::string,Value>>();
+  (*ret)["ok"] = Value{true};
+  (*ret)["filas"] = Value{rows};
+  (*ret)["n"] = Value{(double)nrows};
+  return Value{ret};
+}
+
+static Value cfv_pg_exec_fn(const Value& id_v, const Value& sql_v) {
+  // alias de query para DML (INSERT/UPDATE/DELETE)
+  return cfv_pg_query_fn(id_v, sql_v);
+}
+
+static Value cfv_pg_escapar_fn(const Value& id_v, const Value& str_v) {
+  int id = (int)std::get<double>(id_v.data);
+  if (!cfv_pg_pool.count(id)) throw std::runtime_error("pg_escapar: conexión inválida");
+  std::string s = str_v.index()==2 ? std::get<std::string>(str_v.data) : "";
+  int err = 0;
+  std::vector<char> buf(s.size()*2+1);
+  PQescapeStringConn(cfv_pg_pool[id], buf.data(), s.c_str(), s.size(), &err);
+  return Value{std::string(buf.data())};
+}
+#else
+// Stubs cuando no se compila con PG
+static Value cfv_pg_conectar_fn(const Value&){throw std::runtime_error("pg_conectar: compilar con -DCFV_WITH_PGSQL -lpq");}
+static Value cfv_pg_cerrar_fn(const Value&){throw std::runtime_error("pg_cerrar: compilar con -DCFV_WITH_PGSQL -lpq");}
+static Value cfv_pg_query_fn(const Value&, const Value&){throw std::runtime_error("pg_query: compilar con -DCFV_WITH_PGSQL -lpq");}
+static Value cfv_pg_exec_fn(const Value&, const Value&){throw std::runtime_error("pg_exec: compilar con -DCFV_WITH_PGSQL -lpq");}
+static Value cfv_pg_escapar_fn(const Value&, const Value&){throw std::runtime_error("pg_escapar: compilar con -DCFV_WITH_PGSQL -lpq");}
+#endif
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ── MySQL bindings (CFV_WITH_MYSQL) ───────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+#ifdef CFV_WITH_MYSQL
+static std::unordered_map<int, MYSQL*> cfv_mysql_pool;
+static int cfv_mysql_next_id = 1;
+
+static Value cfv_mysql_conectar_fn(const Value& conf_v) {
+  if (conf_v.index()!=5) throw std::runtime_error("mysql_conectar: se esperaba mapa {host,usuario,password,db,puerto}");
+  auto& m = *std::get<Mapa>(conf_v.data);
+  auto g = [&](const std::string& k, const std::string& def="") -> std::string {
+    return m.count(k) && m.at(k).index()==2 ? std::get<std::string>(m.at(k).data) : def;
+  };
+  int puerto = m.count("puerto") && m.at("puerto").index()==1 ? (int)std::get<double>(m.at("puerto").data) : 3306;
+  MYSQL* con = mysql_init(nullptr);
+  if (!con) throw std::runtime_error("mysql_conectar: mysql_init falló");
+  if (!mysql_real_connect(con, g("host","127.0.0.1").c_str(), g("usuario").c_str(),
+                          g("password").c_str(), g("db").c_str(), puerto, nullptr, 0)) {
+    std::string err = mysql_error(con);
+    mysql_close(con);
+    throw std::runtime_error("mysql_conectar: " + err);
+  }
+  mysql_set_character_set(con, "utf8mb4");
+  int id = cfv_mysql_next_id++;
+  cfv_mysql_pool[id] = con;
+  return Value{(double)id};
+}
+
+static Value cfv_mysql_cerrar_fn(const Value& id_v) {
+  int id = (int)std::get<double>(id_v.data);
+  if (cfv_mysql_pool.count(id)) { mysql_close(cfv_mysql_pool[id]); cfv_mysql_pool.erase(id); }
+  return Value{};
+}
+
+static Value cfv_mysql_query_fn(const Value& id_v, const Value& sql_v) {
+  int id = (int)std::get<double>(id_v.data);
+  if (!cfv_mysql_pool.count(id)) throw std::runtime_error("mysql_query: conexión inválida");
+  MYSQL* con = cfv_mysql_pool[id];
+  std::string sql = std::get<std::string>(sql_v.data);
+  if (mysql_query(con, sql.c_str())) throw std::runtime_error(std::string("mysql_query: ")+mysql_error(con));
+  MYSQL_RES* res = mysql_store_result(con);
+  if (!res) {
+    auto m = std::make_shared<std::map<std::string,Value>>();
+    (*m)["ok"] = Value{true};
+    (*m)["filas_afectadas"] = Value{(double)mysql_affected_rows(con)};
+    return Value{m};
+  }
+  MYSQL_FIELD* fields = mysql_fetch_fields(res);
+  unsigned int ncols = mysql_num_fields(res);
+  auto rows = std::make_shared<std::vector<Value>>();
+  MYSQL_ROW row;
+  while ((row = mysql_fetch_row(res))) {
+    auto rm = std::make_shared<std::map<std::string,Value>>();
+    for (unsigned int c = 0; c < ncols; c++) {
+      (*rm)[fields[c].name] = row[c] ? Value{std::string(row[c])} : Value{};
+    }
+    rows->push_back(Value{rm});
+  }
+  mysql_free_result(res);
+  auto ret = std::make_shared<std::map<std::string,Value>>();
+  (*ret)["ok"] = Value{true};
+  (*ret)["filas"] = Value{rows};
+  (*ret)["n"] = Value{(double)rows->size()};
+  return Value{ret};
+}
+
+static Value cfv_mysql_escapar_fn(const Value& id_v, const Value& str_v) {
+  int id = (int)std::get<double>(id_v.data);
+  if (!cfv_mysql_pool.count(id)) throw std::runtime_error("mysql_escapar: conexión inválida");
+  std::string s = str_v.index()==2 ? std::get<std::string>(str_v.data) : "";
+  std::vector<char> buf(s.size()*2+1);
+  mysql_real_escape_string(cfv_mysql_pool[id], buf.data(), s.c_str(), s.size());
+  return Value{std::string(buf.data())};
+}
+#else
+static Value cfv_mysql_conectar_fn(const Value&){throw std::runtime_error("mysql_conectar: compilar con -DCFV_WITH_MYSQL -lmysqlclient");}
+static Value cfv_mysql_cerrar_fn(const Value&){throw std::runtime_error("mysql_cerrar: compilar con -DCFV_WITH_MYSQL -lmysqlclient");}
+static Value cfv_mysql_query_fn(const Value&, const Value&){throw std::runtime_error("mysql_query: compilar con -DCFV_WITH_MYSQL -lmysqlclient");}
+static Value cfv_mysql_escapar_fn(const Value&, const Value&){throw std::runtime_error("mysql_escapar: compilar con -DCFV_WITH_MYSQL -lmysqlclient");}
+#endif
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ── WebSocket server (RFC 6455, sin deps extra) ────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+#ifndef _WIN32
+// SHA-1 para el handshake WebSocket (implementación mínima)
+static void cfv_ws_sha1(const uint8_t* data, size_t len, uint8_t out[20]) {
+  uint32_t h0=0x67452301,h1=0xEFCDAB89,h2=0x98BADCFE,h3=0x10325476,h4=0xC3D2E1F0;
+  std::vector<uint8_t> msg(data, data+len);
+  msg.push_back(0x80);
+  while(msg.size()%64!=56) msg.push_back(0);
+  uint64_t bits=(uint64_t)len*8;
+  for(int i=7;i>=0;i--) msg.push_back((bits>>(i*8))&0xff);
+  for(size_t i=0;i<msg.size();i+=64) {
+    uint32_t w[80];
+    for(int j=0;j<16;j++) w[j]=(msg[i+j*4]<<24)|(msg[i+j*4+1]<<16)|(msg[i+j*4+2]<<8)|msg[i+j*4+3];
+    for(int j=16;j<80;j++){uint32_t t=w[j-3]^w[j-8]^w[j-14]^w[j-16];w[j]=(t<<1)|(t>>31);}
+    uint32_t a=h0,b=h1,c=h2,d=h3,e=h4;
+    for(int j=0;j<80;j++){
+      uint32_t f,k;
+      if(j<20){f=(b&c)|((~b)&d);k=0x5A827999;}
+      else if(j<40){f=b^c^d;k=0x6ED9EBA1;}
+      else if(j<60){f=(b&c)|(b&d)|(c&d);k=0x8F1BBCDC;}
+      else{f=b^c^d;k=0xCA62C1D6;}
+      uint32_t tmp=((a<<5)|(a>>27))+f+e+k+w[j];
+      e=d;d=c;c=(b<<30)|(b>>2);b=a;a=tmp;
+    }
+    h0+=a;h1+=b;h2+=c;h3+=d;h4+=e;
+  }
+  uint32_t hs[5]={h0,h1,h2,h3,h4};
+  for(int i=0;i<5;i++){out[i*4]=(hs[i]>>24)&0xff;out[i*4+1]=(hs[i]>>16)&0xff;out[i*4+2]=(hs[i]>>8)&0xff;out[i*4+3]=hs[i]&0xff;}
+}
+
+static std::string cfv_ws_base64_encode(const uint8_t* data, size_t len) {
+  static const char* t="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string r;
+  for(size_t i=0;i<len;i+=3){
+    uint32_t v=(i<len?data[i]:0)<<16|((i+1<len?data[i+1]:0)<<8)|(i+2<len?data[i+2]:0);
+    r+=t[(v>>18)&63];r+=t[(v>>12)&63];
+    r+=(i+1<len?t[(v>>6)&63]:'=');
+    r+=(i+2<len?t[v&63]:'=');
+  }
+  return r;
+}
+
+struct CfvWsClient { int fd; bool handshaked; std::string buf; };
+static std::unordered_map<int,CfvWsClient> cfv_ws_clients;
+static std::unordered_map<int,int> cfv_ws_servers; // server_id → server_fd
+static int cfv_ws_next_id = 1;
+
+static Value cfv_ws_escuchar_fn(const Value& puerto_v) {
+  int puerto = (int)std::get<double>(puerto_v.data);
+  int sfd = socket(AF_INET, SOCK_STREAM, 0);
+  if(sfd<0) throw std::runtime_error("ws_escuchar: socket falló");
+  int opt=1; setsockopt(sfd,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(opt));
+  sockaddr_in addr{}; addr.sin_family=AF_INET; addr.sin_port=htons(puerto); addr.sin_addr.s_addr=INADDR_ANY;
+  if(bind(sfd,(sockaddr*)&addr,sizeof(addr))<0) throw std::runtime_error("ws_escuchar: bind falló en puerto "+std::to_string(puerto));
+  listen(sfd,32);
+  int id = cfv_ws_next_id++;
+  cfv_ws_servers[id] = sfd;
+  return Value{(double)id};
+}
+
+// Hacer handshake HTTP→WS
+static bool cfv_ws_do_handshake(CfvWsClient& cli) {
+  // Buscar fin de headers HTTP
+  auto pos = cli.buf.find("\r\n\r\n");
+  if(pos==std::string::npos) return false;
+  std::string headers = cli.buf.substr(0, pos+4);
+  cli.buf = cli.buf.substr(pos+4);
+  // Extraer Sec-WebSocket-Key
+  std::string key;
+  auto kpos = headers.find("Sec-WebSocket-Key:");
+  if(kpos==std::string::npos) return false;
+  kpos += 18; while(kpos<headers.size()&&headers[kpos]==' ') kpos++;
+  auto eol = headers.find("\r\n",kpos);
+  key = headers.substr(kpos, eol-kpos);
+  // Calcular accept
+  std::string magic = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+  uint8_t sha[20]; cfv_ws_sha1((const uint8_t*)magic.data(), magic.size(), sha);
+  std::string accept = cfv_ws_base64_encode(sha, 20);
+  std::string resp = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "+accept+"\r\n\r\n";
+  send(cli.fd, resp.data(), resp.size(), 0);
+  cli.handshaked = true;
+  return true;
+}
+
+static Value cfv_ws_aceptar_fn(const Value& srv_v) {
+  int srv_id = (int)std::get<double>(srv_v.data);
+  if(!cfv_ws_servers.count(srv_id)) throw std::runtime_error("ws_aceptar: servidor inválido");
+  int sfd = cfv_ws_servers[srv_id];
+  fd_set fds; FD_ZERO(&fds); FD_SET(sfd,&fds);
+  struct timeval tv{1,0};
+  int r=select(sfd+1,&fds,nullptr,nullptr,&tv);
+  if(r<=0) return Value{}; // timeout — nulo
+  sockaddr_in ca{}; socklen_t cl=sizeof(ca);
+  int cfd=accept(sfd,(sockaddr*)&ca,&cl);
+  if(cfd<0) return Value{};
+  int id=cfv_ws_next_id++;
+  cfv_ws_clients[id]={cfd,false,""};
+  return Value{(double)id};
+}
+
+static Value cfv_ws_recibir_fn(const Value& cli_v) {
+  int cli_id = (int)std::get<double>(cli_v.data);
+  if(!cfv_ws_clients.count(cli_id)) return Value{};
+  auto& cli = cfv_ws_clients[cli_id];
+  char tmp[4096]; int n=recv(cli.fd,tmp,sizeof(tmp),MSG_DONTWAIT);
+  if(n<=0) return Value{};
+  cli.buf.append(tmp,n);
+  if(!cli.handshaked){ cfv_ws_do_handshake(cli); return Value{}; }
+  if(cli.buf.size()<2) return Value{};
+  // Decodificar frame WebSocket
+  uint8_t* b=(uint8_t*)cli.buf.data();
+  bool fin=(b[0]&0x80)!=0; int op=b[0]&0x0f;
+  bool masked=(b[1]&0x80)!=0; uint64_t plen=b[1]&0x7f;
+  size_t hdr=2;
+  if(plen==126){if(cli.buf.size()<4)return Value{};plen=(b[2]<<8)|b[3];hdr=4;}
+  else if(plen==127){if(cli.buf.size()<10)return Value{};plen=0;for(int i=0;i<8;i++)plen=(plen<<8)|b[2+i];hdr=10;}
+  size_t total=hdr+(masked?4:0)+plen;
+  if(cli.buf.size()<total) return Value{};
+  uint8_t mask[4]={0,0,0,0};
+  if(masked){for(int i=0;i<4;i++)mask[i]=b[hdr+i];hdr+=4;}
+  std::string payload(plen,'\0');
+  for(uint64_t i=0;i<plen;i++) payload[i]=b[hdr+i]^(masked?mask[i%4]:0);
+  cli.buf=cli.buf.substr(total);
+  if(op==8){close(cli.fd);cfv_ws_clients.erase(cli_id);return Value{};} // close frame
+  return Value{payload};
+}
+
+static Value cfv_ws_enviar_fn(const Value& cli_v, const Value& msg_v) {
+  int cli_id=(int)std::get<double>(cli_v.data);
+  if(!cfv_ws_clients.count(cli_id)) return Value{false};
+  std::string payload=msg_v.index()==2?std::get<std::string>(msg_v.data):cfv_valor_a_json(msg_v);
+  std::vector<uint8_t> frame;
+  frame.push_back(0x81); // FIN + text opcode
+  if(payload.size()<126) frame.push_back((uint8_t)payload.size());
+  else if(payload.size()<65536){frame.push_back(126);frame.push_back(payload.size()>>8);frame.push_back(payload.size()&0xff);}
+  else{frame.push_back(127);for(int i=7;i>=0;i--)frame.push_back((payload.size()>>(i*8))&0xff);}
+  frame.insert(frame.end(),payload.begin(),payload.end());
+  send(cfv_ws_clients[cli_id].fd,frame.data(),frame.size(),0);
+  return Value{true};
+}
+
+static Value cfv_ws_broadcast_fn(const Value& srv_v, const Value& msg_v) {
+  // Envía a todos los clientes del servidor (simplificado: envía a todos los clientes conectados)
+  int enviados=0;
+  for(auto& kv:cfv_ws_clients){
+    if(kv.second.handshaked) { cfv_ws_enviar_fn(Value{(double)kv.first},msg_v); enviados++; }
+  }
+  return Value{(double)enviados};
+}
+
+static Value cfv_ws_cerrar_fn(const Value& cli_v) {
+  int cli_id=(int)std::get<double>(cli_v.data);
+  if(!cfv_ws_clients.count(cli_id)) return Value{};
+  uint8_t frame[2]={0x88,0x00}; // close frame
+  send(cfv_ws_clients[cli_id].fd,frame,2,0);
+  close(cfv_ws_clients[cli_id].fd);
+  cfv_ws_clients.erase(cli_id);
+  return Value{};
+}
+
+static Value cfv_ws_cerrar_servidor_fn(const Value& srv_v) {
+  int id=(int)std::get<double>(srv_v.data);
+  if(cfv_ws_servers.count(id)){close(cfv_ws_servers[id]);cfv_ws_servers.erase(id);}
+  return Value{};
+}
+#else
+// Stubs Windows
+static Value cfv_ws_escuchar_fn(const Value&){throw std::runtime_error("ws_escuchar: no soportado en Windows aún");}
+static Value cfv_ws_aceptar_fn(const Value&){throw std::runtime_error("ws_aceptar: no soportado en Windows aún");}
+static Value cfv_ws_recibir_fn(const Value&){throw std::runtime_error("ws_recibir: no soportado en Windows aún");}
+static Value cfv_ws_enviar_fn(const Value&, const Value&){throw std::runtime_error("ws_enviar: no soportado en Windows aún");}
+static Value cfv_ws_broadcast_fn(const Value&, const Value&){throw std::runtime_error("ws_broadcast: no soportado en Windows aún");}
+static Value cfv_ws_cerrar_fn(const Value&){throw std::runtime_error("ws_cerrar: no soportado en Windows aún");}
+static Value cfv_ws_cerrar_servidor_fn(const Value&){throw std::runtime_error("ws_cerrar_servidor: no soportado en Windows aún");}
+#endif
+// ── fin WebSocket ─────────────────────────────────────────────────────────────
+
 Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cfv_fns) {
   cfv_jit_hit("eval_builtin");
   size_t cfv_nombre_tipo = cfv_nombre.index();
@@ -4316,6 +4675,41 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
     Value sv=verdad(compara(cfv_longitud(cfv_args),Value{2.0},">="))?indice(cfv_args,Value{1.0}):Value{std::string("")};
     return cfv_texto_unir_fn(indice(cfv_args,Value{0.0}),sv);
   }
+  // ── PostgreSQL ─────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("pg_conectar")}, "==")))
+    return cfv_pg_conectar_fn(indice(cfv_args,Value{0.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("pg_cerrar")}, "==")))
+    return cfv_pg_cerrar_fn(indice(cfv_args,Value{0.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("pg_query")}, "==")))
+    return cfv_pg_query_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("pg_exec")}, "==")))
+    return cfv_pg_exec_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("pg_escapar")}, "==")))
+    return cfv_pg_escapar_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  // ── MySQL ──────────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("mysql_conectar")}, "==")))
+    return cfv_mysql_conectar_fn(indice(cfv_args,Value{0.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("mysql_cerrar")}, "==")))
+    return cfv_mysql_cerrar_fn(indice(cfv_args,Value{0.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("mysql_query")}, "==")))
+    return cfv_mysql_query_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("mysql_escapar")}, "==")))
+    return cfv_mysql_escapar_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  // ── WebSocket ──────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("ws_escuchar")}, "==")))
+    return cfv_ws_escuchar_fn(indice(cfv_args,Value{0.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("ws_aceptar")}, "==")))
+    return cfv_ws_aceptar_fn(indice(cfv_args,Value{0.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("ws_recibir")}, "==")))
+    return cfv_ws_recibir_fn(indice(cfv_args,Value{0.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("ws_enviar")}, "==")))
+    return cfv_ws_enviar_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("ws_broadcast")}, "==")))
+    return cfv_ws_broadcast_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("ws_cerrar")}, "==")))
+    return cfv_ws_cerrar_fn(indice(cfv_args,Value{0.0}));
+  if (verdad(compara(cfv_nombre, Value{std::string("ws_cerrar_servidor")}, "==")))
+    return cfv_ws_cerrar_servidor_fn(indice(cfv_args,Value{0.0}));
   return Value{std::string("__no_builtin__", 14)};
   return Value{};
 }

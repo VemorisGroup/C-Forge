@@ -1,0 +1,211 @@
+// stdlib/email.cfv — Cliente SMTP para C-Forge
+// Envío de emails via SMTP con soporte TLS/STARTTLS
+// Requiere: cforgev compilado con -DCFV_WITH_OPENSSL
+
+// ── Configuración SMTP ─────────────────────────────────────────────────────────
+funcion smtp_config(host: texto, puerto: numero, usuario: texto, password: texto, tls: booleano): mapa {
+    retornar {
+        "host": host,
+        "puerto": puerto,
+        "usuario": usuario,
+        "password": password,
+        "tls": tls,
+        "timeout_ms": 15000
+    }
+}
+
+// Proveedores comunes preconfigurados
+funcion smtp_gmail(usuario: texto, app_password: texto): mapa {
+    retornar smtp_config("smtp.gmail.com", 587, usuario, app_password, verdadero)
+}
+
+funcion smtp_sendgrid(api_key: texto): mapa {
+    retornar smtp_config("smtp.sendgrid.net", 587, "apikey", api_key, verdadero)
+}
+
+funcion smtp_mailgun(usuario: texto, password: texto): mapa {
+    retornar smtp_config("smtp.mailgun.org", 587, usuario, password, verdadero)
+}
+
+funcion smtp_outlook(usuario: texto, password: texto): mapa {
+    retornar smtp_config("smtp.office365.com", 587, usuario, password, verdadero)
+}
+
+// ── Construir mensaje ──────────────────────────────────────────────────────────
+funcion email_crear(de: texto, para: lista, asunto: texto, cuerpo: texto): mapa {
+    retornar {
+        "de": de,
+        "para": si (tipo_de(para) == "lista") { para } sino { [para] },
+        "cc": [],
+        "bcc": [],
+        "asunto": asunto,
+        "texto": cuerpo,
+        "html": nulo,
+        "adjuntos": [],
+        "headers": {},
+        "reply_to": nulo,
+        "prioridad": "normal"
+    }
+}
+
+funcion email_html(msg: mapa, html: texto): nulo {
+    msg["html"] = html
+}
+
+funcion email_cc(msg: mapa, direccion: texto): nulo {
+    agregar(msg["cc"], direccion)
+}
+
+funcion email_bcc(msg: mapa, direccion: texto): nulo {
+    agregar(msg["bcc"], direccion)
+}
+
+funcion email_adjunto(msg: mapa, nombre: texto, ruta: texto, tipo_mime: texto): nulo {
+    agregar(msg["adjuntos"], {
+        "nombre": nombre,
+        "ruta": ruta,
+        "tipo": si (tipo_mime == nulo) { "application/octet-stream" } sino { tipo_mime }
+    })
+}
+
+funcion email_reply_to(msg: mapa, direccion: texto): nulo {
+    msg["reply_to"] = direccion
+}
+
+funcion email_prioridad(msg: mapa, nivel: texto): nulo {
+    // "alta" | "normal" | "baja"
+    msg["prioridad"] = nivel
+}
+
+// ── Construir raw MIME ─────────────────────────────────────────────────────────
+funcion email_construir_mime(msg: mapa): texto {
+    sea boundary = "cfv_boundary_" + tiempo_ms()
+    sea tiene_adjuntos = longitud(msg["adjuntos"]) > 0
+    sea tiene_html = msg["html"] != nulo
+
+    sea mime = ""
+    mime = mime + "From: " + msg["de"] + "\r\n"
+    mime = mime + "To: " + texto_unir(msg["para"], ", ") + "\r\n"
+    si (longitud(msg["cc"]) > 0) {
+        mime = mime + "Cc: " + texto_unir(msg["cc"], ", ") + "\r\n"
+    }
+    mime = mime + "Subject: =?UTF-8?B?" + base64_encode(msg["asunto"]) + "?=\r\n"
+    mime = mime + "MIME-Version: 1.0\r\n"
+    mime = mime + "Date: " + fecha_ahora()["iso"] + "\r\n"
+    si (msg["reply_to"] != nulo) {
+        mime = mime + "Reply-To: " + msg["reply_to"] + "\r\n"
+    }
+    segun msg["prioridad"] {
+        caso "alta":
+            mime = mime + "X-Priority: 1\r\nImportance: High\r\n"
+        caso "baja":
+            mime = mime + "X-Priority: 5\r\nImportance: Low\r\n"
+    }
+
+    si (tiene_adjuntos o tiene_html) {
+        mime = mime + "Content-Type: multipart/mixed; boundary=\"" + boundary + "\"\r\n\r\n"
+        mime = mime + "--" + boundary + "\r\n"
+    }
+
+    si (tiene_html) {
+        sea boundary2 = "cfv_alt_" + tiempo_ms()
+        mime = mime + "Content-Type: multipart/alternative; boundary=\"" + boundary2 + "\"\r\n\r\n"
+        mime = mime + "--" + boundary2 + "\r\n"
+        mime = mime + "Content-Type: text/plain; charset=UTF-8\r\n\r\n"
+        mime = mime + msg["texto"] + "\r\n\r\n"
+        mime = mime + "--" + boundary2 + "\r\n"
+        mime = mime + "Content-Type: text/html; charset=UTF-8\r\n\r\n"
+        mime = mime + msg["html"] + "\r\n\r\n"
+        mime = mime + "--" + boundary2 + "--\r\n"
+    } sino {
+        mime = mime + "Content-Type: text/plain; charset=UTF-8\r\n\r\n"
+        mime = mime + msg["texto"] + "\r\n"
+    }
+
+    // Adjuntos
+    para adj en msg["adjuntos"] {
+        si (existe_archivo(adj["ruta"])) {
+            sea contenido = leer_archivo(adj["ruta"])
+            sea b64 = base64_encode(contenido)
+            mime = mime + "\r\n--" + boundary + "\r\n"
+            mime = mime + "Content-Type: " + adj["tipo"] + "; name=\"" + adj["nombre"] + "\"\r\n"
+            mime = mime + "Content-Disposition: attachment; filename=\"" + adj["nombre"] + "\"\r\n"
+            mime = mime + "Content-Transfer-Encoding: base64\r\n\r\n"
+            mime = mime + b64 + "\r\n"
+        }
+    }
+
+    si (tiene_adjuntos o tiene_html) {
+        mime = mime + "--" + boundary + "--\r\n"
+    }
+
+    retornar mime
+}
+
+// ── Enviar via HTTP API (SendGrid/Mailgun) ─────────────────────────────────────
+funcion email_enviar_api(api_url: texto, api_key: texto, msg: mapa): mapa {
+    // Para SendGrid
+    sea payload = {
+        "personalizations": [{"to": mapear(msg["para"], funcion(e) { {"email": e} })}],
+        "from": {"email": msg["de"]},
+        "subject": msg["asunto"],
+        "content": [
+            {"type": "text/plain", "value": msg["texto"]}
+        ]
+    }
+    si (msg["html"] != nulo) {
+        agregar(payload["content"], {"type": "text/html", "value": msg["html"]})
+    }
+    intentar {
+        sea resp = http_post(api_url, json_texto(payload), {
+            "Authorization": "Bearer " + api_key,
+            "Content-Type": "application/json"
+        })
+        retornar {"ok": resp["codigo"] < 300, "codigo": resp["codigo"]}
+    } capturar (e) {
+        retornar {"ok": falso, "error": e}
+    }
+}
+
+// ── Validación de email ────────────────────────────────────────────────────────
+funcion email_valido(direccion: texto): booleano {
+    retornar regex_coincide(direccion, "^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$")
+}
+
+// ── Templates de email ─────────────────────────────────────────────────────────
+funcion email_template_bienvenida(nombre: texto, url_confirmacion: texto): mapa {
+    retornar {
+        "asunto": "Bienvenido a nuestra plataforma, " + nombre,
+        "texto": "Hola " + nombre + ",\n\nGracias por registrarte.\n\nConfirma tu cuenta: " + url_confirmacion,
+        "html": "<!DOCTYPE html><html><body style='font-family:sans-serif;max-width:600px;margin:auto'>" +
+                "<h2>Bienvenido, " + nombre + "!</h2>" +
+                "<p>Gracias por registrarte en nuestra plataforma.</p>" +
+                "<a href='" + url_confirmacion + "' style='background:#0066cc;color:white;padding:12px 24px;text-decoration:none;border-radius:4px'>Confirmar cuenta</a>" +
+                "</body></html>"
+    }
+}
+
+funcion email_template_reset_password(nombre: texto, url_reset: texto): mapa {
+    retornar {
+        "asunto": "Restablece tu contraseña",
+        "texto": "Hola " + nombre + ",\n\nRestablece tu contraseña: " + url_reset + "\n\nEste enlace expira en 1 hora.",
+        "html": "<!DOCTYPE html><html><body style='font-family:sans-serif;max-width:600px;margin:auto'>" +
+                "<h2>Restablecer contraseña</h2>" +
+                "<p>Hola " + nombre + ", recibimos una solicitud para restablecer tu contraseña.</p>" +
+                "<a href='" + url_reset + "' style='background:#dc3545;color:white;padding:12px 24px;text-decoration:none;border-radius:4px'>Restablecer contraseña</a>" +
+                "<p style='color:#666;font-size:12px'>Este enlace expira en 1 hora. Si no solicitaste esto, ignora este mensaje.</p>" +
+                "</body></html>"
+    }
+}
+
+funcion email_template_notificacion(titulo: texto, mensaje: texto): mapa {
+    retornar {
+        "asunto": titulo,
+        "texto": mensaje,
+        "html": "<!DOCTYPE html><html><body style='font-family:sans-serif;max-width:600px;margin:auto'>" +
+                "<div style='background:#f8f9fa;padding:24px;border-radius:8px'>" +
+                "<h3>" + titulo + "</h3>" +
+                "<p>" + mensaje + "</p>" +
+                "</div></body></html>"
+    }
+}

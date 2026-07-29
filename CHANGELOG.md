@@ -1,5 +1,79 @@
 # Historial de C-Forge
 
+## 2.4.0 — 2026-07-28
+
+### Herramientas de desarrollo completas
+
+**Formatter — `tools/cfmt.py`:**
+- Formateador canónico de código C-Forge
+- `cfmt archivo.cfv` — formatea en lugar
+- `cfmt --check` — verifica sin modificar (exit 1 si hay cambios)
+- `cfmt --stdout` — imprime a stdout
+- Soporta directorios y globs (`cfmt stdlib/`)
+
+**Linter — `tools/cflint.py`:**
+- Análisis estático con 60+ reglas organizadas por categoría
+- CF001-CF009: Variables no usadas, redeclaraciones
+- CF010-CF019: Funciones no llamadas, parámetros excesivos, funciones largas
+- CF020-CF029: `var`/`let`/`const`, `console.log`, `print()`, `return` en lugar de `retornar`
+- CF030-CF039: Líneas largas, mezcla tabs/espacios, TODO/FIXME
+- CF040-CF049: Anidamiento excesivo (complejidad ciclomática)
+- CF050-CF059: Builtins deprecados
+- CF060-CF069: Credenciales hardcodeadas, SQL injection hints
+- `--strict` convierte warnings en errores, `--json` para integración CI/CD
+
+**Transpilador AOT — `tools/cforgec.py`:**
+- Compila C-Forge → C99 nativo vía transpilación
+- Tokenizador, parser y generador de código C completos
+- `cforgec archivo.cfv --compile` — genera y compila con gcc
+- `cforgec archivo.cfv --run` — compila y ejecuta directamente
+- `cforgec --ir archivo.cfv` — imprime AST
+- Runtime C mínimo incluido (CfvValue, tipos, mostrar, cfv_truthy)
+
+**Package Registry — `tools/pkg_registry.py` + `cfpkg`:**
+- Servidor HTTP del registro de paquetes (estilo npm)
+- `cfpkg serve --port 7373` — iniciar el servidor
+- `cfpkg publish ./mi-paquete/` — publicar leyendo cforge.toml
+- `cfpkg install nombre@1.0.0` — instalar en `cforge_modules/`
+- `cfpkg search texto` — buscar paquetes
+- `cfpkg info nombre` — ver metadata completa
+- Almacenamiento en archivos `.cfpkg` (tarballs gz)
+
+**Debugger DAP — `tools/dap_server.py`:**
+- Servidor Debug Adapter Protocol (Microsoft DAP spec)
+- Compatible con VS Code, Neovim DAP, cualquier cliente DAP
+- `python3 dap_server.py --stdio` — para VS Code launch config
+- `python3 dap_server.py --port 4711` — modo TCP para debug remoto
+- Soporta: breakpoints, step in/over/out, stack frames, variables, evaluate
+- Modo simulación cuando el intérprete no está disponible
+
+### Nuevos módulos stdlib
+
+- `stdlib/hilos.cfv` — Concurrencia de alto nivel
+  - `hilo_lanzar`, `pool_crear/enviar/esperar_todo`
+  - Semáforos, promesas, `promesa_todo` (Promise.all)
+  - Workers con canal entrada/salida
+- `stdlib/fecha.cfv` — Fechas y tiempos completos
+  - Parsear ISO 8601, DD/MM/YYYY, formatear con patrones
+  - Aritmética: agregar días/meses/años/horas
+  - `tiempo_relativo()` — "hace 3 días", "en 2 horas"
+  - Rangos de fechas, semana del año, año bisiesto
+
+### Mejoras de base de datos
+
+**PostgreSQL nativo (`#ifdef CFV_WITH_PGSQL`):**
+- `pg_conectar(conn_str)`, `pg_cerrar(id)`, `pg_query(id, sql)`, `pg_exec(id, sql)`, `pg_escapar(id, str)`
+- Pool de conexiones interno
+
+**MySQL nativo (`#ifdef CFV_WITH_MYSQL`):**
+- `mysql_conectar(conf)`, `mysql_cerrar(id)`, `mysql_query(id, sql)`, `mysql_escapar(id, str)`
+
+**WebSocket RFC 6455 nativo (sin deps):**
+- SHA-1 implementado desde cero (FIPS 180-4)
+- `ws_escuchar`, `ws_aceptar`, `ws_recibir`, `ws_enviar`, `ws_broadcast`, `ws_cerrar`
+
+---
+
 ## 2.3.1 — 2026-07-28
 
 ### Nuevas funciones nativas (builtins v2.3b)

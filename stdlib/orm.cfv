@@ -1,0 +1,262 @@
+// stdlib/orm.cfv — ORM (Object-Relational Mapper) para C-Forge
+// Compatible con SQLite (db.cfv), PostgreSQL (pg_*) y MySQL (mysql_*)
+// API: modelo_crear, modelo_guardar, modelo_buscar, modelo_actualizar, modelo_eliminar
+
+// ── Registro de modelos ────────────────────────────────────────────────────────
+sea _orm_modelos = {}   // nombre → {tabla, campos, pk}
+sea _orm_conn = nulo
+sea _orm_driver = "sqlite"  // "sqlite" | "pg" | "mysql"
+
+funcion orm_conectar(driver: texto, conn: cualquiera): nulo {
+    _orm_driver = driver
+    _orm_conn = conn
+}
+
+// ── Definir modelo ─────────────────────────────────────────────────────────────
+// campos = [{"nombre":"id","tipo":"entero","pk":verdadero,"autoincrement":verdadero}, ...]
+funcion orm_modelo(nombre: texto, tabla: texto, campos: lista): nulo {
+    sea pk = "id"
+    para campo en campos {
+        si (tiene_clave(campo, "pk") y campo["pk"]) {
+            pk = campo["nombre"]
+        }
+    }
+    _orm_modelos[nombre] = {
+        "tabla": tabla,
+        "campos": campos,
+        "pk": pk
+    }
+}
+
+// ── Crear tabla (migración) ────────────────────────────────────────────────────
+funcion orm_migrar(nombre: texto): nulo {
+    si (!tiene_clave(_orm_modelos, nombre)) {
+        lanzar "orm_migrar: modelo '" + nombre + "' no definido"
+    }
+    sea modelo = _orm_modelos[nombre]
+    sea defs = []
+    para campo en modelo["campos"] {
+        sea tipo_sql = orm_tipo_sql(campo["tipo"])
+        sea def = campo["nombre"] + " " + tipo_sql
+        si (tiene_clave(campo, "pk") y campo["pk"]) {
+            def = def + " PRIMARY KEY"
+        }
+        si (tiene_clave(campo, "autoincrement") y campo["autoincrement"]) {
+            si (_orm_driver == "sqlite") {
+                def = def + " AUTOINCREMENT"
+            } sino si (_orm_driver == "pg") {
+                def = campo["nombre"] + " SERIAL PRIMARY KEY"
+            } sino {
+                def = def + " AUTO_INCREMENT"
+            }
+        }
+        si (tiene_clave(campo, "no_nulo") y campo["no_nulo"]) {
+            def = def + " NOT NULL"
+        }
+        si (tiene_clave(campo, "unico") y campo["unico"]) {
+            def = def + " UNIQUE"
+        }
+        si (tiene_clave(campo, "default")) {
+            def = def + " DEFAULT " + orm_escape_valor(campo["default"])
+        }
+        agregar(defs, def)
+    }
+    sea sql = "CREATE TABLE IF NOT EXISTS " + modelo["tabla"] +
+              " (" + texto_unir(defs, ", ") + ")"
+    orm_ejecutar(sql)
+}
+
+funcion orm_tipo_sql(tipo: texto): texto {
+    segun tipo {
+        caso "entero":   retornar "INTEGER"
+        caso "numero":   retornar "REAL"
+        caso "texto":    retornar "TEXT"
+        caso "booleano": retornar "INTEGER"
+        caso "fecha":    retornar "TEXT"
+        caso "json":     retornar "TEXT"
+        caso "blob":     retornar "BLOB"
+    }
+    retornar "TEXT"
+}
+
+// ── CRUD ───────────────────────────────────────────────────────────────────────
+
+// Insertar registro — retorna id del nuevo registro
+funcion orm_insertar(nombre: texto, datos: mapa): cualquiera {
+    sea modelo = _orm_modelos[nombre]
+    sea pk = modelo["pk"]
+    sea cols = []
+    sea vals = []
+    para campo en modelo["campos"] {
+        sea n = campo["nombre"]
+        si (n == pk y tiene_clave(campo, "autoincrement") y campo["autoincrement"]) {
+            continuar
+        }
+        si (tiene_clave(datos, n)) {
+            agregar(cols, n)
+            agregar(vals, orm_escape_valor(datos[n]))
+        }
+    }
+    sea sql = "INSERT INTO " + modelo["tabla"] +
+              " (" + texto_unir(cols, ", ") + ")" +
+              " VALUES (" + texto_unir(vals, ", ") + ")"
+    sea res = orm_ejecutar(sql)
+    si (_orm_driver == "sqlite") {
+        sea id_res = orm_query("SELECT last_insert_rowid() as id")
+        si (longitud(id_res["filas"]) > 0) {
+            retornar id_res["filas"][0]["id"]
+        }
+    }
+    retornar res
+}
+
+// Buscar todos — con filtros opcionales
+funcion orm_buscar(nombre: texto, filtros: mapa): lista {
+    sea modelo = _orm_modelos[nombre]
+    sea sql = "SELECT * FROM " + modelo["tabla"]
+    si (longitud(mapa_claves(filtros)) > 0) {
+        sea wheres = []
+        para kv en mapa_entradas(filtros) {
+            agregar(wheres, kv[0] + " = " + orm_escape_valor(kv[1]))
+        }
+        sql = sql + " WHERE " + texto_unir(wheres, " AND ")
+    }
+    sea res = orm_query(sql)
+    retornar res["filas"]
+}
+
+// Buscar por PK
+funcion orm_buscar_por_id(nombre: texto, id: cualquiera): mapa {
+    sea modelo = _orm_modelos[nombre]
+    sea sql = "SELECT * FROM " + modelo["tabla"] +
+              " WHERE " + modelo["pk"] + " = " + orm_escape_valor(id) +
+              " LIMIT 1"
+    sea res = orm_query(sql)
+    si (longitud(res["filas"]) == 0) { retornar nulo }
+    retornar res["filas"][0]
+}
+
+// Buscar con condición WHERE personalizada
+funcion orm_donde(nombre: texto, where: texto): lista {
+    sea modelo = _orm_modelos[nombre]
+    sea sql = "SELECT * FROM " + modelo["tabla"] + " WHERE " + where
+    sea res = orm_query(sql)
+    retornar res["filas"]
+}
+
+// Actualizar por PK
+funcion orm_actualizar(nombre: texto, id: cualquiera, datos: mapa): booleano {
+    sea modelo = _orm_modelos[nombre]
+    sea sets = []
+    para kv en mapa_entradas(datos) {
+        agregar(sets, kv[0] + " = " + orm_escape_valor(kv[1]))
+    }
+    sea sql = "UPDATE " + modelo["tabla"] +
+              " SET " + texto_unir(sets, ", ") +
+              " WHERE " + modelo["pk"] + " = " + orm_escape_valor(id)
+    orm_ejecutar(sql)
+    retornar verdadero
+}
+
+// Eliminar por PK
+funcion orm_eliminar(nombre: texto, id: cualquiera): booleano {
+    sea modelo = _orm_modelos[nombre]
+    sea sql = "DELETE FROM " + modelo["tabla"] +
+              " WHERE " + modelo["pk"] + " = " + orm_escape_valor(id)
+    orm_ejecutar(sql)
+    retornar verdadero
+}
+
+// Contar registros
+funcion orm_contar(nombre: texto, filtros: mapa): numero {
+    sea modelo = _orm_modelos[nombre]
+    sea sql = "SELECT COUNT(*) as n FROM " + modelo["tabla"]
+    si (longitud(mapa_claves(filtros)) > 0) {
+        sea wheres = []
+        para kv en mapa_entradas(filtros) {
+            agregar(wheres, kv[0] + " = " + orm_escape_valor(kv[1]))
+        }
+        sql = sql + " WHERE " + texto_unir(wheres, " AND ")
+    }
+    sea res = orm_query(sql)
+    retornar texto_a_numero(res["filas"][0]["n"])
+}
+
+// Paginación
+funcion orm_paginar(nombre: texto, pagina: numero, por_pagina: numero, filtros: mapa): mapa {
+    sea modelo = _orm_modelos[nombre]
+    sea offset = (pagina - 1) * por_pagina
+    sea sql = "SELECT * FROM " + modelo["tabla"]
+    si (longitud(mapa_claves(filtros)) > 0) {
+        sea wheres = []
+        para kv en mapa_entradas(filtros) {
+            agregar(wheres, kv[0] + " = " + orm_escape_valor(kv[1]))
+        }
+        sql = sql + " WHERE " + texto_unir(wheres, " AND ")
+    }
+    sql = sql + " LIMIT " + por_pagina + " OFFSET " + offset
+    sea res = orm_query(sql)
+    sea total = orm_contar(nombre, filtros)
+    retornar {
+        "filas": res["filas"],
+        "pagina": pagina,
+        "por_pagina": por_pagina,
+        "total": total,
+        "paginas": piso(total / por_pagina) + si (total % por_pagina > 0) { 1 } sino { 0 }
+    }
+}
+
+// ── Utilidades ─────────────────────────────────────────────────────────────────
+
+funcion orm_escape_valor(v: cualquiera): texto {
+    si (v == nulo) { retornar "NULL" }
+    si (tipo_de(v) == "numero") { retornar v + "" }
+    si (tipo_de(v) == "booleano") { retornar si (v) { "1" } sino { "0" } }
+    // Escapar comillas simples
+    sea s = v + ""
+    s = regex_reemplazar(s, "'", "''")
+    retornar "'" + s + "'"
+}
+
+funcion orm_query(sql: texto): mapa {
+    si (_orm_driver == "sqlite") {
+        retornar db_query(_orm_conn, sql)
+    } sino si (_orm_driver == "pg") {
+        retornar pg_query(_orm_conn, sql)
+    } sino si (_orm_driver == "mysql") {
+        retornar mysql_query(_orm_conn, sql)
+    }
+    lanzar "orm_query: driver desconocido: " + _orm_driver
+}
+
+funcion orm_ejecutar(sql: texto): cualquiera {
+    si (_orm_driver == "sqlite") {
+        retornar db_exec(_orm_conn, sql)
+    } sino si (_orm_driver == "pg") {
+        retornar pg_exec(_orm_conn, sql)
+    } sino si (_orm_driver == "mysql") {
+        retornar mysql_query(_orm_conn, sql)
+    }
+    lanzar "orm_ejecutar: driver desconocido: " + _orm_driver
+}
+
+// ── Transacciones ──────────────────────────────────────────────────────────────
+funcion orm_transaccion(fn_cuerpo: cualquiera): cualquiera {
+    orm_ejecutar("BEGIN")
+    intentar {
+        sea res = fn_cuerpo()
+        orm_ejecutar("COMMIT")
+        retornar res
+    } capturar (e) {
+        orm_ejecutar("ROLLBACK")
+        lanzar e
+    }
+}
+
+// ── Relaciones ─────────────────────────────────────────────────────────────────
+funcion orm_tiene_muchos(nombre: texto, nombre_rel: texto, clave_foranea: texto): lista {
+    // Obtiene registros relacionados por clave foránea
+    // Uso: orm_tiene_muchos("Usuario", "Pedido", "usuario_id")
+    // → SELECT * FROM pedidos WHERE usuario_id = ?
+    retornar []  // implementación básica — expandir según modelo
+}

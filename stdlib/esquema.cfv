@@ -1,0 +1,254 @@
+// stdlib/esquema.cfv — Validación de esquemas JSON/datos para C-Forge
+// Similar a Zod/Joi/JSON Schema: define estructura y valida datos
+
+// ── Tipos de esquema ────────────────────────────────────────────────────────────
+funcion esq_texto(): mapa {
+    retornar {"_tipo": "texto", "_requerido": verdadero, "_reglas": []}
+}
+
+funcion esq_numero(): mapa {
+    retornar {"_tipo": "numero", "_requerido": verdadero, "_reglas": []}
+}
+
+funcion esq_booleano(): mapa {
+    retornar {"_tipo": "booleano", "_requerido": verdadero, "_reglas": []}
+}
+
+funcion esq_lista(esquema_item: mapa): mapa {
+    retornar {"_tipo": "lista", "_item": esquema_item, "_requerido": verdadero, "_reglas": []}
+}
+
+funcion esq_mapa(campos: mapa): mapa {
+    retornar {"_tipo": "mapa", "_campos": campos, "_requerido": verdadero, "_reglas": [], "_adicionales": falso}
+}
+
+funcion esq_cualquiera(): mapa {
+    retornar {"_tipo": "cualquiera", "_requerido": falso, "_reglas": []}
+}
+
+funcion esq_union(tipos: lista): mapa {
+    retornar {"_tipo": "union", "_tipos": tipos, "_requerido": verdadero, "_reglas": []}
+}
+
+funcion esq_literal(valor: cualquiera): mapa {
+    retornar {"_tipo": "literal", "_valor": valor, "_requerido": verdadero, "_reglas": []}
+}
+
+// ── Modificadores ──────────────────────────────────────────────────────────────
+funcion esq_opcional(esq: mapa): mapa {
+    sea copia = mapa_fusionar({}, esq)
+    copia["_requerido"] = falso
+    retornar copia
+}
+
+funcion esq_default(esq: mapa, valor: cualquiera): mapa {
+    sea copia = mapa_fusionar({}, esq)
+    copia["_default"] = valor
+    copia["_requerido"] = falso
+    retornar copia
+}
+
+funcion esq_nullable(esq: mapa): mapa {
+    sea copia = mapa_fusionar({}, esq)
+    copia["_nullable"] = verdadero
+    retornar copia
+}
+
+// ── Reglas para texto ──────────────────────────────────────────────────────────
+funcion esq_min(esq: mapa, n: numero): mapa {
+    sea copia = mapa_fusionar({}, esq)
+    agregar(copia["_reglas"], {"tipo": "min", "val": n})
+    retornar copia
+}
+
+funcion esq_max(esq: mapa, n: numero): mapa {
+    sea copia = mapa_fusionar({}, esq)
+    agregar(copia["_reglas"], {"tipo": "max", "val": n})
+    retornar copia
+}
+
+funcion esq_patron(esq: mapa, regex: texto): mapa {
+    sea copia = mapa_fusionar({}, esq)
+    agregar(copia["_reglas"], {"tipo": "patron", "val": regex})
+    retornar copia
+}
+
+funcion esq_email(esq: mapa): mapa {
+    retornar esq_patron(esq, "^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$")
+}
+
+funcion esq_url(esq: mapa): mapa {
+    retornar esq_patron(esq, "^https?://[\\w\\-]+(\\.[\\w\\-]+)+.*$")
+}
+
+funcion esq_uuid(esq: mapa): mapa {
+    retornar esq_patron(esq, "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+}
+
+funcion esq_en(esq: mapa, valores: lista): mapa {
+    sea copia = mapa_fusionar({}, esq)
+    agregar(copia["_reglas"], {"tipo": "enum", "val": valores})
+    retornar copia
+}
+
+funcion esq_personalizado(esq: mapa, fn_validar: cualquiera, mensaje: texto): mapa {
+    sea copia = mapa_fusionar({}, esq)
+    agregar(copia["_reglas"], {"tipo": "custom", "fn": fn_validar, "msg": mensaje})
+    retornar copia
+}
+
+// ── Motor de validación ────────────────────────────────────────────────────────
+funcion esq_validar(esq: mapa, valor: cualquiera): mapa {
+    sea errores = []
+    sea val = valor
+
+    // Nulo / undefined
+    si (val == nulo) {
+        si (tiene_clave(esq, "_nullable") y esq["_nullable"]) {
+            retornar {"ok": verdadero, "valor": nulo, "errores": []}
+        }
+        si (!esq["_requerido"]) {
+            sea def = si (tiene_clave(esq, "_default")) { esq["_default"] } sino { nulo }
+            retornar {"ok": verdadero, "valor": def, "errores": []}
+        }
+        retornar {"ok": falso, "valor": nulo, "errores": ["Valor requerido"]}
+    }
+
+    // Validar tipo
+    sea tipo = esq["_tipo"]
+
+    segun tipo {
+        caso "texto":
+            si (tipo_de(val) != "texto") {
+                agregar(errores, "Se esperaba texto, recibió " + tipo_de(val))
+            }
+        caso "numero":
+            si (tipo_de(val) != "numero") {
+                intentar {
+                    val = texto_a_numero(val + "")
+                } capturar (e) {
+                    agregar(errores, "Se esperaba número, recibió " + tipo_de(val))
+                }
+            }
+        caso "booleano":
+            si (tipo_de(val) != "booleano") {
+                si (val == "true" o val == "1") { val = verdadero }
+                sino si (val == "false" o val == "0") { val = falso }
+                sino { agregar(errores, "Se esperaba booleano") }
+            }
+        caso "lista":
+            si (tipo_de(val) != "lista") {
+                agregar(errores, "Se esperaba lista")
+            } sino si (tiene_clave(esq, "_item")) {
+                para i en rango(longitud(val)) {
+                    sea r = esq_validar(esq["_item"], val[i])
+                    si (!r["ok"]) {
+                        para e en r["errores"] {
+                            agregar(errores, "[" + i + "]: " + e)
+                        }
+                    }
+                }
+            }
+        caso "mapa":
+            si (tipo_de(val) != "mapa") {
+                agregar(errores, "Se esperaba mapa/objeto")
+            } sino si (tiene_clave(esq, "_campos")) {
+                para kv en mapa_entradas(esq["_campos"]) {
+                    sea nombre_campo = kv[0]
+                    sea esq_campo = kv[1]
+                    sea val_campo = si (tiene_clave(val, nombre_campo)) { val[nombre_campo] } sino { nulo }
+                    sea r = esq_validar(esq_campo, val_campo)
+                    si (!r["ok"]) {
+                        para e en r["errores"] {
+                            agregar(errores, nombre_campo + ": " + e)
+                        }
+                    } sino si (r["valor"] != val_campo) {
+                        val[nombre_campo] = r["valor"]
+                    }
+                }
+                // Campos no permitidos
+                si (!tiene_clave(esq, "_adicionales") o !esq["_adicionales"]) {
+                    para clave en mapa_claves(val) {
+                        si (!tiene_clave(esq["_campos"], clave)) {
+                            agregar(errores, "Campo no permitido: " + clave)
+                        }
+                    }
+                }
+            }
+        caso "union":
+            sea alguno_ok = falso
+            para tipo_u en esq["_tipos"] {
+                sea r = esq_validar(tipo_u, val)
+                si (r["ok"]) { alguno_ok = verdadero }
+            }
+            si (!alguno_ok) {
+                agregar(errores, "No coincide con ningún tipo del union")
+            }
+        caso "literal":
+            si (val != esq["_valor"]) {
+                agregar(errores, "Se esperaba exactamente: " + esq["_valor"])
+            }
+    }
+
+    // Aplicar reglas adicionales si no hay errores de tipo
+    si (longitud(errores) == 0) {
+        para regla en esq["_reglas"] {
+            segun regla["tipo"] {
+                caso "min":
+                    si (tipo == "texto" y longitud(val) < regla["val"]) {
+                        agregar(errores, "Mínimo " + regla["val"] + " caracteres")
+                    } sino si (tipo == "numero" y val < regla["val"]) {
+                        agregar(errores, "Mínimo " + regla["val"])
+                    } sino si (tipo == "lista" y longitud(val) < regla["val"]) {
+                        agregar(errores, "Mínimo " + regla["val"] + " elementos")
+                    }
+                caso "max":
+                    si (tipo == "texto" y longitud(val) > regla["val"]) {
+                        agregar(errores, "Máximo " + regla["val"] + " caracteres")
+                    } sino si (tipo == "numero" y val > regla["val"]) {
+                        agregar(errores, "Máximo " + regla["val"])
+                    } sino si (tipo == "lista" y longitud(val) > regla["val"]) {
+                        agregar(errores, "Máximo " + regla["val"] + " elementos")
+                    }
+                caso "patron":
+                    si (!regex_coincide(val + "", regla["val"])) {
+                        agregar(errores, "Formato inválido")
+                    }
+                caso "enum":
+                    si (!lista_contiene(regla["val"], val)) {
+                        agregar(errores, "Debe ser uno de: " + texto_unir(
+                            mapear(regla["val"], funcion(v) { v + "" }), ", "))
+                    }
+                caso "custom":
+                    intentar {
+                        si (!regla["fn"](val)) {
+                            agregar(errores, regla["msg"] ?? "Validación personalizada falló")
+                        }
+                    } capturar (e) {
+                        agregar(errores, "Error en validación: " + e)
+                    }
+            }
+        }
+    }
+
+    retornar {
+        "ok": longitud(errores) == 0,
+        "valor": val,
+        "errores": errores
+    }
+}
+
+// Validar y lanzar excepción si hay error
+funcion esq_parsear(esq: mapa, valor: cualquiera): cualquiera {
+    sea r = esq_validar(esq, valor)
+    si (!r["ok"]) {
+        lanzar "ValidationError: " + texto_unir(r["errores"], "; ")
+    }
+    retornar r["valor"]
+}
+
+// Validar body de request JSON
+funcion esq_request(esq: mapa, ctx: mapa): cualquiera {
+    sea body = ctx["json"] ?? json_parsear(ctx["cuerpo"] ?? "{}")
+    retornar esq_parsear(esq, body)
+}

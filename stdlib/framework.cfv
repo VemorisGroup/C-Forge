@@ -1,0 +1,243 @@
+// stdlib/framework.cfv — Web Framework tipo Express/FastAPI para C-Forge
+// Construido sobre web.cfv y router.cfv
+// API: app_crear, app_get/post/put/delete, app_use, app_escuchar
+
+importar "stdlib/router.cfv"
+importar "stdlib/log.cfv"
+
+// ── Crear aplicación ──────────────────────────────────────────────────────────
+funcion app_crear(): mapa {
+    sea app = router_crear()
+    app["middleware_global"] = []
+    app["config"] = {
+        "puerto": 3000,
+        "host": "0.0.0.0",
+        "cors": falso,
+        "cors_origen": "*",
+        "json_limit": 1048576,
+        "log_requests": verdadero,
+        "static_dir": nulo
+    }
+    app["_handlers"] = {}
+    retornar app
+}
+
+// ── Configurar app ─────────────────────────────────────────────────────────────
+funcion app_config(app: mapa, clave: texto, valor: cualquiera): nulo {
+    app["config"][clave] = valor
+}
+
+// ── Rutas ──────────────────────────────────────────────────────────────────────
+funcion app_get(app: mapa, ruta: texto, handler: cualquiera): nulo {
+    sea nombre = "_h_" + longitud(mapa_claves(app["_handlers"]))
+    app["_handlers"][nombre] = handler
+    router_agregar_ruta(app, "GET", ruta, nombre, [])
+}
+
+funcion app_post(app: mapa, ruta: texto, handler: cualquiera): nulo {
+    sea nombre = "_h_" + longitud(mapa_claves(app["_handlers"]))
+    app["_handlers"][nombre] = handler
+    router_agregar_ruta(app, "POST", ruta, nombre, [])
+}
+
+funcion app_put(app: mapa, ruta: texto, handler: cualquiera): nulo {
+    sea nombre = "_h_" + longitud(mapa_claves(app["_handlers"]))
+    app["_handlers"][nombre] = handler
+    router_agregar_ruta(app, "PUT", ruta, nombre, [])
+}
+
+funcion app_delete(app: mapa, ruta: texto, handler: cualquiera): nulo {
+    sea nombre = "_h_" + longitud(mapa_claves(app["_handlers"]))
+    app["_handlers"][nombre] = handler
+    router_agregar_ruta(app, "DELETE", ruta, nombre, [])
+}
+
+funcion app_patch(app: mapa, ruta: texto, handler: cualquiera): nulo {
+    sea nombre = "_h_" + longitud(mapa_claves(app["_handlers"]))
+    app["_handlers"][nombre] = handler
+    router_agregar_ruta(app, "PATCH", ruta, nombre, [])
+}
+
+// ── Middleware global ──────────────────────────────────────────────────────────
+funcion app_use(app: mapa, middleware: cualquiera): nulo {
+    agregar(app["middleware_global"], middleware)
+}
+
+// ── Archivos estáticos ─────────────────────────────────────────────────────────
+funcion app_static(app: mapa, ruta_web: texto, dir_local: texto): nulo {
+    app["config"]["static_dir"] = dir_local
+    app["config"]["static_prefix"] = ruta_web
+}
+
+// ── Respuestas helper ──────────────────────────────────────────────────────────
+funcion app_json(srv: cualquiera, datos: cualquiera, codigo: numero): nulo {
+    sea codigo_real = si (codigo == nulo) { 200 } sino { codigo }
+    web_responder(srv, codigo_real, json_texto(datos), "application/json; charset=utf-8")
+}
+
+funcion app_html(srv: cualquiera, html: texto, codigo: numero): nulo {
+    sea codigo_real = si (codigo == nulo) { 200 } sino { codigo }
+    web_responder(srv, codigo_real, html, "text/html; charset=utf-8")
+}
+
+funcion app_texto(srv: cualquiera, txt: texto): nulo {
+    web_responder(srv, 200, txt, "text/plain; charset=utf-8")
+}
+
+funcion app_redirect(srv: cualquiera, url: texto): nulo {
+    web_responder(srv, 302, "", "text/plain")
+}
+
+funcion app_error(srv: cualquiera, mensaje: texto, codigo: numero): nulo {
+    sea codigo_real = si (codigo == nulo) { 500 } sino { codigo }
+    web_responder(srv, codigo_real, json_texto({"error": mensaje, "codigo": codigo_real}), "application/json")
+}
+
+// ── Escuchar y procesar requests ───────────────────────────────────────────────
+funcion app_escuchar(app: mapa, puerto: numero): nulo {
+    sea puerto_real = si (puerto == nulo) { app["config"]["puerto"] } sino { puerto }
+    sea srv = web_escuchar(puerto_real)
+    mostrar("🚀 C-Forge Framework corriendo en http://localhost:" + puerto_real)
+    router_listar_rutas(app)
+    mostrar("")
+
+    mientras (verdadero) {
+        sea req = web_solicitud(srv)
+        sea metodo = req["metodo"]
+        sea ruta = req["ruta"]
+        sea t0 = tiempo_ms()
+
+        // CORS preflight
+        si (metodo == "OPTIONS" y app["config"]["cors"]) {
+            web_responder(srv, 204, "", "text/plain")
+            continuar
+        }
+
+        // Archivos estáticos
+        si (app["config"]["static_dir"] != nulo) {
+            sea prefix = app["config"]["static_prefix"] ?? "/"
+            si (texto_empieza_con(ruta, prefix)) {
+                sea rel = subcadena(ruta, longitud(prefix), longitud(ruta))
+                sea ruta_fisica = ruta_unir([app["config"]["static_dir"], rel])
+                si (existe_archivo(ruta_fisica)) {
+                    sea ext = ruta_extension(ruta_fisica)
+                    sea contenido = leer_archivo(ruta_fisica)
+                    web_responder(srv, 200, contenido, app_mime(ext))
+                    continuar
+                }
+            }
+        }
+
+        // Ejecutar middlewares globales
+        sea ctx = router_crear_ctx(req, {})
+        ctx["_srv"] = srv
+        sea blocked = falso
+        para mw en app["middleware_global"] {
+            sea mw_res = mw(ctx, srv)
+            si (mw_res == "stop") { blocked = verdadero }
+        }
+        si (blocked) { continuar }
+
+        // Resolver ruta
+        sea match = router_resolver(app, metodo, ruta)
+        si (!match["encontrado"]) {
+            app_error(srv, "Ruta no encontrada: " + metodo + " " + ruta, 404)
+            si (app["config"]["log_requests"]) {
+                log_advertencia("404 " + metodo + " " + ruta + " (" + (tiempo_ms()-t0) + "ms)")
+            }
+            continuar
+        }
+
+        ctx["params"] = match["params"]
+        sea handler_nombre = match["handler"]
+
+        intentar {
+            si (tiene_clave(app["_handlers"], handler_nombre)) {
+                app["_handlers"][handler_nombre](ctx, srv)
+            } sino {
+                app_error(srv, "Handler no encontrado", 500)
+            }
+        } capturar (e) {
+            log_error("Error en handler " + handler_nombre + ": " + e)
+            app_error(srv, "Error interno: " + e, 500)
+        }
+
+        si (app["config"]["log_requests"]) {
+            sea dt = tiempo_ms() - t0
+            sea color = si (dt < 100) { "\033[32m" } sino si (dt < 500) { "\033[33m" } sino { "\033[31m" }
+            mostrar(color + metodo + "\033[0m " + ruta + " " + (tiempo_ms()-t0) + "ms")
+        }
+    }
+}
+
+funcion app_mime(ext: texto): texto {
+    segun ext {
+        caso ".html": retornar "text/html; charset=utf-8"
+        caso ".css":  retornar "text/css"
+        caso ".js":   retornar "application/javascript"
+        caso ".json": retornar "application/json"
+        caso ".png":  retornar "image/png"
+        caso ".jpg":  retornar "image/jpeg"
+        caso ".svg":  retornar "image/svg+xml"
+        caso ".ico":  retornar "image/x-icon"
+        caso ".woff2":retornar "font/woff2"
+    }
+    retornar "application/octet-stream"
+}
+
+// ── Middlewares incluidos ──────────────────────────────────────────────────────
+
+// Middleware de logging
+funcion mw_logger(ctx: mapa, srv: cualquiera): texto {
+    log_info(ctx["metodo"] + " " + ctx["ruta"])
+    retornar "ok"
+}
+
+// Middleware de autenticación con token Bearer
+funcion mw_auth(secreto: texto): cualquiera {
+    retornar funcion(ctx: mapa, srv: cualquiera): texto {
+        sea auth = ctx["headers"]["Authorization"] ?? ctx["headers"]["authorization"] ?? ""
+        si (!texto_empieza_con(auth, "Bearer ")) {
+            web_responder(srv, 401, json_texto({"error": "No autorizado"}), "application/json")
+            retornar "stop"
+        }
+        sea token = subcadena(auth, 7, longitud(auth))
+        // Validación básica (en producción usar JWT real)
+        si (longitud(token) < 10) {
+            web_responder(srv, 401, json_texto({"error": "Token inválido"}), "application/json")
+            retornar "stop"
+        }
+        ctx["token"] = token
+        retornar "ok"
+    }
+}
+
+// Middleware rate limiting simple (en memoria)
+sea _rl_contadores = {}
+sea _rl_ventana = {}
+
+funcion mw_rate_limit(max_req: numero, ventana_ms: numero): cualquiera {
+    retornar funcion(ctx: mapa, srv: cualquiera): texto {
+        sea ip = ctx["ip"] ?? "unknown"
+        sea ahora = tiempo_ms()
+        si (!tiene_clave(_rl_ventana, ip) o ahora - _rl_ventana[ip] > ventana_ms) {
+            _rl_contadores[ip] = 0
+            _rl_ventana[ip] = ahora
+        }
+        _rl_contadores[ip] = _rl_contadores[ip] + 1
+        si (_rl_contadores[ip] > max_req) {
+            web_responder(srv, 429, json_texto({"error": "Demasiadas solicitudes"}), "application/json")
+            retornar "stop"
+        }
+        retornar "ok"
+    }
+}
+
+// Middleware CORS
+funcion mw_cors(origen: texto): cualquiera {
+    retornar funcion(ctx: mapa, srv: cualquiera): texto {
+        // Los headers CORS se agregan en web_responder automáticamente
+        // en una implementación completa
+        retornar "ok"
+    }
+}

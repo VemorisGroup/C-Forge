@@ -1,0 +1,175 @@
+// stdlib/eventos.cfv — Event Emitter para C-Forge
+// API similar a Node.js EventEmitter: on, emit, off, once, removeAllListeners
+
+// ── Event Emitter ──────────────────────────────────────────────────────────────
+funcion eventos_crear(): mapa {
+    retornar {
+        "_listeners": {},     // evento → [fn, ...]
+        "_once": {},          // evento → [fn, ...]
+        "_max": 100           // máximo de listeners por evento
+    }
+}
+
+// Registrar listener permanente
+funcion eventos_on(emitter: mapa, evento: texto, fn: cualquiera): mapa {
+    si (!tiene_clave(emitter["_listeners"], evento)) {
+        emitter["_listeners"][evento] = []
+    }
+    si (longitud(emitter["_listeners"][evento]) >= emitter["_max"]) {
+        lanzar "eventos_on: máximo de listeners alcanzado para '" + evento + "'"
+    }
+    agregar(emitter["_listeners"][evento], fn)
+    retornar emitter
+}
+
+// Registrar listener de una sola vez
+funcion eventos_once(emitter: mapa, evento: texto, fn: cualquiera): mapa {
+    si (!tiene_clave(emitter["_once"], evento)) {
+        emitter["_once"][evento] = []
+    }
+    agregar(emitter["_once"][evento], fn)
+    retornar emitter
+}
+
+// Eliminar un listener específico
+funcion eventos_off(emitter: mapa, evento: texto, fn: cualquiera): mapa {
+    si (tiene_clave(emitter["_listeners"], evento)) {
+        sea nuevos = filtrar(emitter["_listeners"][evento], funcion(f) { f != fn })
+        emitter["_listeners"][evento] = nuevos
+    }
+    retornar emitter
+}
+
+// Emitir evento con argumentos
+funcion eventos_emit(emitter: mapa, evento: texto, datos: cualquiera): numero {
+    sea llamados = 0
+
+    // Listeners permanentes
+    si (tiene_clave(emitter["_listeners"], evento)) {
+        para fn en emitter["_listeners"][evento] {
+            intentar { fn(datos) } capturar (e) {
+                // Emitir evento de error si existe
+                si (evento != "error" y tiene_clave(emitter["_listeners"], "error")) {
+                    eventos_emit(emitter, "error", {"fuente": evento, "error": e})
+                }
+            }
+            llamados = llamados + 1
+        }
+    }
+
+    // Listeners once (se ejecutan y eliminan)
+    si (tiene_clave(emitter["_once"], evento)) {
+        sea fns = emitter["_once"][evento]
+        emitter["_once"][evento] = []
+        para fn en fns {
+            intentar { fn(datos) } capturar (e) { }
+            llamados = llamados + 1
+        }
+    }
+
+    retornar llamados
+}
+
+// Eliminar todos los listeners de un evento (o todos si no se especifica)
+funcion eventos_limpiar(emitter: mapa, evento: texto): nulo {
+    si (evento == nulo) {
+        emitter["_listeners"] = {}
+        emitter["_once"] = {}
+    } sino {
+        si (tiene_clave(emitter["_listeners"], evento)) {
+            emitter["_listeners"][evento] = []
+        }
+        si (tiene_clave(emitter["_once"], evento)) {
+            emitter["_once"][evento] = []
+        }
+    }
+}
+
+// Contar listeners de un evento
+funcion eventos_contar(emitter: mapa, evento: texto): numero {
+    sea n = 0
+    si (tiene_clave(emitter["_listeners"], evento)) {
+        n = n + longitud(emitter["_listeners"][evento])
+    }
+    si (tiene_clave(emitter["_once"], evento)) {
+        n = n + longitud(emitter["_once"][evento])
+    }
+    retornar n
+}
+
+// Listar eventos registrados
+funcion eventos_listar(emitter: mapa): lista {
+    sea evs = []
+    para kv en mapa_entradas(emitter["_listeners"]) {
+        si (longitud(kv[1]) > 0) { agregar(evs, kv[0]) }
+    }
+    para kv en mapa_entradas(emitter["_once"]) {
+        si (longitud(kv[1]) > 0 y !lista_contiene(evs, kv[0])) { agregar(evs, kv[0]) }
+    }
+    retornar evs
+}
+
+// ── Bus de eventos global ──────────────────────────────────────────────────────
+sea _bus_global = eventos_crear()
+
+funcion bus_on(evento: texto, fn: cualquiera): nulo {
+    eventos_on(_bus_global, evento, fn)
+}
+
+funcion bus_once(evento: texto, fn: cualquiera): nulo {
+    eventos_once(_bus_global, evento, fn)
+}
+
+funcion bus_emit(evento: texto, datos: cualquiera): numero {
+    retornar eventos_emit(_bus_global, evento, datos)
+}
+
+funcion bus_off(evento: texto, fn: cualquiera): nulo {
+    eventos_off(_bus_global, evento, fn)
+}
+
+// ── Máquina de estados (FSM) con eventos ─────────────────────────────────────
+// Estados y transiciones basados en eventos
+
+funcion fsm_crear(estado_inicial: texto, transiciones: mapa): mapa {
+    // transiciones = {"ESTADO": {"EVENTO": "NUEVO_ESTADO", ...}, ...}
+    sea fsm = eventos_crear()
+    fsm["_estado"] = estado_inicial
+    fsm["_transiciones"] = transiciones
+    fsm["_historial"] = [estado_inicial]
+    retornar fsm
+}
+
+funcion fsm_estado(fsm: mapa): texto {
+    retornar fsm["_estado"]
+}
+
+funcion fsm_transicion(fsm: mapa, evento: texto): booleano {
+    sea estado_actual = fsm["_estado"]
+    si (!tiene_clave(fsm["_transiciones"], estado_actual)) {
+        retornar falso
+    }
+    sea trans = fsm["_transiciones"][estado_actual]
+    si (!tiene_clave(trans, evento)) {
+        retornar falso
+    }
+    sea nuevo_estado = trans[evento]
+    sea estado_prev = estado_actual
+    fsm["_estado"] = nuevo_estado
+    agregar(fsm["_historial"], nuevo_estado)
+    // Emitir eventos
+    eventos_emit(fsm, "transicion", {"de": estado_prev, "a": nuevo_estado, "evento": evento})
+    eventos_emit(fsm, "enter:" + nuevo_estado, {"de": estado_prev, "evento": evento})
+    eventos_emit(fsm, "exit:" + estado_prev, {"a": nuevo_estado, "evento": evento})
+    retornar verdadero
+}
+
+funcion fsm_puede(fsm: mapa, evento: texto): booleano {
+    sea estado = fsm["_estado"]
+    retornar tiene_clave(fsm["_transiciones"], estado) y
+           tiene_clave(fsm["_transiciones"][estado], evento)
+}
+
+funcion fsm_historial(fsm: mapa): lista {
+    retornar fsm["_historial"]
+}

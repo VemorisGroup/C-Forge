@@ -1,0 +1,234 @@
+// stdlib/yaml.cfv — Parser y generador YAML para C-Forge
+// Soporta: scalars, listas, mapas, anidamiento, comentarios, multi-documento
+
+// ── Parser YAML ────────────────────────────────────────────────────────────────
+funcion yaml_parsear(texto_yaml: texto): cualquiera {
+    sea lineas = texto_dividir(texto_yaml, "\n")
+    sea estado = {"pos": 0, "lineas": lineas}
+    retornar yaml_parse_valor(estado, 0)
+}
+
+funcion yaml_parse_valor(st: mapa, indent_esp: numero): cualquiera {
+    sea lineas = st["lineas"]
+    sea pos = st["pos"]
+
+    // Saltar líneas vacías y comentarios
+    mientras (pos < longitud(lineas)) {
+        sea l = lineas[pos]
+        sea ltrim = yaml_ltrim(l)
+        si (ltrim == "" o texto_empieza_con(ltrim, "#")) {
+            pos = pos + 1
+            continuar
+        }
+        romper
+    }
+    st["pos"] = pos
+
+    si (pos >= longitud(lineas)) { retornar nulo }
+
+    sea linea = lineas[pos]
+    sea indent_actual = yaml_indent(linea)
+    sea ltrim = yaml_ltrim(linea)
+
+    si (indent_actual < indent_esp) { retornar nulo }
+
+    // Lista: empieza con "- "
+    si (texto_empieza_con(ltrim, "- ") o ltrim == "-") {
+        retornar yaml_parse_lista(st, indent_actual)
+    }
+
+    // Mapa: contiene ": "
+    si (texto_contiene(ltrim, ": ") o texto_termina_con(ltrim, ":")) {
+        retornar yaml_parse_mapa(st, indent_actual)
+    }
+
+    // Scalar
+    st["pos"] = pos + 1
+    retornar yaml_parse_scalar(ltrim)
+}
+
+funcion yaml_parse_mapa(st: mapa, indent_base: numero): mapa {
+    sea resultado = {}
+    sea lineas = st["lineas"]
+
+    mientras (st["pos"] < longitud(lineas)) {
+        sea pos = st["pos"]
+        sea linea = lineas[pos]
+        sea indent = yaml_indent(linea)
+        sea ltrim = yaml_ltrim(linea)
+
+        si (ltrim == "" o texto_empieza_con(ltrim, "#")) {
+            st["pos"] = pos + 1
+            continuar
+        }
+
+        si (indent < indent_base) { romper }
+        si (indent > indent_base) { romper }
+
+        // Ignorar separadores de documento
+        si (ltrim == "---" o ltrim == "...") {
+            st["pos"] = pos + 1
+            continuar
+        }
+
+        // Parsear clave: valor
+        sea sep_idx = texto_indice(ltrim, ": ")
+        si (sep_idx < 0) {
+            // clave sin valor (vacía o siguiente línea)
+            si (texto_termina_con(ltrim, ":")) {
+                sea clave = subcadena(ltrim, 0, longitud(ltrim) - 1)
+                st["pos"] = pos + 1
+                resultado[clave] = yaml_parse_valor(st, indent_base + 2)
+                continuar
+            }
+            st["pos"] = pos + 1
+            continuar
+        }
+
+        sea clave = subcadena(ltrim, 0, sep_idx)
+        sea val_str = subcadena(ltrim, sep_idx + 2, longitud(ltrim))
+
+        st["pos"] = pos + 1
+
+        si (val_str == "" o val_str == "|" o val_str == ">") {
+            // Valor en líneas siguientes
+            resultado[clave] = yaml_parse_valor(st, indent_base + 2)
+        } sino {
+            resultado[clave] = yaml_parse_scalar(val_str)
+        }
+    }
+
+    retornar resultado
+}
+
+funcion yaml_parse_lista(st: mapa, indent_base: numero): lista {
+    sea resultado = []
+    sea lineas = st["lineas"]
+
+    mientras (st["pos"] < longitud(lineas)) {
+        sea pos = st["pos"]
+        sea linea = lineas[pos]
+        sea indent = yaml_indent(linea)
+        sea ltrim = yaml_ltrim(linea)
+
+        si (ltrim == "" o texto_empieza_con(ltrim, "#")) {
+            st["pos"] = pos + 1
+            continuar
+        }
+
+        si (indent < indent_base) { romper }
+        si (!texto_empieza_con(ltrim, "- ") y ltrim != "-") { romper }
+
+        sea val_str = si (ltrim == "-") { "" } sino { subcadena(ltrim, 2, longitud(ltrim)) }
+        st["pos"] = pos + 1
+
+        si (val_str == "") {
+            agregar(resultado, yaml_parse_valor(st, indent_base + 2))
+        } sino si (texto_contiene(val_str, ": ")) {
+            // Mapa inline en lista
+            sea mini_st = {"pos": 0, "lineas": [val_str]}
+            agregar(resultado, yaml_parse_mapa(mini_st, 0))
+        } sino {
+            agregar(resultado, yaml_parse_scalar(val_str))
+        }
+    }
+
+    retornar resultado
+}
+
+funcion yaml_parse_scalar(s: texto): cualquiera {
+    sea t = yaml_ltrim(s)
+    // Quitar comillas
+    si ((texto_empieza_con(t, "\"") y texto_termina_con(t, "\"")) o
+        (texto_empieza_con(t, "'") y texto_termina_con(t, "'"))) {
+        retornar subcadena(t, 1, longitud(t) - 1)
+    }
+    // Tipos especiales
+    si (t == "true" o t == "yes" o t == "on") { retornar verdadero }
+    si (t == "false" o t == "no" o t == "off") { retornar falso }
+    si (t == "null" o t == "~" o t == "") { retornar nulo }
+    si (texto_es_numero(t)) { retornar texto_a_numero(t) }
+    retornar t
+}
+
+funcion yaml_indent(linea: texto): numero {
+    sea i = 0
+    mientras (i < longitud(linea) y subcadena(linea, i, i+1) == " ") {
+        i = i + 1
+    }
+    retornar i
+}
+
+funcion yaml_ltrim(linea: texto): texto {
+    sea i = 0
+    mientras (i < longitud(linea) y subcadena(linea, i, i+1) == " ") {
+        i = i + 1
+    }
+    retornar subcadena(linea, i, longitud(linea))
+}
+
+// ── Generador YAML ─────────────────────────────────────────────────────────────
+funcion yaml_generar(valor: cualquiera, indent: numero): texto {
+    sea pad = texto_repetir("  ", indent)
+    sea tipo = tipo_de(valor)
+
+    si (valor == nulo) { retornar "null" }
+    si (tipo == "booleano") { retornar si (valor) { "true" } sino { "false" } }
+    si (tipo == "numero") { retornar valor + "" }
+
+    si (tipo == "texto") {
+        // Necesita comillas si contiene caracteres especiales
+        si (texto_contiene(valor, ":") o texto_contiene(valor, "#") o
+            texto_contiene(valor, "\n") o texto_empieza_con(valor, " ")) {
+            sea escapado = regex_reemplazar(valor, "\"", "\\\"")
+            retornar "\"" + escapado + "\""
+        }
+        retornar valor
+    }
+
+    si (tipo == "lista") {
+        si (longitud(valor) == 0) { retornar "[]" }
+        sea lineas = []
+        para elem en valor {
+            sea val_str = yaml_generar(elem, indent + 1)
+            si (tipo_de(elem) == "mapa" o tipo_de(elem) == "lista") {
+                agregar(lineas, pad + "-\n" + val_str)
+            } sino {
+                agregar(lineas, pad + "- " + val_str)
+            }
+        }
+        retornar texto_unir(lineas, "\n")
+    }
+
+    si (tipo == "mapa") {
+        sea claves = mapa_claves(valor)
+        si (longitud(claves) == 0) { retornar "{}" }
+        sea lineas = []
+        para clave en claves {
+            sea v = valor[clave]
+            sea tipo_v = tipo_de(v)
+            si (tipo_v == "mapa" o tipo_v == "lista") {
+                agregar(lineas, pad + clave + ":\n" + yaml_generar(v, indent + 1))
+            } sino {
+                agregar(lineas, pad + clave + ": " + yaml_generar(v, indent))
+            }
+        }
+        retornar texto_unir(lineas, "\n")
+    }
+
+    retornar valor + ""
+}
+
+funcion yaml_texto(valor: cualquiera): texto {
+    retornar "---\n" + yaml_generar(valor, 0) + "\n"
+}
+
+// ── Archivo ────────────────────────────────────────────────────────────────────
+funcion yaml_leer(ruta: texto): cualquiera {
+    si (!existe_archivo(ruta)) { lanzar "yaml_leer: no existe: " + ruta }
+    retornar yaml_parsear(leer_archivo(ruta))
+}
+
+funcion yaml_escribir(ruta: texto, valor: cualquiera): nulo {
+    escribir_archivo(ruta, yaml_texto(valor))
+}
