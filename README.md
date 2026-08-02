@@ -131,7 +131,7 @@ lexer → parser → AST → runtime
 ejecutable nativo C-Forge
 ```
 
-Stage 0 y los prototipos de emisión directa se encuentran en
+Stage 0 y los backends de emisión directa se encuentran en
 [`bootstrap/`](bootstrap/). Las fuentes antiguas de Stage 1 se retiraron porque
 no pasaban el parser actual. Consulta [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md)
 para conocer el estado verificable.
@@ -142,8 +142,9 @@ para conocer el estado verificable.
 - Linux: validación mediante CI.
 - Windows: backend experimental; falta validación física completa.
 
-Los emisores directos Mach-O ARM64, ELF x64 y PE x64 están limitados al
-programa prototipo `mostrar("texto")`. El gate comprueba sus cabeceras y ejecuta
+Los emisores mínimos Mach-O ARM64, ELF x64 y PE x64 aceptan el programa
+`mostrar("texto")`. Mach-O y PE incluyen también variantes Core B6.7 para
+variables, aritmética, control, funciones, listas y texto dinámico. El gate comprueba sus cabeceras y ejecuta
 únicamente el formato compatible con el sistema anfitrión. Todavía no son
 backends completos del lenguaje.
 

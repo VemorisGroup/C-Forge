@@ -126,11 +126,14 @@
       "id": "direct-native-backends",
       "name": "Backends nativos directos",
       "status": "partial",
-      "scope": "Emisores deterministas de prototipo para un programa literal mostrar(\"texto\"). Las cabeceras Mach-O ARM64, ELF x64 y PE x64 se verifican automáticamente; solo el formato anfitrión se ejecuta. No son backends generales.",
+      "scope": "Mach-O ARM64 y PE x64 poseen backends Core B6.7 para variables numéricas, aritmética, condiciones, ciclos, funciones, listas y texto dinámico. La emisión se prueba con PATH aislado y no llama compilador ni enlazador. ELF x64 y las características generales restantes todavía pertenecen al subconjunto literal o están pendientes.",
       "evidence": [
         "bootstrap/direct/cforge_macho_arm64.cfv",
+        "bootstrap/direct/cforge_macho_arm64_core.cfv",
         "bootstrap/direct/cforge_elf_x64.cfv",
         "bootstrap/direct/cforge_pe_x64.cfv",
+        "bootstrap/direct/cforge_pe_x64_core.cfv",
+        "bootstrap/fixtures/machine_runtime_b6.cfv",
         "Makefile",
         "docs/RUNTIME-AUTONOMY.md"
       ]

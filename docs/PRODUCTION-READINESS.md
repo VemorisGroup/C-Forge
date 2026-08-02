@@ -15,8 +15,9 @@ compromisos distintos.
 - El contrato del CLI se comprueba automáticamente.
 - La instalación aislada instala motor y biblioteca estándar y ejecuta una
   prueba real.
-- Los emisores directos generan cabeceras Mach-O ARM64, ELF x64 y PE x64 para
-  el caso literal documentado.
+- Los emisores directos mínimos generan Mach-O ARM64, ELF x64 y PE x64. Las
+  variantes Mach-O/PE Core B6.7 cubren además variables, aritmética, control,
+  funciones, listas y texto dinámico sin toolchain durante la emisión.
 - La CI contiene trabajos de compilación para macOS, Linux y Windows.
 
 ## No verificado o no terminado
