@@ -85,7 +85,7 @@ sudo make install
 ## Biblioteca estándar
 
 Los módulos oficiales están en [`stdlib/`](stdlib/) y conservan formato `.cfv`.
-Actualmente hay **31 módulos que pasan el análisis sintáctico y la carga del
+Actualmente hay **34 módulos que pasan el análisis sintáctico y la carga del
 motor**. Incluyen utilidades para:
 
 - texto, números y matemáticas;

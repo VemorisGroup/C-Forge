@@ -25,7 +25,6 @@
       "scope": "Lexer, parser y ejecución de programas .cfv en un ejecutable nativo. Incluye REPL, funciones, closures, clases, excepciones y colecciones.",
       "evidence": [
         "cforgev.cpp",
-        "cforgev.cfv",
         "tests/cfv/01_nucleo.cfv",
         "tests/cfv/02_funciones.cfv",
         "tests/cfv/03_colecciones.cfv",
@@ -47,7 +46,7 @@
       "id": "cfv-standard-library",
       "name": "Biblioteca estándar en C-Forge",
       "status": "verified-preview",
-      "scope": "31 módulos .cfv que pasan análisis sintáctico y carga real. Diez pruebas nativas cubren el núcleo y una selección de biblioteca; la cobertura funcional de cada módulo seguirá ampliándose antes de declararla estable.",
+      "scope": "34 módulos .cfv que pasan análisis sintáctico y carga real. Diez pruebas nativas cubren el núcleo y una selección de biblioteca; la cobertura funcional de cada módulo seguirá ampliándose antes de declararla estable.",
       "evidence": [
         "stdlib/",
         "tests/cfv/05_stdlib_matematica.cfv",

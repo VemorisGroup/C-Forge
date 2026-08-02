@@ -7,7 +7,7 @@ salud, infraestructura crítica ni sistemas donde un fallo pueda causar daños.
 
 - El motor C++20 se construye sin avisos con el gate oficial en macOS ARM64.
 - El ejecutable interpreta `.cfv` sin Python, JVM, .NET ni Node.
-- 31 módulos `.cfv` pasan análisis sintáctico y carga.
+- 34 módulos `.cfv` pasan análisis sintáctico y carga.
 - 10 archivos de prueba nativos pasan localmente.
 - La instalación aislada instala motor y biblioteca estándar y ejecuta una
   prueba real.
@@ -17,7 +17,7 @@ salud, infraestructura crítica ni sistemas donde un fallo pueda causar daños.
 
 ## No verificado o no terminado
 
-- Cobertura funcional exhaustiva de los 31 módulos.
+- Cobertura funcional exhaustiva de los 34 módulos.
 - Toolchain autoalojada reproducible Stage 2/3.
 - Backends directos para el lenguaje completo.
 - Sandboxing fuerte de archivos, procesos y red.

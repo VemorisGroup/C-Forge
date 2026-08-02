@@ -13,7 +13,12 @@ outputs/cforge-master binary linguist-vendored=true
 *.vsix binary
 *.exe  binary
 
-# GitHub Linguist — C-Forge es el lenguaje del repo
+# GitHub Linguist — solamente el código C-Forge participa en estadísticas.
+# La regla general evita que herramientas, bootstrap, web y empaquetado se
+# presenten como lenguajes del producto.
+* linguist-vendored=true
+
+# C-Forge es el único código detectable del repositorio.
 *.cfv linguist-language=C-Forge linguist-detectable=true
 
 # Todo archivo .cfv activo representa código fuente C-Forge.

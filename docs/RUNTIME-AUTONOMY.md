@@ -7,7 +7,7 @@ El ejecutable `cforge` puede interpretar programas `.cfv` sin Python, JVM,
 compilador C++20; por ello la *toolchain* completa todavía no es autónoma.
 
 La biblioteca estándar activa contiene únicamente fuentes `.cfv`. El gate
-local comprueba los 31 módulos y ejecuta ocho archivos de prueba nativos:
+local comprueba los 34 módulos y ejecuta diez archivos de prueba nativos:
 
 ```sh
 make clean
