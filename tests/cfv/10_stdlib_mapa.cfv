@@ -1,0 +1,9 @@
+importar "mapa"
+
+sea datos = {"lenguaje": "C-Forge", "version": 26}
+afirmar(mapa_tiene(datos, "lenguaje"), "mapa_tiene debe encontrar la clave")
+afirmar(mapa_get(datos, "lenguaje", "ninguno") == "C-Forge", "mapa_get debe recuperar valores")
+afirmar(mapa_get(datos, "ausente", 42) == 42, "mapa_get debe usar el valor por defecto")
+afirmar(mapa_tamano(datos) == 2, "mapa_tamano debe contar claves")
+
+mostrar("[OK] stdlib mapa")

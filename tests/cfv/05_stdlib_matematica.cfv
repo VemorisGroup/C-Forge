@@ -1,0 +1,11 @@
+// Biblioteca estándar: matemática escrita en C-Forge.
+importar "matematica"
+
+afirmar(mat_mcd(84, 30) == 6, "MCD incorrecto")
+afirmar(mat_mcm(12, 18) == 36, "MCM incorrecto")
+afirmar(mat_factorial(7) == 5040, "factorial incorrecto")
+afirmar(mat_fibonacci(10) == 55, "fibonacci incorrecto")
+afirmar(mat_es_primo(97), "97 debe ser primo")
+afirmar(longitud(mat_primos_hasta(20)) == 8, "cantidad de primos incorrecta")
+
+mostrar("[OK] stdlib matemática")

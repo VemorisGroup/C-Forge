@@ -103,15 +103,15 @@ funcion emitir_elf_x64(mensaje_sin_salto: texto): lista {
 
 sea argumentos: lista = argumentos_programa()
 afirmar(
-    longitud(argumentos) == 4,
-    "uso: cforge-elf-x64 archivo.cfv -o ejecutable"
+    longitud(argumentos) == 3,
+    "uso: cforge cforge_elf_x64.cfv archivo.cfv -o ejecutable"
 )
-afirmar(argumentos[2] == "-o", "se esperaba -o")
+afirmar(argumentos[1] == "-o", "se esperaba -o")
 
-sea fuente: texto = leer_archivo(argumentos[1])
+sea fuente: texto = leer_archivo(argumentos[0])
 sea mensaje: texto = primer_literal_mostrar(fuente)
 sea ejecutable: lista = emitir_elf_x64(mensaje)
 
-afirmar(escribir_bytes(argumentos[3], ejecutable), "no se pudo escribir ELF")
-afirmar(hacer_ejecutable(argumentos[3]), "no se pudo marcar como ejecutable")
-mostrar("C-Forge emitió código máquina ELF64/x86-64: " + argumentos[3])
+afirmar(escribir_bytes(argumentos[2], ejecutable), "no se pudo escribir ELF")
+afirmar(hacer_ejecutable(argumentos[2]), "no se pudo marcar como ejecutable")
+mostrar("C-Forge emitió código máquina ELF64/x86-64: " + argumentos[2])

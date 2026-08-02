@@ -1,4 +1,4 @@
-name: Publicar paquetes
+name: Publicar C-Forge nativo
 
 on:
   push:
@@ -8,68 +8,65 @@ permissions:
   contents: write
 
 jobs:
-  archives:
+  native:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
-            platform: macos
+            artifact: cforge-macos-native
           - os: ubuntu-latest
-            platform: linux
+            artifact: cforge-linux-x64
           - os: windows-latest
-            platform: windows
+            artifact: cforge-windows-x64.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Construir archivo portable
-        shell: bash
-        run: python packaging/build_portable.py --version "${GITHUB_REF_NAME#v}" --platform "${{ matrix.platform }}"
-      - name: Construir ejecutable autónomo para Windows
-        if: runner.os == 'Windows'
-        shell: bash
+
+      - name: Construir en Unix
+        if: runner.os != 'Windows'
         run: |
-          python -m pip install pyinstaller cryptography
-          pyinstaller --onefile --name "cforge-${GITHUB_REF_NAME#v}-windows-x64" \
-            --hidden-import compilador_nativo --hidden-import compilador_wasm --hidden-import compilador_llvm \
-            --hidden-import cforge_diagnostics --hidden-import cforge_lsp \
-            --hidden-import cforge_dap --hidden-import cforge_packages --hidden-import cforge_vm --hidden-import cforge_memory \
-            --hidden-import cforge_parity \
-            --collect-all cryptography cforgev.py
+          make clean
+          make build
+          make check
+          make test
+          cp cforge "${{ matrix.artifact }}"
+
+      - name: Construir en Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          cl /std:c++20 /EHsc /O2 /Fe:cforge.exe cforgev.cpp ws2_32.lib
+          cforge.exe --version
+          cforge.exe test tests\cfv\01_nucleo.cfv
+          copy cforge.exe ${{ matrix.artifact }}
+
       - uses: actions/upload-artifact@v4
         with:
-          name: cforgev-${{ matrix.platform }}
-          path: dist/*
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
 
   debian:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Construir paquete Debian
-        run: bash packaging/debian/build-deb.sh "${GITHUB_REF_NAME#v}" all
+      - name: Construir paquete Debian nativo
+        run: packaging/debian/build-deb.sh "${GITHUB_REF_NAME#v}" amd64
       - uses: actions/upload-artifact@v4
         with:
-          name: cforgev-debian
+          name: cforge-debian
           path: dist/*.deb
 
   release:
-    needs: [archives, debian]
+    needs: [native, debian]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
           merge-multiple: true
-      - name: Generar manifiestos de gestores de paquetes
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz" -o source.tar.gz
-          python packaging/homebrew/generate.py "$VERSION" source.tar.gz -o release-assets/cforge.rb
-          python packaging/winget/generate.py "$VERSION" "release-assets/cforge-${VERSION}-windows-x64.exe" -o release-assets/VemorisGroup.CForgev.yaml
-      - name: Crear GitHub Release
+      - name: Publicar artefactos verificados
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" release-assets/* --generate-notes --title "C-Forge $GITHUB_REF_NAME"

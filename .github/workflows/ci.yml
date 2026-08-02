@@ -1,4 +1,4 @@
-name: CI — C-Forge v3.0.0
+name: CI — C-Forge 2.6 native
 
 on:
   push:
@@ -38,18 +38,30 @@ jobs:
         run: |
           brew install ${{ matrix.openssl_pkg }} sqlite
 
-      - name: Compilar cforgev
-        run: make build CXX=${{ matrix.cxx }}
+      - name: Compilar cforge
+        run: make clean && make build CXX=${{ matrix.cxx }}
+
+      - name: Verificar CLI autónomo
+        run: |
+          ./cforge --version
+          ./cforge --help
+
+      - name: Gate nativo completo
+        run: |
+          make check
+          make test
+          make backend-check
+          make install-check
 
       - name: Smoke test básico
         run: |
           echo 'mostrar("C-Forge CI OK")' > /tmp/ci_test.cfv
-          CFORGE_STDLIB=./stdlib ./cforgev /tmp/ci_test.cfv
+          CFORGE_STDLIB=./stdlib ./cforge /tmp/ci_test.cfv
 
       - name: Test importar stdlib
         run: |
           printf 'importar "matematica"\nmostrar(piso(3.7))\n' > /tmp/test_imp.cfv
-          CFORGE_STDLIB=./stdlib ./cforgev /tmp/test_imp.cfv
+          CFORGE_STDLIB=./stdlib ./cforge /tmp/test_imp.cfv
 
       - name: Ejecutar ejemplos
         run: |
@@ -65,48 +77,56 @@ jobs:
             ejemplos/09_stdlib_algoritmos.cfv \
             ejemplos/10_stdlib_numero.cfv; do
             echo "  → $f"
-            CFORGE_STDLIB=./stdlib timeout 15 ./cforgev "$f"
+            CFORGE_STDLIB=./stdlib ./cforge "$f"
           done
           echo "Todos los ejemplos OK"
 
       - name: Test stdlib algoritmos
         run: |
           printf 'importar "algoritmos"\nsea cmp = funcion(a, b) { retornar a - b }\nmostrar(mergesort([3,1,2], cmp))\n' > /tmp/test_algo.cfv
-          CFORGE_STDLIB=./stdlib ./cforgev /tmp/test_algo.cfv
+          CFORGE_STDLIB=./stdlib ./cforge /tmp/test_algo.cfv
 
       - name: Test stdlib numero
         run: |
           printf 'importar "numero"\nmostrar(numero_decimales(3.14159, 2))\nmostrar(seno(0))\n' > /tmp/test_num.cfv
-          CFORGE_STDLIB=./stdlib ./cforgev /tmp/test_num.cfv
+          CFORGE_STDLIB=./stdlib ./cforge /tmp/test_num.cfv
 
-  # ── Herramientas Python ─────────────────────────────────────────────────────
-  python-tools:
-    name: Python Tools
+  # ── Pruebas escritas en C-Forge, ejecutadas por el motor nativo ─────────────
+  cforge-language-tests:
+    name: C-Forge language tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Compilar motor
+        run: make clean && make build CXX=g++
 
-      - name: Instalar herramientas desde pyproject.toml
-        run: pip install -e . --quiet
-
-      - name: Test cfmt
+      - name: Verificar y ejecutar pruebas .cfv
         run: |
-          echo 'mostrar("hola")' > /tmp/test.cfv
-          python3 tools/cfmt.py /tmp/test.cfv --check 2>/dev/null || true
-          echo "cfmt OK"
+          make check
+          make test
 
-      - name: Test cflint
+  # Compila y ejecuta el núcleo en Windows. Los backends directos se validan
+  # por formato en los otros jobs hasta disponer de runners de cada arquitectura.
+  windows-native:
+    name: Build & Test (Windows x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compilar motor con MSVC
+        shell: cmd
+        run: cl /std:c++20 /EHsc /O2 /Fe:cforge.exe cforgev.cpp ws2_32.lib
+
+      - name: Ejecutar pruebas esenciales
+        shell: pwsh
         run: |
-          python3 tools/cflint.py /tmp/test.cfv 2>/dev/null || true
-          echo "cflint OK"
-
-      - name: Test cforge CLI
-        run: python3 tools/cforge_cli.py --help || true
+          .\cforge.exe --version
+          .\cforge.exe check tests/cfv/01_nucleo.cfv
+          .\cforge.exe test tests/cfv/01_nucleo.cfv
+          .\cforge.exe test tests/cfv/02_funciones.cfv
+          .\cforge.exe test tests/cfv/03_colecciones.cfv
+          .\cforge.exe test tests/cfv/04_errores.cfv
 
   # ── Docker build ────────────────────────────────────────────────────────────
   docker:
@@ -122,5 +142,5 @@ jobs:
         run: |
           echo 'mostrar("Docker OK")' > /tmp/docker_test.cfv
           docker run --rm -v /tmp:/work \
-            --entrypoint cforgev cforge:ci \
+            --entrypoint cforge cforge:ci \
             /work/docker_test.cfv

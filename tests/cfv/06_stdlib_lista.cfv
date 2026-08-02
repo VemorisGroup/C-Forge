@@ -1,0 +1,13 @@
+// Biblioteca estándar: listas escritas en C-Forge.
+importar "lista"
+
+sea valores = [4, 1, 4, 2, 3]
+afirmar(lst_suma(valores) == 14, "suma de lista incorrecta")
+afirmar(lst_producto([2, 3, 4]) == 24, "producto incorrecto")
+afirmar(lst_min(valores) == 1, "mínimo incorrecto")
+afirmar(lst_max(valores) == 4, "máximo incorrecto")
+afirmar(lst_contar(valores, 4) == 2, "conteo incorrecto")
+afirmar(longitud(lst_unico(valores)) == 4, "elementos únicos incorrectos")
+afirmar(longitud(lst_zip([1, 2], ["a", "b", "c"])) == 2, "zip incorrecto")
+
+mostrar("[OK] stdlib lista")

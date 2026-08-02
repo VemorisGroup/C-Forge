@@ -6,12 +6,9 @@ experimental de Vemoris Group.
 ## Funciones
 
 - Resaltado TextMate para palabras clave, tipos, funciones, números y textos.
-- Reconocimiento de `gpu`, `cluster`, `test` y bloques `extern`.
-- Coloreado de los puentes Python, C#, C++, Java, JavaScript y TypeScript.
+- Reconocimiento de `gpu`, `cluster` y `test` como sintaxis experimental.
 - Soporte para funciones nativas de sistema, archivos, TCP, matrices y arrays.
-- Coloreado de `console.log`, `System.out.println`, `std::cout` y `cout`.
-- Compatibilidad visual con `.append()`, `.push()`, `.length` y `.len()`.
-- Forge Shared Arena y conectores declarativos `ia_`, `ui_` y `web_`.
+- Resaltado de la sintaxis propia `mostrar`, `agregar` y `longitud`.
 - Comentarios de línea mediante `//`.
 - Cierre automático de llaves, corchetes, paréntesis y comillas.
 - Cliente LSP integrado sin dependencias externas: diagnósticos, hover tipado,
@@ -33,9 +30,8 @@ gpu {
     mostrar(resultados);
 }
 
-console.log("C-Forge compatible");
-resultados.append(36);
-print(resultados.length);
+agregar(resultados, 36)
+mostrar(longitud(resultados))
 ```
 
 ## Requisitos

@@ -1,4 +1,4 @@
-# C-Forgev build products
+# C-Forge build products
 build/
 dist/
 *.dylib
@@ -9,6 +9,9 @@ dist/
 *.obj
 *.ll
 *.dSYM/
+cforge
+cforgev
+cforge-*
 
 # Generated and temporary workspaces
 work/
@@ -29,6 +32,9 @@ node_modules/
 .vscode-test/
 outputs/marketplace-assets/
 outputs/main.cfv
+*.tmp
+*.temp
+*.log
 
 # Only current official deliverables belong in the repository
 outputs/*

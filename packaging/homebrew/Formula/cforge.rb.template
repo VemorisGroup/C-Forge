@@ -5,23 +5,20 @@ class Cforge < Formula
   sha256 "SHA256"
   license :cannot_represent
 
-  depends_on "python@3.13"
-  depends_on "cryptography"
+  depends_on "openssl@3"
 
   def install
-    libexec.install "cforgev.py", "compilador_nativo.py", "compilador_wasm.py", "compilador_llvm.py",
-      "cforge_diagnostics.py", "cforge_lsp.py", "cforge_dap.py", "cforge_packages.py", "cforge_vm.py",
-      "cforge_memory.py", "cforge_parity.py", "capabilities.json",
-      "include", "ejemplos", "registry", "docs"
-    (bin/"cforge").write <<~SH
-      #!/bin/sh
-      exec "#{Formula["python@3.13"].opt_bin}/python3.13" "#{libexec}/cforgev.py" "$@"
-    SH
+    system ENV.cxx, "-std=c++20", "-O2", "-DCFV_WITH_OPENSSL",
+      "-Iinclude", "-I#{Formula["openssl@3"].opt_include}", "cforgev.cpp",
+      "-L#{Formula["openssl@3"].opt_lib}", "-lssl", "-lcrypto", "-o", "cforge"
+    bin.install "cforge"
     bin.install_symlink "cforge" => "cforgev"
+    (lib/"cforge/stdlib").install Dir["stdlib/*.cfv"]
   end
 
   test do
-    assert_match "C-Forge #{version}", shell_output("#{bin}/cforge --version")
-    assert_match "developer-preview", shell_output("#{bin}/cforge capabilities")
+    (testpath/"hola.cfv").write 'mostrar("Homebrew C-Forge OK")'
+    assert_match "C-Forge", shell_output("#{bin}/cforge --version")
+    assert_match "Homebrew C-Forge OK", shell_output("#{bin}/cforge #{testpath}/hola.cfv")
   end
 end

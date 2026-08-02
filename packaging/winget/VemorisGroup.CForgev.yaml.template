@@ -1,4 +1,4 @@
-# Se completa con packaging/winget/generate.py después de publicar el ejecutable.
+# Sustituir VERSION y SHA256 durante la publicación del ejecutable nativo.
 PackageIdentifier: VemorisGroup.CForgev
 PackageVersion: VERSION
 PackageLocale: es-CL

@@ -5,12 +5,10 @@
 set -e
 
 REPO="VemorisGroup/C-Forge"
-VERSION="3.0.0"
+VERSION="2.6.0-dev"
 INSTALL_DIR="/usr/local/bin"
-TOOLS_DIR="/usr/local/lib/cforge/tools"
-BINARY_NAME="cforgev"
+BINARY_NAME="cforge"
 STDLIB_DIR="/usr/local/lib/cforge/stdlib"
-CFPKG_NAME="cfpkg"
 
 # Colores
 RED='\033[0;31m'
@@ -63,29 +61,19 @@ RAW="https://raw.githubusercontent.com/${REPO}/main"
 
 curl -fsSL "$RAW/cforgev.cpp" -o "$TMP_DIR/cforgev.cpp"
 echo -e "  OK cforgev.cpp"
+mkdir -p "$TMP_DIR/include"
+curl -fsSL "$RAW/include/cforge_shared_arena.h" -o "$TMP_DIR/include/cforge_shared_arena.h"
+echo -e "  OK include/cforge_shared_arena.h"
 
-# Descargar stdlib (v2.5.1 — todos los módulos)
+# Descargar únicamente la biblioteca estándar validada por el gate 2.6.
 mkdir -p "$TMP_DIR/stdlib"
-for mod in aleatorio algoritmos async base64 benchmark colecciones concurrencia \
-           crypto csv db email enum errores esquema eventos fecha ffi framework \
-           generadores gl http_cliente interfaz io json lista log mapa matematica \
-           numero orm os pkgmgr pruebas regex sdl streams texto tipado tipos \
-           validar web yaml; do
+for mod in aleatorio algoritmos assets audio auditoria auth base64 colecciones \
+           colision concurrencia crypto db errores fecha fisica2d fisica3d gl \
+           input io json lista mapa matematica nlp numero os particulas redis \
+           regex sdl web; do
     curl -fsSL "$RAW/stdlib/${mod}.cfv" -o "$TMP_DIR/stdlib/${mod}.cfv" 2>/dev/null && \
         echo -e "  OK stdlib/${mod}.cfv" || echo -e "  -- stdlib/${mod}.cfv (omitido)"
 done
-
-# Descargar herramientas Python
-mkdir -p "$TMP_DIR/tools"
-for tool in cfmt cflint cftest cfdoc cfwatch cforgec cforge_cli dap_server lsp_server pkg_registry repl cfbuild; do
-    curl -fsSL "$RAW/tools/${tool}.py" -o "$TMP_DIR/tools/${tool}.py" 2>/dev/null && \
-        echo -e "  OK tools/${tool}.py" || true
-done
-
-# Descargar cfpkg
-curl -fsSL "$RAW/cfpkg" -o "$TMP_DIR/cfpkg"
-chmod +x "$TMP_DIR/cfpkg"
-echo -e "  OK cfpkg"
 
 echo ""
 echo -e "  ${BLUE}Compilando interprete...${NC}"
@@ -141,36 +129,28 @@ if [ -z "$SQLITE_FLAGS" ]; then
     echo -e "  Para instalarlo: Ubuntu: sudo apt install libsqlite3-dev | macOS: brew install sqlite"
 fi
 
-PYTHON_FLAGS=$(python3-config --includes --ldflags 2>/dev/null || echo "")
-
 # Intentar con todas las combinaciones — primero completo, luego degradar
 if $CXX -std=c++20 -O2 \
     -o "$TMP_DIR/${BINARY_NAME}" \
-    "$TMP_DIR/cforgev.cpp" \
+    -I"$TMP_DIR/include" "$TMP_DIR/cforgev.cpp" \
     $OPENSSL_FLAGS $SQLITE_FLAGS -lpthread \
     2>/dev/null; then
     echo -e "  OK compilado con OpenSSL + SQLite"
 elif $CXX -std=c++20 -O2 \
     -o "$TMP_DIR/${BINARY_NAME}" \
-    "$TMP_DIR/cforgev.cpp" \
+    -I"$TMP_DIR/include" "$TMP_DIR/cforgev.cpp" \
     $OPENSSL_FLAGS -lpthread \
     2>/dev/null; then
     echo -e "  OK compilado con OpenSSL (sin SQLite)"
 elif $CXX -std=c++20 -O2 \
     -o "$TMP_DIR/${BINARY_NAME}" \
-    "$TMP_DIR/cforgev.cpp" \
+    -I"$TMP_DIR/include" "$TMP_DIR/cforgev.cpp" \
     $SQLITE_FLAGS -lpthread \
     2>/dev/null; then
     echo -e "  OK compilado con SQLite (sin OpenSSL)"
 elif $CXX -std=c++20 -O2 \
     -o "$TMP_DIR/${BINARY_NAME}" \
-    "$TMP_DIR/cforgev.cpp" \
-    $PYTHON_FLAGS \
-    2>/dev/null; then
-    echo -e "  OK compilado con Python"
-elif $CXX -std=c++20 -O2 \
-    -o "$TMP_DIR/${BINARY_NAME}" \
-    "$TMP_DIR/cforgev.cpp" 2>&1; then
+    -I"$TMP_DIR/include" "$TMP_DIR/cforgev.cpp" 2>&1; then
     echo -e "  OK compilado (basico)"
 else
     echo -e "${RED}  Error al compilar. Reporta el error en github.com/${REPO}/issues${NC}"
@@ -184,50 +164,13 @@ echo -e "  ${BLUE}Instalando...${NC}"
 $SUDO cp "$TMP_DIR/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
 $SUDO chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 echo -e "  OK ${INSTALL_DIR}/${BINARY_NAME}"
-
-# Instalar cfpkg
-# Parchear cfpkg para apuntar a la stdlib instalada
-sed "s|STDLIB_DIR=\"\$(dirname \"\$0\")/stdlib\"|STDLIB_DIR=\"${STDLIB_DIR}\"|g" \
-    "$TMP_DIR/cfpkg" > "$TMP_DIR/cfpkg_patched"
-sed -i.bak "s|CFORGEV_BIN=\"\$(dirname \"\$0\")/cforgev_new\"|CFORGEV_BIN=\"${INSTALL_DIR}/${BINARY_NAME}\"|g" \
-    "$TMP_DIR/cfpkg_patched" 2>/dev/null || \
-sed -i '' "s|CFORGEV_BIN=\"\$(dirname \"\$0\")/cforgev_new\"|CFORGEV_BIN=\"${INSTALL_DIR}/${BINARY_NAME}\"|g" \
-    "$TMP_DIR/cfpkg_patched"
-$SUDO cp "$TMP_DIR/cfpkg_patched" "${INSTALL_DIR}/${CFPKG_NAME}"
-$SUDO chmod +x "${INSTALL_DIR}/${CFPKG_NAME}"
-echo -e "  OK ${INSTALL_DIR}/${CFPKG_NAME}"
+$SUDO ln -sf "${INSTALL_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/cforgev"
+echo -e "  OK ${INSTALL_DIR}/cforgev (alias de compatibilidad)"
 
 # Instalar stdlib
 $SUDO mkdir -p "$STDLIB_DIR"
 $SUDO cp "$TMP_DIR/stdlib/"*.cfv "$STDLIB_DIR/" 2>/dev/null || true
 echo -e "  OK stdlib -> ${STDLIB_DIR}"
-
-# Instalar herramientas Python
-$SUDO mkdir -p "$TOOLS_DIR"
-$SUDO cp "$TMP_DIR/tools/"*.py "$TOOLS_DIR/" 2>/dev/null || true
-echo -e "  OK tools -> ${TOOLS_DIR}"
-
-# Instalar wrappers de herramientas en PATH
-for tool in cfmt cflint cftest cfdoc cfwatch cforgec; do
-    $SUDO tee "${INSTALL_DIR}/${tool}" > /dev/null << EOF
-#!/usr/bin/env python3
-import sys
-sys.path.insert(0, "${TOOLS_DIR}")
-exec(open("${TOOLS_DIR}/${tool}.py").read())
-EOF
-    $SUDO chmod +x "${INSTALL_DIR}/${tool}"
-    echo -e "  OK ${INSTALL_DIR}/${tool}"
-done
-
-# Instalar CLI unificado cforge
-$SUDO tee "${INSTALL_DIR}/cforge" > /dev/null << 'EOF'
-#!/usr/bin/env python3
-import sys, os
-sys.path.insert(0, "/usr/local/lib/cforge/tools")
-exec(open("/usr/local/lib/cforge/tools/cforge_cli.py").read())
-EOF
-$SUDO chmod +x "${INSTALL_DIR}/cforge"
-echo -e "  OK ${INSTALL_DIR}/cforge (CLI unificado)"
 
 # Completions de shell
 COMP_DIR="/usr/local/share/cforge/completions"
@@ -252,13 +195,9 @@ echo ""
 echo -e "  Comandos disponibles:"
 echo -e "    cforge run archivo.cfv  -- ejecutar un programa"
 echo -e "    cforge repl             -- REPL interactivo"
-echo -e "    cforge build            -- compilar proyecto"
-echo -e "    cforge test             -- ejecutar tests"
-echo -e "    cforge fmt archivo.cfv  -- formatear código"
-echo -e "    cforge lint archivo.cfv -- analizar código"
-echo -e "    cforge docs             -- generar documentación"
-echo -e "    cforge pkg install pkg  -- instalar paquete"
-echo -e "    cfpkg install u/repo    -- gestor de paquetes"
+echo -e "    cforge check archivo.cfv -- verificar sintaxis"
+echo -e "    cforge test archivo.cfv -- ejecutar pruebas"
+echo -e "    cforge fmt archivo.cfv  -- verificar formato"
 echo ""
 echo -e "  Documentacion: https://github.com/${REPO}"
 echo ""

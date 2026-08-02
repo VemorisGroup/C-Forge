@@ -1,0 +1,14 @@
+// JSON y texto implementados directamente por el motor nativo.
+importar "json"
+
+sea fuente = json_serializar({"proyecto": "C-Forge", "version": 2.6, "estable": falso})
+sea documento = json_parsear(fuente)
+afirmar(documento["proyecto"] == "C-Forge", "JSON texto incorrecto")
+afirmar(documento["version"] == 2.6, "JSON numérico incorrecto")
+afirmar(no documento["estable"], "JSON booleano incorrecto")
+afirmar(json_valido("[1,2,3]"), "JSON válido rechazado")
+afirmar(no json_valido("[rota"), "JSON inválido aceptado")
+afirmar(texto_mayusculas("C-Forge") == "C-FORGE", "mayúsculas incorrectas")
+afirmar(texto_reemplazar("uno dos", "dos", "tres") == "uno tres", "reemplazo incorrecto")
+
+mostrar("[OK] JSON y texto")

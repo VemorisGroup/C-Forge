@@ -1,0 +1,11 @@
+// Prueba del manejo de excepciones del lenguaje.
+sea capturado = falso
+
+intentar {
+    lanzar "fallo controlado"
+} capturar (error) {
+    capturado = verdadero
+}
+
+afirmar(capturado, "la excepción debe ser capturada")
+mostrar("[OK] errores")

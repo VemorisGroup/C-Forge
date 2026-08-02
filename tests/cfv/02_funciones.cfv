@@ -1,0 +1,19 @@
+// Prueba de funciones, recursión y closures.
+funcion factorial(n) {
+    si (n <= 1) {
+        retornar 1
+    }
+    retornar n * factorial(n - 1)
+}
+
+funcion crear_sumador(base) {
+    retornar funcion(valor) {
+        retornar base + valor
+    }
+}
+
+sea sumar_diez = crear_sumador(10)
+afirmar(factorial(6) == 720, "factorial(6) debe ser 720")
+afirmar(sumar_diez(32) == 42, "el closure debe conservar su entorno")
+
+mostrar("[OK] funciones")

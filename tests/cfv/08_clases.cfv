@@ -1,0 +1,19 @@
+// Clases, estado y métodos del núcleo C-Forge.
+clase Contador {
+    sea valor = 0
+
+    funcion constructor(inicial) {
+        esto.valor = inicial
+    }
+
+    funcion incrementar(cantidad) {
+        esto.valor = esto.valor + cantidad
+        retornar esto.valor
+    }
+}
+
+sea contador = Contador(40)
+afirmar(contador.incrementar(2) == 42, "método de clase incorrecto")
+afirmar(contador.valor == 42, "estado de clase incorrecto")
+
+mostrar("[OK] clases")

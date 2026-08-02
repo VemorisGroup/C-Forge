@@ -4,15 +4,10 @@
   "scopeName": "source.cforgev",
   "patterns": [
     { "include": "#comments" },
-    { "include": "#externPython" },
-    { "include": "#externCpp" },
-    { "include": "#externJavaScript" },
-    { "include": "#externJava" },
     { "include": "#strings" },
     { "include": "#numbers" },
     { "include": "#types" },
     { "include": "#keywords" },
-    { "include": "#compatibility" },
     { "include": "#functions" }
   ],
   "repository": {
@@ -42,18 +37,6 @@
     },
     "types": {
       "patterns": [{ "name": "storage.type.cforgev", "match": "\\b(numero|texto|booleano|lista|mapa|tupla|conjunto|opcion|nulo|cualquiera)\\b" }]
-    },
-    "externPython": {
-      "patterns": [{ "name": "meta.embedded.block.python.cforgev", "begin": "\\bextern\\s*\\(\\s*\"python\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.python" }]
-    },
-    "externCpp": {
-      "patterns": [{ "name": "meta.embedded.block.cpp.cforgev", "begin": "\\bextern\\s*\\(\\s*\"cpp\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.cpp" }]
-    },
-    "externJavaScript": {
-      "patterns": [{ "name": "meta.embedded.block.javascript.cforgev", "begin": "\\bextern\\s*\\(\\s*\"(?:javascript|typescript)\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.js" }]
-    },
-    "externJava": {
-      "patterns": [{ "name": "meta.embedded.block.java.cforgev", "begin": "\\bextern\\s*\\(\\s*\"java\"\\s*\\)\\s*\\{", "beginCaptures": { "0": { "name": "keyword.control.import.cforgev" } }, "end": "\\}", "contentName": "source.java" }]
     },
     "keywords": {
       "patterns": [
@@ -87,16 +70,8 @@
         },
         {
           "name": "keyword.import.cforgev",
-          "match": "\\b(usar|import|pip|nuget|npm|maven)\\b"
+          "match": "\\b(usar|importar)\\b"
         }
-      ]
-    },
-    "compatibility": {
-      "patterns": [
-        { "name": "meta.function-call.compatibility.javascript.cforgev", "match": "\\b(console)(\\.)(log)(?=\\s*\\()", "captures": { "1": { "name": "support.class.console.cforgev" }, "2": { "name": "punctuation.accessor.cforgev" }, "3": { "name": "support.function.log.cforgev" } } },
-        { "name": "meta.function-call.compatibility.java.cforgev", "match": "\\b(System)(\\.)(out)(\\.)(println)(?=\\s*\\()", "captures": { "1": { "name": "support.class.system.cforgev" }, "2": { "name": "punctuation.accessor.cforgev" }, "3": { "name": "support.variable.out.cforgev" }, "4": { "name": "punctuation.accessor.cforgev" }, "5": { "name": "support.function.println.cforgev" } } },
-        { "name": "meta.output.compatibility.cpp.cforgev", "match": "\\b(?:std::)?(?:cout|endl)\\b", "captures": { "0": { "name": "support.function.output.cpp.cforgev" } } },
-        { "name": "meta.method.compatibility.collection.cforgev", "match": "(\\.)(append|push|length|len|agregar|pop|top)\\b", "captures": { "1": { "name": "punctuation.accessor.cforgev" }, "2": { "name": "support.function.collection.cforgev" } } }
       ]
     },
     "functions": {
@@ -136,7 +111,7 @@
         },
         {
           "name": "support.function.interop.cforgev",
-          "match": "\\b(use_python|use_csharp|use_native|use_cpp|use_javascript|use_typescript|use_java|cluster_estado|jit_estado|jit_caliente|matrix|array_fast|forge_hash|forge_bench)\\b"
+          "match": "\\b(cluster_estado|jit_estado|jit_caliente|matrix|array_fast|forge_hash|forge_bench)\\b"
         }
       ]
     }

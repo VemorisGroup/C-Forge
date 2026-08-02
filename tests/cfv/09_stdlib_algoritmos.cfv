@@ -1,0 +1,12 @@
+importar "algoritmos"
+
+sea comparar = funcion(a, b) {
+    retornar a - b
+}
+
+sea ordenados = mergesort([9, 1, 5, 3], comparar)
+afirmar(longitud(ordenados) == 4, "mergesort debe conservar los elementos")
+afirmar(ordenados[0] == 1, "mergesort debe ordenar el primer elemento")
+afirmar(ordenados[3] == 9, "mergesort debe ordenar el último elemento")
+
+mostrar("[OK] stdlib algoritmos")

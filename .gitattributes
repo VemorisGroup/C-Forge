@@ -16,17 +16,10 @@ outputs/cforge-master binary linguist-vendored=true
 # GitHub Linguist — C-Forge es el lenguaje del repo
 *.cfv linguist-language=C-Forge linguist-detectable=true
 
-# Launcher shell — no contar
-cforge linguist-vendored=true
-
-# Ejemplos con código embebido de otros lenguajes — no contar
-ejemplos/arquitectura_08.cfv linguist-vendored=true
-ejemplos/arquitectura_09.cfv linguist-vendored=true
-ejemplos/arquitectura_10.cfv linguist-vendored=true
-ejemplos/calculadora_app.cfv linguist-vendored=true
-ejemplos/extern_cluster_10.cfv linguist-vendored=true
-ejemplos/interop_colecciones_16.cfv linguist-vendored=true
-main.cfv linguist-vendored=true
+# Todo archivo .cfv activo representa código fuente C-Forge.
+# GitHub mostrará el nombre C-Forge cuando github-linguist acepte oficialmente
+# el lenguaje en su catálogo; hasta entonces puede agruparlo como "Other".
+*.cfv linguist-vendored=false linguist-generated=false linguist-detectable=true
 
 # Todo lo demás no cuenta en las estadísticas
 *.cpp linguist-generated=true
@@ -38,3 +31,12 @@ main.cfv linguist-vendored=true
 *.cs  linguist-vendored=true
 *.c   linguist-vendored=true
 *.rb  linguist-vendored=true
+*.py  linguist-vendored=true
+*.java linguist-vendored=true
+*.kt  linguist-vendored=true
+*.kts linguist-vendored=true
+*.swift linguist-vendored=true
+*.ts  linguist-vendored=true
+*.html linguist-vendored=true
+packaging/** linguist-vendored=true
+herramientas/** linguist-vendored=true

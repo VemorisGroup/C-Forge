@@ -1,59 +1,42 @@
 # Distribución de C-Forge
 
-## Estado real de los comandos
+C-Forge se distribuye como motor nativo más la biblioteca estándar `.cfv`. Los
+paquetes actuales no deben incluir Python, JVM, .NET ni Node.
 
-La automatización del repositorio genera archivos portables para macOS, Linux y
-Windows, además de un paquete `.deb`. Publicar un tag como `v1.4.1` crea una
-GitHub Release mediante `.github/workflows/release.yml`.
+## Construcción local
 
-### Homebrew
-
-La fórmula se genera desde `packaging/homebrew/Formula/cforge.rb.template` con
-el SHA-256 del código fuente del tag y se adjunta a cada lanzamiento.
-Debe publicarse en un repositorio llamado `VemorisGroup/homebrew-cforgev`.
-Desde ese momento funcionará el comando oficial del tap:
-
-```bash
-brew install VemorisGroup/cforgev/cforge
+```sh
+make clean
+make build
+make check
+make test
+make install-check
 ```
 
-Después de instalar el tap, también funcionará `brew install cforge`. El comando
-`cforgev` se conserva como alias histórico dentro del paquete. Para instalar sin
-tap, Homebrew debe aceptar la fórmula en
-`homebrew/core`; la licencia actual propietaria no cumple sus requisitos de
-software libre.
+## Homebrew
 
-### Windows
+La plantilla `packaging/homebrew/Formula/cforge.rb.template` compila
+`cforgev.cpp`, instala `cforge` y copia `stdlib/*.cfv`. La fórmula publicada
+debe reemplazar `VERSION` y `SHA256` con los valores del tag.
 
-El lanzamiento genera un ejecutable autónomo con PyInstaller y también un ZIP
-portable para desarrollo. Después se completa el manifiesto con:
+## Debian/Ubuntu
 
-```bash
-python packaging/winget/generate.py 1.4.1 dist/cforge-1.4.1-windows-x64.exe
+En un anfitrión Debian con `g++` y `dpkg-deb`:
+
+```sh
+packaging/debian/build-deb.sh 2.6.0 amd64
 ```
 
-El manifiesto resultante debe enviarse a `microsoft/winget-pkgs`. Cuando sea
-aceptado, la instalación será:
+El paquete resultante contiene el binario y la biblioteca estándar; no declara
+una dependencia de Python.
 
-```powershell
-winget install VemorisGroup.CForgev
-```
+## Windows
 
-### Debian y Ubuntu
+GitHub Actions compila `cforge.exe` con MSVC y publica el ejecutable al crear un
+tag. El manifiesto WinGet es una plantilla y no debe enviarse hasta confirmar el
+hash del artefacto y una ejecución física limpia en Windows x64.
 
-Cada tag genera `cforgev_VERSION_all.deb`, instalable con:
+## Límite de soporte
 
-```bash
-sudo apt install ./cforgev_VERSION_all.deb
-```
-
-Para obtener `sudo apt install cforgev`, Vemoris Group debe alojar y firmar un
-repositorio APT y el usuario debe agregarlo una vez. Entrar a los repositorios
-oficiales de Debian/Ubuntu requiere revisión independiente de esas comunidades.
-
-## Compatibilidad
-
-El intérprete portable requiere Python 3.9 o posterior. Node.js, JDK, .NET y un
-compilador C++ son dependencias opcionales para sus respectivos puentes. El
-backend nativo C++ todavía necesita adaptación de sockets para Windows; la
-ejecución interpretada sí se prueba en Windows.
+Que exista un flujo de empaquetado no equivale a soporte certificado. Consulta
+`docs/PLATFORM-VALIDATION.md` para el estado real de cada plataforma.

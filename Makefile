@@ -1,11 +1,14 @@
 # ── C-Forge Makefile ───────────────────────────────────────────────────────────
-# Compila e instala el intérprete cforgev y las herramientas de desarrollo
+# Compila e instala el motor autónomo de C-Forge.
+# C++ se usa únicamente como bootstrap del ejecutable nativo. La biblioteca
+# estándar, las pruebas y los programas distribuidos usan archivos .cfv.
 
 CXX      ?= g++
-CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -Wno-unused-parameter
+CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -Wno-unused-parameter \
+            -Wno-unused-variable -Wno-unused-function
 INCLUDES := -I. -I./include
 LIBS     := -lpthread -ldl
-TARGET   := cforgev
+TARGET   := cforge
 SRC      := cforgev.cpp
 PREFIX   ?= /usr/local
 
@@ -29,15 +32,9 @@ else
     endif
 endif
 
-# Node.js headers (opcional para bindings)
-NODE_INC := $(shell node -e "require('path').join(require('os').homedir(),'include')" 2>/dev/null || echo /usr/include/node)
-ifneq ($(wildcard $(NODE_INC)/node_version.h),)
-    INCLUDES += -I$(NODE_INC)
-endif
-
 # ── Targets ────────────────────────────────────────────────────────────────────
 
-.PHONY: all build debug release install uninstall tools test clean help
+.PHONY: all build debug release install uninstall test check backend-check install-check clean help
 
 ## Compilar (default)
 all: build
@@ -65,20 +62,12 @@ sdl: CXXFLAGS += -DCFV_WITH_SDL2
 sdl: LIBS     += -lSDL2 -lSDL2_ttf -lSDL2_mixer -lSDL2_image
 sdl: $(TARGET)
 
-## Compilar con soporte Python (para stdlib/ffi.cfv)
-python: CXXFLAGS += $(shell python3-config --includes) -DCFV_WITH_PYTHON
-python: LIBS     += $(shell python3-config --ldflags --libs)
-python: $(TARGET)
-
 ## Instalar en el sistema
 install: build
-	@echo "  INSTALL  $(PREFIX)/bin/$(TARGET)"
+	@echo "  INSTALL  $(PREFIX)/bin/cforge"
 	@install -d $(PREFIX)/bin
-	@install -m 755 $(TARGET) $(PREFIX)/bin/$(TARGET)
 	@install -m 755 $(TARGET) $(PREFIX)/bin/cforge
-	@echo "  INSTALL  tools → $(PREFIX)/lib/cforge/tools/"
-	@install -d $(PREFIX)/lib/cforge/tools
-	@install -m 644 tools/*.py $(PREFIX)/lib/cforge/tools/
+	@ln -sf cforge $(PREFIX)/bin/cforgev
 	@echo "  INSTALL  stdlib → $(PREFIX)/lib/cforge/stdlib/"
 	@install -d $(PREFIX)/lib/cforge/stdlib
 	@install -m 644 stdlib/*.cfv $(PREFIX)/lib/cforge/stdlib/
@@ -97,31 +86,57 @@ uninstall:
 	@rm -rf $(PREFIX)/share/cforge
 	@echo "  ✓ C-Forge desinstalado"
 
-## Instalar herramientas Python como comandos (cfmt, cflint, etc.)
-tools:
-	@echo "  INSTALL  herramientas Python"
-	@for tool in cfmt cflint cftest cfbuild cfdoc cfwatch cforgec; do \
-	    echo "#!/usr/bin/env python3\nimport sys; sys.argv[0]='$$tool'\nexec(open('tools/$$tool.py').read())" \
-	    > $(PREFIX)/bin/$$tool && chmod +x $(PREFIX)/bin/$$tool; \
-	    echo "  ✓ $$tool → $(PREFIX)/bin/$$tool"; \
+## Verificar todos los programas de prueba escritos en C-Forge
+check: build
+	@set -e; \
+	for file in stdlib/*.cfv; do \
+		echo "  CHECK $$file"; \
+		CFORGE_STDLIB=./stdlib ./$(TARGET) check "$$file"; \
+	done; \
+	for file in tests/cfv/*.cfv; do \
+		echo "  CHECK $$file"; \
+		CFORGE_STDLIB=./stdlib ./$(TARGET) check "$$file"; \
+	done; \
+	for file in main.cfv ejemplos/*.cfv benchmarks/*.cfv bootstrap/direct/*.cfv; do \
+		echo "  CHECK $$file"; \
+		CFORGE_STDLIB=./stdlib ./$(TARGET) check "$$file"; \
 	done
-	@echo "#!/usr/bin/env python3\nimport sys; exec(open('tools/cforge_cli.py').read())" \
-	    > $(PREFIX)/bin/cforge && chmod +x $(PREFIX)/bin/cforge
-	@echo "  ✓ cforge CLI → $(PREFIX)/bin/cforge"
 
-## Ejecutar tests básicos
+## Ejecutar pruebas nativas .cfv
 test: build
-	@echo "  TEST  hola.cfv"
-	@echo 'mostrar("Hola C-Forge!")' > /tmp/test_cf.cfv
-	@CFORGE_STDLIB=./stdlib ./$(TARGET) /tmp/test_cf.cfv
-	@echo "  TEST  importar stdlib"
-	@echo 'importar "matematica"\nmostrar(piso(2.9))' > /tmp/test_imp.cfv
-	@CFORGE_STDLIB=./stdlib ./$(TARGET) /tmp/test_imp.cfv
-	@echo "  TEST  cfmt"
-	@python3 tools/cfmt.py /tmp/test_cf.cfv --check 2>/dev/null || true
-	@echo "  TEST  cflint"
-	@python3 tools/cflint.py /tmp/test_cf.cfv 2>/dev/null || true
-	@echo "  ✓ Tests básicos OK"
+	@set -e; total=0; \
+	for file in tests/cfv/*.cfv; do \
+		echo "  TEST  $$file"; \
+		CFORGE_STDLIB=./stdlib ./$(TARGET) test "$$file"; \
+		total=$$((total + 1)); \
+	done; \
+	echo "  ✓ $$total archivos de prueba C-Forge aprobados"
+
+## Verificar emisores binarios directos y ejecutar el formato anfitrión
+backend-check: build
+	@set -e; fixture="$$(pwd)/bootstrap/fixtures/machine_hello_b6.cfv"; \
+	./$(TARGET) bootstrap/direct/cforge_macho_arm64.cfv "$$fixture" -o /tmp/cforge-check-macho; \
+	./$(TARGET) bootstrap/direct/cforge_elf_x64.cfv "$$fixture" -o /tmp/cforge-check-elf; \
+	./$(TARGET) bootstrap/direct/cforge_pe_x64.cfv "$$fixture" -o /tmp/cforge-check.exe; \
+	file /tmp/cforge-check-macho | grep -q "Mach-O 64-bit executable arm64"; \
+	file /tmp/cforge-check-elf | grep -q "ELF 64-bit LSB executable, x86-64"; \
+	file /tmp/cforge-check.exe | grep -q "PE32+ executable.*x86-64"; \
+	if [ "$(UNAME)" = "Darwin" ] && [ "$(ARCH)" = "arm64" ]; then \
+		test "$$(/tmp/cforge-check-macho)" = "Hola maquina C-Forge"; \
+	elif [ "$(UNAME)" = "Linux" ] && [ "$(ARCH)" = "x86_64" ]; then \
+		test "$$(/tmp/cforge-check-elf)" = "Hola maquina C-Forge"; \
+	fi; \
+	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 verificados"
+
+## Probar una instalación aislada sin modificar el sistema
+install-check: build
+	@set -e; prefix=/tmp/cforge-install-check; \
+	rm -rf "$$prefix"; \
+	$(MAKE) install PREFIX="$$prefix" >/dev/null; \
+	test "$$($$prefix/bin/cforge --version)" = "C-Forge 2.6.0-dev"; \
+	CFORGE_STDLIB="$$prefix/lib/cforge/stdlib" \
+		"$$prefix/bin/cforge" tests/cfv/01_nucleo.cfv >/dev/null; \
+	echo "  ✓ instalación aislada verificada en $$prefix"
 
 ## Benchmark rápido
 bench: build
@@ -132,7 +147,7 @@ bench: build
 
 ## Limpiar artefactos de compilación
 clean:
-	@rm -f $(TARGET) *.o
+	@rm -f cforge cforgev *.o
 	@echo "  CLEAN  artefactos eliminados"
 
 ## Ayuda
@@ -140,15 +155,16 @@ help:
 	@echo ""
 	@echo "  C-Forge Makefile"
 	@echo "  ──────────────────────────────────────────"
-	@echo "  make              Compilar cforgev"
+	@echo "  make              Compilar cforge"
 	@echo "  make debug        Compilar en modo debug"
 	@echo "  make release      Compilar con O3 + march=native"
 	@echo "  make sdl          Compilar con soporte SDL2"
-	@echo "  make python       Compilar con soporte Python FFI"
 	@echo "  make install      Instalar en $(PREFIX)"
-	@echo "  make tools        Instalar herramientas Python"
 	@echo "  make uninstall    Desinstalar"
+	@echo "  make check        Verificar sintaxis de pruebas .cfv"
 	@echo "  make test         Ejecutar tests básicos"
+	@echo "  make backend-check Verificar Mach-O, ELF y PE"
+	@echo "  make install-check Probar instalación aislada"
 	@echo "  make bench        Benchmark fib(30)"
 	@echo "  make clean        Limpiar artefactos"
 	@echo ""

@@ -2,9 +2,9 @@
 
 ## Versiones
 
-`1.6.0-developer-preview` recibe correcciones durante su desarrollo, pero no posee
+`2.6.0-dev` recibe correcciones durante su desarrollo, pero no posee
 todavía certificación para entornos críticos. No ejecute scripts `.cfv` desconocidos:
-los puentes `extern`, procesos y red pueden acceder a capacidades del sistema.
+los procesos, archivos y la red pueden acceder a capacidades del sistema.
 
 ## Informar vulnerabilidades
 
@@ -15,8 +15,8 @@ cuando exista una versión reparada.
 
 ## Controles automatizados
 
-- CodeQL para Python y C/C++ en cada cambio y semanalmente.
-- Auditoría de dependencias Python con `pip-audit`.
+- CodeQL para C++ en cada cambio y semanalmente.
+- Compilación sin avisos y pruebas nativas `.cfv`.
 - Límites de tamaño, HTTPS y SHA-256 para paquetes.
 - Rechazo de enlaces y rutas ascendentes al extraer paquetes.
 - Suite multiplataforma en macOS, Ubuntu y Windows.

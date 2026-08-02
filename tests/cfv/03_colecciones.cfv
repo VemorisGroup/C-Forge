@@ -1,0 +1,12 @@
+// Prueba de listas, mapas e indexación.
+sea numeros = [2, 4, 6]
+agregar(numeros, 8)
+
+afirmar(longitud(numeros) == 4, "la lista debe contener cuatro elementos")
+afirmar(numeros[0] == 2, "la indexación inicial debe funcionar")
+afirmar(numeros[3] == 8, "agregar debe conservar el nuevo elemento")
+
+sea persona = {"nombre": "Javier", "proyecto": "C-Forge"}
+afirmar(persona["proyecto"] == "C-Forge", "el acceso a mapas debe funcionar")
+
+mostrar("[OK] colecciones")

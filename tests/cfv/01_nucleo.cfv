@@ -1,0 +1,14 @@
+// Prueba del núcleo C-Forge: valores, operadores, condiciones y ciclos.
+sea acumulado = 0
+sea i = 1
+
+mientras (i <= 10) {
+    acumulado = acumulado + i
+    i = i + 1
+}
+
+afirmar(acumulado == 55, "la suma de 1 a 10 debe ser 55")
+afirmar(7 * 6 == 42, "la multiplicación debe producir 42")
+afirmar(20 / 4 == 5, "la división debe producir 5")
+
+mostrar("[OK] núcleo")

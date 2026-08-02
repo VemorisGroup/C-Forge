@@ -1,29 +1,19 @@
 # Matriz de validación de plataformas
 
-C-Forge solo considera una plataforma soportada cuando existe un informe
-reproducible con versión del sistema, arquitectura, compilador, runtimes,
-instalación limpia, desinstalación, suite, fuzzing, paridad y FFI.
+| Sistema | Arquitectura | Gate declarado | Prueba física | Estado |
+|---|---:|---:|---:|---|
+| macOS | ARM64 | sí | motor, instalación y Mach-O literal comprobados localmente | preview verificada |
+| macOS | x64 | sí | pendiente | no validada |
+| Linux | x64 | sí | pendiente de confirmar CI verde del commit | parcial |
+| Linux | ARM64 | no | pendiente | no validada |
+| Windows | x64 | sí | pendiente de confirmar CI verde del commit | parcial |
+| Windows | ARM64 | no | pendiente | no validada |
 
-| Sistema | Arquitectura | CI | Prueba física | FFI seis runtimes | Estado |
-|---|---:|---:|---:|---:|---|
-| macOS | ARM64 | configurada | núcleo local comprobado | incompleta | experimental |
-| macOS | x64 | configurada | pendiente | pendiente | no validada |
-| Linux | ARM64 | pendiente | pendiente | pendiente | no validada |
-| Linux | x64 | configurada | pendiente | pendiente | no validada |
-| Windows | ARM64 | pendiente | pendiente | pendiente | no validada |
-| Windows | x64 | configurada | pendiente | pendiente | no validada |
+“Gate declarado” significa que existe un trabajo en GitHub Actions; no asegura
+por sí mismo que esté verde. Una plataforma solo se anunciará como soportada
+después de conservar logs de instalación limpia, ejecución, pruebas,
+desinstalación y hashes de sus artefactos.
 
-“CI configurada” no significa “CI verde” ni sustituye una prueba física.
-
-## Evidencia mínima por plataforma
-
-1. Instalación en una máquina o VM limpia.
-2. `cforge --version`, `check`, `vm`, `bytecode` y `parity`.
-3. Compilación LLVM y ejecución del binario.
-4. Puentes C/C++, Python, JVM, .NET, Node y TypeScript.
-5. Suite completa y al menos 20.000 casos de fuzzing.
-6. Paquete reproducible, SHA-256 y firma verificada.
-7. Desinstalación sin archivos huérfanos ni modificación inesperada del sistema.
-
-Los resultados deben adjuntar logs, hashes y fecha. Una fila solo pasa a
-“soportada” después de revisar esa evidencia.
+El backend PE se inspecciona por formato en macOS, pero aún no se ha ejecutado
+físicamente en Windows durante esta revisión. Lo mismo aplica al ELF fuera de
+un anfitrión Linux.

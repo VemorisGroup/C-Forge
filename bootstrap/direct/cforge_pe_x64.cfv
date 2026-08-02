@@ -257,16 +257,16 @@ funcion emitir_pe_x64(mensaje_sin_salto: texto): lista {
 
 sea argumentos_pe: lista = argumentos_programa()
 afirmar(
-    longitud(argumentos_pe) == 4,
-    "uso: cforge-pe-x64 archivo.cfv -o programa.exe"
+    longitud(argumentos_pe) == 3,
+    "uso: cforge cforge_pe_x64.cfv archivo.cfv -o programa.exe"
 )
-afirmar(argumentos_pe[2] == "-o", "se esperaba -o")
+afirmar(argumentos_pe[1] == "-o", "se esperaba -o")
 
-sea fuente_pe: texto = leer_archivo(argumentos_pe[1])
+sea fuente_pe: texto = leer_archivo(argumentos_pe[0])
 sea mensaje_pe: texto = primer_literal_pe(fuente_pe)
 sea ejecutable_pe: lista = emitir_pe_x64(mensaje_pe)
 afirmar(
-    escribir_bytes(argumentos_pe[3], ejecutable_pe),
+    escribir_bytes(argumentos_pe[2], ejecutable_pe),
     "no se pudo escribir PE x64"
 )
-mostrar("C-Forge emitió PE32+ x86-64: " + argumentos_pe[3])
+mostrar("C-Forge emitió PE32+ x86-64: " + argumentos_pe[2])

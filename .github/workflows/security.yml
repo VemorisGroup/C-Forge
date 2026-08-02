@@ -21,7 +21,7 @@ jobs:
       - name: Build para CodeQL
         run: |
           sudo apt-get update -qq && sudo apt-get install -y clang
-          clang++ -std=c++17 -O0 -Iinclude cforgev.cpp -o cforgev_codeql
+          clang++ -std=c++20 -O0 -Iinclude cforgev.cpp -o cforge_codeql
       - uses: github/codeql-action/analyze@v3
 
   fuzz-smoke:
@@ -37,10 +37,10 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y clang
 
-      - name: Bootstrap + compilar
+      - name: Compilar motor nativo
         run: |
-          clang++ -std=c++17 -O2 -Iinclude cforgev.cpp -o cforgev_bootstrap
-          ./cforgev_bootstrap compilador_nativo.cfv cforgev.cfv cforgev_test
+          make clean
+          make build CXX=clang++
 
       - name: Fuzz smoke — entradas inválidas no crashean
         shell: bash
@@ -54,7 +54,7 @@ jobs:
             '@@@@' \
             '' ; do
             echo "$prog" > /tmp/fuzz_case.cfv
-            ./cforgev_test /tmp/fuzz_case.cfv 2>/dev/null || true
+            ./cforge /tmp/fuzz_case.cfv 2>/dev/null || true
           done
           echo 'mostrar("fuzz OK")' > /tmp/fuzz_valid.cfv
-          ./cforgev_test /tmp/fuzz_valid.cfv
+          ./cforge /tmp/fuzz_valid.cfv
