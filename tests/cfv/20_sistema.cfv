@@ -1,0 +1,9 @@
+sea info = sys_info()
+
+afirmar(longitud(info["sistema"]) > 0, "el nombre del sistema debe existir")
+afirmar(longitud(info["cpu"]) > 0, "la arquitectura debe existir")
+afirmar(info["nucleos"] >= 1, "debe existir al menos una CPU")
+afirmar(ruta_extension("programa.cfv") == ".cfv", "extensión de ruta incorrecta")
+afirmar(ruta_nombre("/tmp/programa.cfv") == "programa.cfv", "nombre de ruta incorrecto")
+
+mostrar("[OK] sistema")

@@ -31,22 +31,14 @@ referencias atómico, estado y checksum FNV-1a.
 - El mutex de asignación es `PTHREAD_PROCESS_SHARED` en macOS/Linux y un mutex
   nombrado en Windows.
 - El payload se verifica con checksum antes de entregarlo al adaptador.
-- La Arena transporta bytes. Cada runtime crea sus propios wrappers
-  (`memoryview`, `ByteBuffer`, `Span<byte>` o vista equivalente).
+- La Arena transporta bytes y expone vistas validadas mediante offsets relativos.
 
-## Catálogo declarativo
+## Uso dentro de C-Forge
 
-| Prefijo C-Forge | Motor | Configuración del adaptador |
-|---|---|---|
-| `ia_` | Python | `CFORGE_IA_MODULE` |
-| `ui_` | Java | `CFORGE_UI_ADAPTER` |
-| `web_` | JavaScript/Node | `CFORGE_WEB_MODULE` |
-
-El catálogo es deliberadamente determinista: no inspecciona el contenido de una
-función ni envía código arbitrario a un motor por heurísticas. Las funciones
-`file_read`, `json_parse` y `sys_fetch` estampan automáticamente su resultado en
-la Arena del ejecutable nativo. `forge_arena_estado()` permite inspeccionar sus
-contadores y últimos offsets durante desarrollo.
+La Arena es una primitiva interna del runtime para buffers compartidos de
+C-Forge. Los antiguos adaptadores a runtimes extranjeros fueron retirados y no
+forman parte de ABI 1.0. Ninguna función se enruta por nombre hacia otro
+lenguaje.
 
 ## Estado de ABI 1.0
 

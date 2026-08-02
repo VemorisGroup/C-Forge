@@ -1,7 +1,6 @@
 # C-Forge Language
 
-Soporte oficial de lenguaje para archivos `.cfv` de **C-Forge**, un proyecto
-experimental de Vemoris Group.
+Soporte oficial de lenguaje para archivos `.cfv` de **C-Forge 2.6 estable**.
 
 ## Funciones
 
@@ -11,10 +10,9 @@ experimental de Vemoris Group.
 - Resaltado de la sintaxis propia `mostrar`, `agregar` y `longitud`.
 - Comentarios de línea mediante `//`.
 - Cierre automático de llaves, corchetes, paréntesis y comillas.
-- Cliente LSP integrado sin dependencias externas: diagnósticos, hover tipado,
-  autocompletado, definición/referencias entre archivos, renombrado y formato.
-- Depuración DAP con breakpoints normales, condicionales, por cantidad de
-  impactos y logpoints; inspección segura de objetos y colecciones.
+- Comprobación mediante el comando estable `cforge check`.
+- Ejecución del archivo activo mediante el comando estable `cforge`.
+- Autocompletado básico de palabras reservadas.
 
 ## Ejemplo
 
@@ -46,7 +44,7 @@ cforge programa.cfv
 
 ## Estado
 
-Versión `1.6.0`, publicada como Preview. C-Forge y esta extensión continúan en
-desarrollo experimental.
+Versión `2.6.0`, alineada con el núcleo estable. LSP y DAP permanecen fuera de
+esta versión hasta disponer de implementación y pruebas públicas.
 
 Copyright © 2026 Vemoris Group y Javier. Todos los derechos reservados.

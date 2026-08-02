@@ -1,0 +1,20 @@
+// Los errores recuperables no deben terminar el proceso.
+sea divisiones = 0
+sea indices = 0
+
+intentar {
+    sea imposible = 1 / 0
+} capturar (error) {
+    divisiones = divisiones + 1
+}
+
+intentar {
+    sea valor = [1, 2][99]
+} capturar (error) {
+    indices = indices + 1
+}
+
+afirmar(divisiones == 1, "la división por cero debe capturarse")
+afirmar(indices == 1, "el índice fuera de rango debe capturarse")
+
+mostrar("[OK] errores límite")

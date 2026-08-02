@@ -1,2 +1,0 @@
-importar "stdlib/io.cfv"
-mostrar("io ok")

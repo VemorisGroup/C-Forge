@@ -2,8 +2,8 @@
 
 ## Versiones
 
-`2.6.0-dev` recibe correcciones durante su desarrollo, pero no posee
-todavía certificación para entornos críticos. No ejecute scripts `.cfv` desconocidos:
+`2.6.x` es la rama estable mantenida y recibe correcciones de seguridad. No posee
+certificación regulatoria para entornos críticos. No ejecute scripts `.cfv` desconocidos:
 los procesos, archivos y la red pueden acceder a capacidades del sistema.
 
 ## Informar vulnerabilidades
@@ -16,7 +16,7 @@ cuando exista una versión reparada.
 ## Controles automatizados
 
 - CodeQL para C++ en cada cambio y semanalmente.
-- Compilación sin avisos y pruebas nativas `.cfv`.
+- Compilación sin avisos, pruebas nativas `.cfv`, ASan y UBSan.
 - Límites de tamaño, HTTPS y SHA-256 para paquetes.
 - Rechazo de enlaces y rutas ascendentes al extraer paquetes.
 - Suite multiplataforma en macOS, Ubuntu y Windows.

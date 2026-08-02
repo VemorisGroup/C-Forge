@@ -1,0 +1,12 @@
+// Texto, Unicode básico, Base64 y conversiones nativas.
+importar "base64"
+
+sea original = "C-Forge estable 2.6"
+sea codificado = base64_codificar(original)
+
+afirmar(longitud(codificado) > longitud(original), "Base64 debe producir contenido")
+afirmar(base64_decodificar(codificado) == original, "Base64 debe ser reversible")
+afirmar(url_decodificar(url_codificar("C Forge/2.6")) == "C Forge/2.6", "URL encoding debe ser reversible")
+afirmar(codigo_char("A") == 65, "el código de A debe ser 65")
+
+mostrar("[OK] texto y Base64")

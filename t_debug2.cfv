@@ -1,5 +1,0 @@
-funcion foo(y: numero): numero {
-    y = 5
-    retornar y
-}
-mostrar(a_texto(foo(3)))

@@ -10,6 +10,7 @@ make clean
 make build
 make check
 make test
+make release-check
 make install-check
 ```
 

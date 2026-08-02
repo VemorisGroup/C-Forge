@@ -1,2 +1,0 @@
-importar "stdlib/tipos.cfv"
-mostrar("tipos ok")

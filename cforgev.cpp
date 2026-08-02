@@ -39,7 +39,7 @@
 #include <sys/sysctl.h>
 #endif
 #endif
-// OpenSSL (opcional — compilar con -DCFV_WITH_OPENSSL -I/usr/include/node /usr/lib/.../libcrypto.so.3)
+// OpenSSL opcional para primitivas criptográficas nativas.
 #ifdef CFV_WITH_OPENSSL
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
@@ -96,13 +96,13 @@ using Value=ForgeValue;using Lista=std::shared_ptr<std::vector<ForgeValue>>;usin
 struct CfvDenseMatrix{size_t rows=0,columns=0;std::vector<double>values;};
 struct ForgeValue{std::variant<std::monostate,double,std::string,bool,Lista,Mapa,FastArray,DenseMatrix,Tupla,Conjunto>data;std::string origin="cforge";ForgeValue()=default;ForgeValue(double v):data(v){}ForgeValue(std::string v):data(std::move(v)){}ForgeValue(const char*v):data(std::string(v)){}ForgeValue(bool v):data(v){}ForgeValue(Lista v):data(std::move(v)){}ForgeValue(Mapa v):data(std::move(v)){}ForgeValue(FastArray v):data(std::move(v)){}ForgeValue(DenseMatrix v):data(std::move(v)){}ForgeValue(Tupla v):data(std::move(v)){}ForgeValue(Conjunto v):data(std::move(v)){}size_t index()const{return data.index();}};
 struct CfvTuple{std::vector<ForgeValue>values;};struct CfvSet{std::vector<ForgeValue>values;};
-static ForgeValue cfv_origin(ForgeValue value,std::string origin){value.origin=std::move(origin);return value;}
+[[maybe_unused]] static ForgeValue cfv_origin(ForgeValue value,std::string origin){value.origin=std::move(origin);return value;}
 enum CfvType{CFV_NULL=0,CFV_INTEGER=1,CFV_DECIMAL=2,CFV_TEXT=3,CFV_BOOLEAN=4,CFV_LIST=5,CFV_MAP=6,CFV_RECORD=7};
 using CfvReleaseFunction=void(*)(void*);
 struct CfvValue{int32_t type;int64_t integer;double decimal;const char* text;void*owner;CfvReleaseFunction release;};
 using CfvForeignFunction=int(*)(const CfvValue*,size_t,CfvValue*,char*,size_t);
 static constexpr uint32_t CFV_ABI_V2=0x00020000u;
-static constexpr uint64_t CFV_V2_BORROWED=0x00000001ull,CFV_V2_OWNED=0x00000002ull;
+static constexpr uint64_t CFV_V2_BORROWED=0x00000001ull; [[maybe_unused]] static constexpr uint64_t CFV_V2_OWNED=0x00000002ull;
 static constexpr uint32_t CFV_V2_MAX_DEPTH=64u;
 struct CfvValueV2{uint32_t struct_size;uint32_t type;uint64_t flags;uint64_t length;int64_t integer;double decimal;const void*data;void*owner;CfvReleaseFunction release;};
 struct CfvMapEntryV2{CfvValueV2 key;CfvValueV2 value;};
@@ -117,9 +117,9 @@ struct CfvCallFrame {
   ~CfvCallFrame() { if (!cfv_call_stack.empty()) cfv_call_stack.pop_back(); }
 };
 static std::mutex cfv_symbol_mutex;static std::map<std::string,ForgeValue*>cfv_symbols;
-static void cfv_share_symbol(const std::string&name,ForgeValue*value){std::lock_guard<std::mutex>lock(cfv_symbol_mutex);cfv_symbols[name]=value;}
-static ForgeValue cfv_symbol(const std::string&name){std::lock_guard<std::mutex>lock(cfv_symbol_mutex);auto found=cfv_symbols.find(name);if(found==cfv_symbols.end()||!found->second)throw std::runtime_error("símbolo global desconocido: "+name);return *found->second;}
-static ForgeValue cfv_symbol_snapshot(){std::lock_guard<std::mutex>lock(cfv_symbol_mutex);auto map=std::make_shared<std::map<std::string,ForgeValue>>();for(const auto&[name,value]:cfv_symbols)if(value)(*map)[name]=*value;return map;}
+[[maybe_unused]] static void cfv_share_symbol(const std::string&name,ForgeValue*value){std::lock_guard<std::mutex>lock(cfv_symbol_mutex);cfv_symbols[name]=value;}
+[[maybe_unused]] static ForgeValue cfv_symbol(const std::string&name){std::lock_guard<std::mutex>lock(cfv_symbol_mutex);auto found=cfv_symbols.find(name);if(found==cfv_symbols.end()||!found->second)throw std::runtime_error("símbolo global desconocido: "+name);return *found->second;}
+[[maybe_unused]] static ForgeValue cfv_symbol_snapshot(){std::lock_guard<std::mutex>lock(cfv_symbol_mutex);auto map=std::make_shared<std::map<std::string,ForgeValue>>();for(const auto&[name,value]:cfv_symbols)if(value)(*map)[name]=*value;return map;}
 #ifdef _WIN32
 extern "C" __declspec(dllexport) int cfv_register_function(const char*name,CfvForeignFunction fn){if(!name||!fn)return 1;cfv_registry()[name]=fn;return 0;}
 extern "C" __declspec(dllexport) int cfv_register_function_v2(const char*name,CfvForeignFunctionV2 fn){if(!name||!fn)return 1;cfv_registry_v2()[name]=fn;return 0;}
@@ -128,21 +128,21 @@ extern "C" __attribute__((visibility("default"))) int cfv_register_function(cons
 extern "C" __attribute__((visibility("default"))) int cfv_register_function_v2(const char*name,CfvForeignFunctionV2 fn){if(!name||!fn)return 1;cfv_registry_v2()[name]=fn;return 0;}
 #endif
 static double numero(const Value& v) { if (auto p=std::get_if<double>(&v.data)) return *p; throw std::runtime_error("se esperaba un número"); }
-static bool verdad(const Value& v) { if (auto p=std::get_if<bool>(&v.data)) return *p; throw std::runtime_error("se esperaba verdadero o falso"); }
-static Value suma(const Value&a,const Value&b){ if(a.index()==1&&b.index()==1)return numero(a)+numero(b); if(a.index()==2&&b.index()==2)return std::get<std::string>(a.data)+std::get<std::string>(b.data); throw std::runtime_error("'+' requiere dos números o dos textos"); }
-static Value resta(const Value&a,const Value&b){return numero(a)-numero(b);} static Value multiplica(const Value&a,const Value&b){return numero(a)*numero(b);}
-static Value divide(const Value&a,const Value&b){double d=numero(b);if(d==0)throw std::runtime_error("no se puede dividir por cero");return numero(a)/d;}
-static Value modulo(const Value&a,const Value&b){long long d=(long long)numero(b);if(d==0)throw std::runtime_error("no se puede dividir por cero en módulo");return (double)((long long)numero(a)%d);}
-static Value bit_and(const Value&a,const Value&b){return (double)((long long)numero(a)&(long long)numero(b));}
-static Value bit_or(const Value&a,const Value&b){return (double)((long long)numero(a)|(long long)numero(b));}
-static Value bit_xor(const Value&a,const Value&b){return (double)((long long)numero(a)^(long long)numero(b));}
-static Value bit_shl(const Value&a,const Value&b){int s=(int)numero(b);if(s<0)throw std::runtime_error("desplazamiento negativo no permitido");return (double)((long long)numero(a)<<s);}
-static Value bit_shr(const Value&a,const Value&b){int s=(int)numero(b);if(s<0)throw std::runtime_error("desplazamiento negativo no permitido");return (double)((long long)numero(a)>>s);}
-static Value compara(const Value&a,const Value&b,const std::string&o){if(o=="==")return a.data==b.data;if(o=="!=")return a.data!=b.data;if(a.index()==1&&b.index()==1){double x=numero(a),y=numero(b);if(o==">")return x>y;if(o==">=")return x>=y;if(o=="<")return x<y;return x<=y;}if(a.index()==2&&b.index()==2){auto x=std::get<std::string>(a.data),y=std::get<std::string>(b.data);if(o==">")return x>y;if(o==">=")return x>=y;if(o=="<")return x<y;return x<=y;}throw std::runtime_error("comparación entre tipos incompatibles");}
-static std::string cfv_number_text(double value){std::ostringstream stream;if(std::floor(value)==value)stream<<(long long)value;else stream<<value;return stream.str();}
-static std::string texto(const Value&v){if(v.index()==0)return "nulo";if(auto p=std::get_if<double>(&v.data))return cfv_number_text(*p);if(auto p=std::get_if<std::string>(&v.data))return *p;if(auto p=std::get_if<bool>(&v.data))return *p?"verdadero":"falso";if(auto p=std::get_if<Lista>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=", ";s+=texto((*p)->at(i));}return s+"]";}if(auto p=std::get_if<Mapa>(&v.data)){auto marker=(*p)->find("__opcion");if(marker!=(*p)->end()){auto has=(*p)->find("tiene");if(has==(*p)->end()||!verdad(has->second))return "ninguno";return "algunos("+texto((*p)->at("valor"))+")";}std::string s="{";bool first=true;for(auto&[k,x]:**p){if(!first)s+=", ";first=false;s+="\""+k+"\": "+texto(x);}return s+"}";}if(auto p=std::get_if<FastArray>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=", ";s+=cfv_number_text((*p)->at(i));}return s+"]";}if(auto p=std::get_if<DenseMatrix>(&v.data)){std::string s="[";for(size_t row=0;row<(*p)->rows;++row){if(row)s+=", ";s+="[";for(size_t column=0;column<(*p)->columns;++column){if(column)s+=", ";s+=cfv_number_text((*p)->values[row*(*p)->columns+column]);}s+="]";}return s+"]";}if(auto p=std::get_if<Tupla>(&v.data)){std::string s="(";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=", ";s+=texto((*p)->values[i]);}if((*p)->values.size()==1)s+=",";return s+")";}if(auto p=std::get_if<Conjunto>(&v.data)){std::string s="conjunto(";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=", ";s+=texto((*p)->values[i]);}return s+")";}throw std::runtime_error("ForgeValue desconocido");}
-static std::string cfv_json_escape(const std::string&input){std::string out="\"";for(unsigned char c:input){switch(c){case '\"':out+="\\\"";break;case '\\':out+="\\\\";break;case '\n':out+="\\n";break;case '\r':out+="\\r";break;case '\t':out+="\\t";break;default:if(c<32){char b[7];std::snprintf(b,sizeof(b),"\\u%04x",c);out+=b;}else out+=(char)c;}}return out+"\"";}
-static std::string cfv_canonical_json(const Value&v){if(v.index()==0)return "null";if(auto p=std::get_if<double>(&v.data))return cfv_number_text(*p);if(auto p=std::get_if<std::string>(&v.data))return cfv_json_escape(*p);if(auto p=std::get_if<bool>(&v.data))return *p?"true":"false";if(auto p=std::get_if<Lista>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=",";s+=cfv_canonical_json((*p)->at(i));}return s+"]";}if(auto p=std::get_if<Mapa>(&v.data)){std::string s="{";bool first=true;for(const auto&[k,x]:**p){if(!first)s+=",";first=false;s+=cfv_json_escape(k)+":"+cfv_canonical_json(x);}return s+"}";}if(auto p=std::get_if<Tupla>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=",";s+=cfv_canonical_json((*p)->values[i]);}return s+"]";}if(auto p=std::get_if<Conjunto>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=",";s+=cfv_canonical_json((*p)->values[i]);}return s+"]";}return cfv_json_escape(texto(v));}
+[[maybe_unused]] static bool verdad(const Value& v) { if (auto p=std::get_if<bool>(&v.data)) return *p; throw std::runtime_error("se esperaba verdadero o falso"); }
+[[maybe_unused]] static Value suma(const Value&a,const Value&b){ if(a.index()==1&&b.index()==1)return numero(a)+numero(b); if(a.index()==2&&b.index()==2)return std::get<std::string>(a.data)+std::get<std::string>(b.data); throw std::runtime_error("'+' requiere dos números o dos textos"); }
+[[maybe_unused]] static Value resta(const Value&a,const Value&b){return numero(a)-numero(b);} [[maybe_unused]] static Value multiplica(const Value&a,const Value&b){return numero(a)*numero(b);}
+[[maybe_unused]] static Value divide(const Value&a,const Value&b){double d=numero(b);if(d==0)throw std::runtime_error("no se puede dividir por cero");return numero(a)/d;}
+[[maybe_unused]] static Value modulo(const Value&a,const Value&b){long long d=(long long)numero(b);if(d==0)throw std::runtime_error("no se puede dividir por cero en módulo");return (double)((long long)numero(a)%d);}
+[[maybe_unused]] static Value bit_and(const Value&a,const Value&b){return (double)((long long)numero(a)&(long long)numero(b));}
+[[maybe_unused]] static Value bit_or(const Value&a,const Value&b){return (double)((long long)numero(a)|(long long)numero(b));}
+[[maybe_unused]] static Value bit_xor(const Value&a,const Value&b){return (double)((long long)numero(a)^(long long)numero(b));}
+[[maybe_unused]] static Value bit_shl(const Value&a,const Value&b){int s=(int)numero(b);if(s<0)throw std::runtime_error("desplazamiento negativo no permitido");return (double)((long long)numero(a)<<s);}
+[[maybe_unused]] static Value bit_shr(const Value&a,const Value&b){int s=(int)numero(b);if(s<0)throw std::runtime_error("desplazamiento negativo no permitido");return (double)((long long)numero(a)>>s);}
+[[maybe_unused]] static Value compara(const Value&a,const Value&b,const std::string&o){if(o=="==")return a.data==b.data;if(o=="!=")return a.data!=b.data;if(a.index()==1&&b.index()==1){double x=numero(a),y=numero(b);if(o==">")return x>y;if(o==">=")return x>=y;if(o=="<")return x<y;return x<=y;}if(a.index()==2&&b.index()==2){auto x=std::get<std::string>(a.data),y=std::get<std::string>(b.data);if(o==">")return x>y;if(o==">=")return x>=y;if(o=="<")return x<y;return x<=y;}throw std::runtime_error("comparación entre tipos incompatibles");}
+[[maybe_unused]] static std::string cfv_number_text(double value){std::ostringstream stream;if(std::floor(value)==value)stream<<(long long)value;else stream<<value;return stream.str();}
+[[maybe_unused]] static std::string texto(const Value&v){if(v.index()==0)return "nulo";if(auto p=std::get_if<double>(&v.data))return cfv_number_text(*p);if(auto p=std::get_if<std::string>(&v.data))return *p;if(auto p=std::get_if<bool>(&v.data))return *p?"verdadero":"falso";if(auto p=std::get_if<Lista>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=", ";s+=texto((*p)->at(i));}return s+"]";}if(auto p=std::get_if<Mapa>(&v.data)){auto marker=(*p)->find("__opcion");if(marker!=(*p)->end()){auto has=(*p)->find("tiene");if(has==(*p)->end()||!verdad(has->second))return "ninguno";return "algunos("+texto((*p)->at("valor"))+")";}std::string s="{";bool first=true;for(auto&[k,x]:**p){if(!first)s+=", ";first=false;s+="\""+k+"\": "+texto(x);}return s+"}";}if(auto p=std::get_if<FastArray>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=", ";s+=cfv_number_text((*p)->at(i));}return s+"]";}if(auto p=std::get_if<DenseMatrix>(&v.data)){std::string s="[";for(size_t row=0;row<(*p)->rows;++row){if(row)s+=", ";s+="[";for(size_t column=0;column<(*p)->columns;++column){if(column)s+=", ";s+=cfv_number_text((*p)->values[row*(*p)->columns+column]);}s+="]";}return s+"]";}if(auto p=std::get_if<Tupla>(&v.data)){std::string s="(";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=", ";s+=texto((*p)->values[i]);}if((*p)->values.size()==1)s+=",";return s+")";}if(auto p=std::get_if<Conjunto>(&v.data)){std::string s="conjunto(";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=", ";s+=texto((*p)->values[i]);}return s+")";}throw std::runtime_error("ForgeValue desconocido");}
+[[maybe_unused]] static std::string cfv_json_escape(const std::string&input){std::string out="\"";for(unsigned char c:input){switch(c){case '\"':out+="\\\"";break;case '\\':out+="\\\\";break;case '\n':out+="\\n";break;case '\r':out+="\\r";break;case '\t':out+="\\t";break;default:if(c<32){char b[7];std::snprintf(b,sizeof(b),"\\u%04x",c);out+=b;}else out+=(char)c;}}return out+"\"";}
+[[maybe_unused]] static std::string cfv_canonical_json(const Value&v){if(v.index()==0)return "null";if(auto p=std::get_if<double>(&v.data))return cfv_number_text(*p);if(auto p=std::get_if<std::string>(&v.data))return cfv_json_escape(*p);if(auto p=std::get_if<bool>(&v.data))return *p?"true":"false";if(auto p=std::get_if<Lista>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->size();++i){if(i)s+=",";s+=cfv_canonical_json((*p)->at(i));}return s+"]";}if(auto p=std::get_if<Mapa>(&v.data)){std::string s="{";bool first=true;for(const auto&[k,x]:**p){if(!first)s+=",";first=false;s+=cfv_json_escape(k)+":"+cfv_canonical_json(x);}return s+"}";}if(auto p=std::get_if<Tupla>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=",";s+=cfv_canonical_json((*p)->values[i]);}return s+"]";}if(auto p=std::get_if<Conjunto>(&v.data)){std::string s="[";for(size_t i=0;i<(*p)->values.size();++i){if(i)s+=",";s+=cfv_canonical_json((*p)->values[i]);}return s+"]";}return cfv_json_escape(texto(v));}
 struct CfvArenaRuntime{std::filesystem::path path;std::unique_ptr<cforge::arena::ForgeSharedArena>arena;std::mutex mutex;std::map<std::string,cforge::arena::Offset>latest;CfvArenaRuntime(){auto id=
 #ifdef _WIN32
 (unsigned long long)GetCurrentProcessId();
@@ -151,17 +151,17 @@ struct CfvArenaRuntime{std::filesystem::path path;std::unique_ptr<cforge::arena:
 #endif
 path=std::filesystem::temp_directory_path()/("cforge-arena-"+std::to_string(id)+".bin");arena=std::make_unique<cforge::arena::ForgeSharedArena>(cforge::arena::ForgeSharedArena::create(path,64ULL*1024ULL*1024ULL));}~CfvArenaRuntime(){std::error_code error;arena.reset();std::filesystem::remove(path,error);}};
 static CfvArenaRuntime&cfv_arena_runtime(){static CfvArenaRuntime runtime;return runtime;}
-static Value cfv_arena_stage(Value value,const std::string&connector){auto&runtime=cfv_arena_runtime();auto json=cfv_canonical_json(value);std::lock_guard<std::mutex>guard(runtime.mutex);runtime.latest[connector]=runtime.arena->store_text(cforge::arena::ValueType::Json,json);return value;}
-static Value cfv_arena_estado(){auto&runtime=cfv_arena_runtime();auto out=std::make_shared<std::map<std::string,Value>>();(*out)["ruta"]=runtime.path.string();(*out)["capacidad"]=(double)runtime.arena->capacity();(*out)["usado"]=(double)runtime.arena->used();(*out)["registros_vivos"]=(double)runtime.arena->live_records();auto offsets=std::make_shared<std::map<std::string,Value>>();{std::lock_guard<std::mutex>guard(runtime.mutex);for(const auto&[name,offset]:runtime.latest)(*offsets)[name]=(double)offset;}(*out)["offsets"]=offsets;return out;}
-static Value cfv_compat_append(Value collection,Value item){auto list=std::get_if<Lista>(&collection.data);if(!list)throw std::runtime_error("append/push requiere una lista");(*list)->push_back(std::move(item));cfv_arena_stage(collection,"compat_collection");return Value{};}
-static Value cfv_compat_length(Value collection){cfv_arena_stage(collection,"compat_length");if(auto p=std::get_if<std::string>(&collection.data))return (double)p->size();if(auto p=std::get_if<Lista>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<Mapa>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<FastArray>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<DenseMatrix>(&collection.data))return (double)(*p)->rows;if(auto p=std::get_if<Tupla>(&collection.data))return (double)(*p)->values.size();if(auto p=std::get_if<Conjunto>(&collection.data))return (double)(*p)->values.size();throw std::runtime_error("length/len requiere texto o colección");}
-static void mostrar(const Value&v){std::cout<<texto(v)<<'\n';}
-static Value cfv_leer(Value mensaje=Value{std::string("")}){if(mensaje.index()!=2)throw std::runtime_error("el mensaje de leer debe ser texto");std::cout<<std::get<std::string>(mensaje.data);std::string s;std::getline(std::cin,s);return s;}
-static Value cfv_a_numero(const Value&v){try{if(auto p=std::get_if<double>(&v.data))return *p;if(auto p=std::get_if<std::string>(&v.data))return std::stod(*p);}catch(...){ }throw std::runtime_error("no se puede convertir a número");}
-static Value cfv_a_texto(const Value&v){return texto(v);}
-static Value cfv_longitud(const Value&v){if(auto p=std::get_if<std::string>(&v.data))return (double)p->size();if(auto p=std::get_if<Lista>(&v.data))return (double)(*p)->size();if(auto p=std::get_if<Mapa>(&v.data)){auto& mp=*p;if(mp->count("__rango")){double fin=numero((*mp).at("fin"));double inicio=numero((*mp).at("inicio"));double paso=mp->count("paso")?numero((*mp).at("paso")):1.0;return (double)((long long)std::ceil((fin-inicio)/paso));}return (double)(*p)->size();}if(auto p=std::get_if<FastArray>(&v.data))return (double)(*p)->size();if(auto p=std::get_if<DenseMatrix>(&v.data))return (double)(*p)->rows;if(auto p=std::get_if<Tupla>(&v.data))return (double)(*p)->values.size();if(auto p=std::get_if<Conjunto>(&v.data))return (double)(*p)->values.size();throw std::runtime_error("longitud requiere una colección");}
-static Value cfv_agregar(Value lista,Value valor){if(auto p=std::get_if<Lista>(&lista.data)){(*p)->push_back(std::move(valor));return Value{};}throw std::runtime_error("agregar requiere una lista");}
-static Value cfv_sys_run(const Value&command){if(command.index()!=2)throw std::runtime_error("sys_run requiere un comando de texto");std::string shell=std::get<std::string>(command.data)+" 2>&1";
+[[maybe_unused]] static Value cfv_arena_stage(Value value,const std::string&connector){auto&runtime=cfv_arena_runtime();auto json=cfv_canonical_json(value);std::lock_guard<std::mutex>guard(runtime.mutex);runtime.latest[connector]=runtime.arena->store_text(cforge::arena::ValueType::Json,json);return value;}
+[[maybe_unused]] static Value cfv_arena_estado(){auto&runtime=cfv_arena_runtime();auto out=std::make_shared<std::map<std::string,Value>>();(*out)["ruta"]=runtime.path.string();(*out)["capacidad"]=(double)runtime.arena->capacity();(*out)["usado"]=(double)runtime.arena->used();(*out)["registros_vivos"]=(double)runtime.arena->live_records();auto offsets=std::make_shared<std::map<std::string,Value>>();{std::lock_guard<std::mutex>guard(runtime.mutex);for(const auto&[name,offset]:runtime.latest)(*offsets)[name]=(double)offset;}(*out)["offsets"]=offsets;return out;}
+[[maybe_unused]] static Value cfv_compat_append(Value collection,Value item){auto list=std::get_if<Lista>(&collection.data);if(!list)throw std::runtime_error("append/push requiere una lista");(*list)->push_back(std::move(item));cfv_arena_stage(collection,"compat_collection");return Value{};}
+[[maybe_unused]] static Value cfv_compat_length(Value collection){cfv_arena_stage(collection,"compat_length");if(auto p=std::get_if<std::string>(&collection.data))return (double)p->size();if(auto p=std::get_if<Lista>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<Mapa>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<FastArray>(&collection.data))return (double)(*p)->size();if(auto p=std::get_if<DenseMatrix>(&collection.data))return (double)(*p)->rows;if(auto p=std::get_if<Tupla>(&collection.data))return (double)(*p)->values.size();if(auto p=std::get_if<Conjunto>(&collection.data))return (double)(*p)->values.size();throw std::runtime_error("length/len requiere texto o colección");}
+[[maybe_unused]] static void mostrar(const Value&v){std::cout<<texto(v)<<'\n';}
+[[maybe_unused]] static Value cfv_leer(Value mensaje=Value{std::string("")}){if(mensaje.index()!=2)throw std::runtime_error("el mensaje de leer debe ser texto");std::cout<<std::get<std::string>(mensaje.data);std::string s;std::getline(std::cin,s);return s;}
+[[maybe_unused]] static Value cfv_a_numero(const Value&v){try{if(auto p=std::get_if<double>(&v.data))return *p;if(auto p=std::get_if<std::string>(&v.data))return std::stod(*p);}catch(...){ }throw std::runtime_error("no se puede convertir a número");}
+[[maybe_unused]] static Value cfv_a_texto(const Value&v){return texto(v);}
+[[maybe_unused]] static Value cfv_longitud(const Value&v){if(auto p=std::get_if<std::string>(&v.data))return (double)p->size();if(auto p=std::get_if<Lista>(&v.data))return (double)(*p)->size();if(auto p=std::get_if<Mapa>(&v.data)){auto& mp=*p;if(mp->count("__rango")){double fin=numero((*mp).at("fin"));double inicio=numero((*mp).at("inicio"));double paso=mp->count("paso")?numero((*mp).at("paso")):1.0;return (double)((long long)std::ceil((fin-inicio)/paso));}return (double)(*p)->size();}if(auto p=std::get_if<FastArray>(&v.data))return (double)(*p)->size();if(auto p=std::get_if<DenseMatrix>(&v.data))return (double)(*p)->rows;if(auto p=std::get_if<Tupla>(&v.data))return (double)(*p)->values.size();if(auto p=std::get_if<Conjunto>(&v.data))return (double)(*p)->values.size();throw std::runtime_error("longitud requiere una colección");}
+[[maybe_unused]] static Value cfv_agregar(Value lista,Value valor){if(auto p=std::get_if<Lista>(&lista.data)){(*p)->push_back(std::move(valor));return Value{};}throw std::runtime_error("agregar requiere una lista");}
+[[maybe_unused]] static Value cfv_sys_run(const Value&command){if(command.index()!=2)throw std::runtime_error("sys_run requiere un comando de texto");std::string shell=std::get<std::string>(command.data)+" 2>&1";
 #ifdef _WIN32
 FILE*pipe=_popen(shell.c_str(),"r");
 #else
@@ -174,7 +174,7 @@ int status=_pclose(pipe);
 int raw=pclose(pipe);int status=WIFEXITED(raw)?WEXITSTATUS(raw):raw;
 #endif
 auto result=std::make_shared<std::map<std::string,Value>>();(*result)["estado"]=(double)status;(*result)["salida"]=output;(*result)["error"]=std::string("");return result;}
-static Value cfv_sys_info(){uint64_t memory=0;
+[[maybe_unused]] static Value cfv_sys_info(){uint64_t memory=0;
 #ifdef __APPLE__
 size_t memory_size=sizeof(memory);sysctlbyname("hw.memsize",&memory,&memory_size,nullptr,0);
 #elif !defined(_WIN32)
@@ -200,7 +200,7 @@ static std::filesystem::path cfv_base_archivos;
 // ── Module resolution cache (prevents double-import) ─────────────────────────
 static std::unordered_set<std::string> cfv_imported_set;
 // ── Module search paths ───────────────────────────────────────────────────────
-static std::string cfv_resolver_modulo(const std::string& spec) {
+[[maybe_unused]] static std::string cfv_resolver_modulo(const std::string& spec) {
     // 1. Add .cfv extension if missing
     std::string name = spec;
     if (name.size() < 4 || name.substr(name.size()-4) != ".cfv") name += ".cfv";
@@ -227,16 +227,16 @@ static std::string cfv_resolver_modulo(const std::string& spec) {
     // Final: return original (will fail gracefully with readable error)
     return (cfv_base_archivos / name).string();
 }
-static std::string ruta_archivo(const Value&v){if(v.index()!=2)throw std::runtime_error("la ruta debe ser texto");auto p=std::filesystem::path(std::get<std::string>(v.data));return (p.is_absolute()?p:cfv_base_archivos/p).string();}
-static Value cfv_leer_archivo(const Value&ruta){std::ifstream f(ruta_archivo(ruta),std::ios::binary);if(!f)throw std::runtime_error("no se pudo abrir el archivo");std::ostringstream s;s<<f.rdbuf();return s.str();}
-static Value cfv_escribir_archivo(const Value&ruta,const Value&contenido){if(contenido.index()!=2)throw std::runtime_error("el contenido debe ser texto");auto p=std::filesystem::path(ruta_archivo(ruta));if(p.has_parent_path())std::filesystem::create_directories(p.parent_path());std::ofstream f(p,std::ios::binary);if(!f)throw std::runtime_error("no se pudo escribir el archivo");f<<std::get<std::string>(contenido.data);return Value{};}
-static Value cfv_bytes_texto(const Value&value){
+[[maybe_unused]] static std::string ruta_archivo(const Value&v){if(v.index()!=2)throw std::runtime_error("la ruta debe ser texto");auto p=std::filesystem::path(std::get<std::string>(v.data));return (p.is_absolute()?p:cfv_base_archivos/p).string();}
+[[maybe_unused]] static Value cfv_leer_archivo(const Value&ruta){std::ifstream f(ruta_archivo(ruta),std::ios::binary);if(!f)throw std::runtime_error("no se pudo abrir el archivo");std::ostringstream s;s<<f.rdbuf();return s.str();}
+[[maybe_unused]] static Value cfv_escribir_archivo(const Value&ruta,const Value&contenido){if(contenido.index()!=2)throw std::runtime_error("el contenido debe ser texto");auto p=std::filesystem::path(ruta_archivo(ruta));if(p.has_parent_path())std::filesystem::create_directories(p.parent_path());std::ofstream f(p,std::ios::binary);if(!f)throw std::runtime_error("no se pudo escribir el archivo");f<<std::get<std::string>(contenido.data);return Value{};}
+[[maybe_unused]] static Value cfv_bytes_texto(const Value&value){
   if(value.index()!=2)throw std::runtime_error("bytes_texto requiere texto");
   auto bytes=std::make_shared<std::vector<Value>>();
   for(unsigned char byte:std::get<std::string>(value.data))bytes->push_back(Value{(double)byte});
   return Value{bytes};
 }
-static Value cfv_escribir_bytes(const Value&ruta,const Value&contenido){
+[[maybe_unused]] static Value cfv_escribir_bytes(const Value&ruta,const Value&contenido){
   auto bytes=std::get_if<Lista>(&contenido.data);
   if(!bytes)throw std::runtime_error("escribir_bytes requiere una lista");
   auto path=std::filesystem::path(ruta_archivo(ruta));
@@ -250,7 +250,7 @@ static Value cfv_escribir_bytes(const Value&ruta,const Value&contenido){
   }
   return Value{(bool)output};
 }
-static Value cfv_hacer_ejecutable(const Value&ruta){
+[[maybe_unused]] static Value cfv_hacer_ejecutable(const Value&ruta){
   auto path=std::filesystem::path(ruta_archivo(ruta));
 #ifdef _WIN32
   return Value{std::filesystem::exists(path)};
@@ -264,15 +264,15 @@ static Value cfv_hacer_ejecutable(const Value&ruta){
   return Value{!error};
 #endif
 }
-static Value cfv_file_read(const Value&ruta){return cfv_arena_stage(cfv_leer_archivo(ruta),"file_read");}
-static Value cfv_file_write(const Value&ruta,const Value&contenido){return cfv_escribir_archivo(ruta,contenido);}
-static Value cfv_file_append(const Value&ruta,const Value&contenido){if(contenido.index()!=2)throw std::runtime_error("el contenido debe ser texto");auto p=std::filesystem::path(ruta_archivo(ruta));if(p.has_parent_path())std::filesystem::create_directories(p.parent_path());std::ofstream f(p,std::ios::binary|std::ios::app);if(!f)throw std::runtime_error("no se pudo anexar al archivo");f<<std::get<std::string>(contenido.data);return Value{};}
-static Value cfv_existe_archivo(const Value&ruta){return std::filesystem::exists(ruta_archivo(ruta));}
-static Value cfv_listar_directorio(const Value&ruta){auto path=std::filesystem::path(ruta_archivo(ruta));auto result=std::make_shared<std::vector<Value>>();if(!std::filesystem::exists(path))return result;for(const auto&e:std::filesystem::directory_iterator(path))result->push_back(Value{e.path().filename().string()});return result;}
-static Value cfv_crear_directorio(const Value&ruta){std::filesystem::create_directories(ruta_archivo(ruta));return Value{};}
-static Value cfv_eliminar_archivo(const Value&ruta){std::filesystem::remove_all(ruta_archivo(ruta));return Value{};}
+[[maybe_unused]] static Value cfv_file_read(const Value&ruta){return cfv_arena_stage(cfv_leer_archivo(ruta),"file_read");}
+[[maybe_unused]] static Value cfv_file_write(const Value&ruta,const Value&contenido){return cfv_escribir_archivo(ruta,contenido);}
+[[maybe_unused]] static Value cfv_file_append(const Value&ruta,const Value&contenido){if(contenido.index()!=2)throw std::runtime_error("el contenido debe ser texto");auto p=std::filesystem::path(ruta_archivo(ruta));if(p.has_parent_path())std::filesystem::create_directories(p.parent_path());std::ofstream f(p,std::ios::binary|std::ios::app);if(!f)throw std::runtime_error("no se pudo anexar al archivo");f<<std::get<std::string>(contenido.data);return Value{};}
+[[maybe_unused]] static Value cfv_existe_archivo(const Value&ruta){return std::filesystem::exists(ruta_archivo(ruta));}
+[[maybe_unused]] static Value cfv_listar_directorio(const Value&ruta){auto path=std::filesystem::path(ruta_archivo(ruta));auto result=std::make_shared<std::vector<Value>>();if(!std::filesystem::exists(path))return result;for(const auto&e:std::filesystem::directory_iterator(path))result->push_back(Value{e.path().filename().string()});return result;}
+[[maybe_unused]] static Value cfv_crear_directorio(const Value&ruta){std::filesystem::create_directories(ruta_archivo(ruta));return Value{};}
+[[maybe_unused]] static Value cfv_eliminar_archivo(const Value&ruta){std::filesystem::remove_all(ruta_archivo(ruta));return Value{};}
 // HTTP GET via curl (no dependency on libcurl — uses system curl)
-static Value cfv_http_get(const Value&url_v){
+[[maybe_unused]] static Value cfv_http_get(const Value&url_v){
   if(url_v.index()!=2)throw std::runtime_error("http_get requiere una URL de texto");
   const std::string&url=std::get<std::string>(url_v.data);
   if(url.substr(0,4)!="http")throw std::runtime_error("http_get solo acepta URLs http/https");
@@ -286,16 +286,16 @@ static Value cfv_http_get(const Value&url_v){
   pclose(pipe);
   return Value{output};
 }
-static Value cfv_array_fast(const Value&input){auto list=std::get_if<Lista>(&input.data);if(!list)throw std::runtime_error("array_fast requiere una lista numérica");auto output=std::make_shared<std::vector<double>>();output->reserve((*list)->size());for(const auto&value:**list)output->push_back(numero(value));return output;}
-static Value cfv_matrix(const Value&rows_value,const Value&columns_value,const Value&fill_value=Value{0.0}){double rows_number=numero(rows_value),columns_number=numero(columns_value),fill=numero(fill_value);if(rows_number<0||columns_number<0||std::floor(rows_number)!=rows_number||std::floor(columns_number)!=columns_number||rows_number*columns_number>10000000.0)throw std::runtime_error("dimensiones de matrix inválidas");auto matrix=std::make_shared<CfvDenseMatrix>();matrix->rows=(size_t)rows_number;matrix->columns=(size_t)columns_number;matrix->values.assign(matrix->rows*matrix->columns,fill);return matrix;}
+[[maybe_unused]] static Value cfv_array_fast(const Value&input){auto list=std::get_if<Lista>(&input.data);if(!list)throw std::runtime_error("array_fast requiere una lista numérica");auto output=std::make_shared<std::vector<double>>();output->reserve((*list)->size());for(const auto&value:**list)output->push_back(numero(value));return output;}
+[[maybe_unused]] static Value cfv_matrix(const Value&rows_value,const Value&columns_value,const Value&fill_value=Value{0.0}){double rows_number=numero(rows_value),columns_number=numero(columns_value),fill=numero(fill_value);if(rows_number<0||columns_number<0||std::floor(rows_number)!=rows_number||std::floor(columns_number)!=columns_number||rows_number*columns_number>10000000.0)throw std::runtime_error("dimensiones de matrix inválidas");auto matrix=std::make_shared<CfvDenseMatrix>();matrix->rows=(size_t)rows_number;matrix->columns=(size_t)columns_number;matrix->values.assign(matrix->rows*matrix->columns,fill);return matrix;}
 #ifdef _WIN32
-static Value cfv_net_send(const Value&,const Value&,const Value&){throw std::runtime_error("net_send requiere backend Winsock");}
-static Value cfv_net_listen(const Value&){throw std::runtime_error("net_listen requiere backend Winsock");}
-static Value cfv_net_listen(const Value&,const Value&){throw std::runtime_error("net_listen requiere backend Winsock");}
+[[maybe_unused]] static Value cfv_net_send(const Value&,const Value&,const Value&){throw std::runtime_error("net_send requiere backend Winsock");}
+[[maybe_unused]] static Value cfv_net_listen(const Value&){throw std::runtime_error("net_listen requiere backend Winsock");}
+[[maybe_unused]] static Value cfv_net_listen(const Value&,const Value&){throw std::runtime_error("net_listen requiere backend Winsock");}
 #else
 struct CfvSocket{int value=-1;explicit CfvSocket(int descriptor=-1):value(descriptor){}~CfvSocket(){if(value>=0)::close(value);}CfvSocket(const CfvSocket&)=delete;CfvSocket&operator=(const CfvSocket&)=delete;};
-static Value cfv_net_send(const Value&host_value,const Value&port_value,const Value&data_value){if(host_value.index()!=2||data_value.index()!=2)throw std::runtime_error("net_send requiere host, puerto y texto");int port=(int)numero(port_value);if(port<1||port>65535)throw std::runtime_error("puerto inválido");addrinfo hints{};hints.ai_family=AF_UNSPEC;hints.ai_socktype=SOCK_STREAM;addrinfo*raw=nullptr;auto port_text=std::to_string(port);if(getaddrinfo(std::get<std::string>(host_value.data).c_str(),port_text.c_str(),&hints,&raw)!=0)throw std::runtime_error("no se pudo resolver el host");std::unique_ptr<addrinfo,decltype(&freeaddrinfo)>addresses(raw,freeaddrinfo);int descriptor=-1;for(auto*entry=raw;entry;entry=entry->ai_next){descriptor=socket(entry->ai_family,entry->ai_socktype,entry->ai_protocol);if(descriptor>=0&&connect(descriptor,entry->ai_addr,entry->ai_addrlen)==0)break;if(descriptor>=0)::close(descriptor);descriptor=-1;}CfvSocket connection(descriptor);if(descriptor<0)throw std::runtime_error("net_send no pudo conectar");const auto&data=std::get<std::string>(data_value.data);size_t sent=0;while(sent<data.size()){ssize_t count=send(descriptor,data.data()+sent,data.size()-sent,0);if(count<=0)throw std::runtime_error("net_send perdió la conexión");sent+=(size_t)count;}return (double)sent;}
-static Value cfv_net_listen(const Value&port_value,const Value&timeout_value=Value{5000.0}){int port=(int)numero(port_value),timeout=(int)numero(timeout_value);if(port<1||port>65535||timeout<0)throw std::runtime_error("puerto o timeout inválido");CfvSocket server(socket(AF_INET,SOCK_STREAM,0));if(server.value<0)throw std::runtime_error("net_listen no pudo crear socket");int reuse=1;setsockopt(server.value,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));sockaddr_in address{};address.sin_family=AF_INET;address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);address.sin_port=htons((uint16_t)port);if(bind(server.value,(sockaddr*)&address,sizeof(address))!=0||listen(server.value,1)!=0)throw std::runtime_error("net_listen no pudo abrir el puerto");fd_set set;FD_ZERO(&set);FD_SET(server.value,&set);timeval wait{timeout/1000,(timeout%1000)*1000};int ready=select(server.value+1,&set,nullptr,nullptr,&wait);if(ready==0)throw std::runtime_error("net_listen agotó el tiempo de espera");if(ready<0)throw std::runtime_error("net_listen falló esperando conexión");sockaddr_storage peer{};socklen_t peer_size=sizeof(peer);CfvSocket client(accept(server.value,(sockaddr*)&peer,&peer_size));if(client.value<0)throw std::runtime_error("net_listen no pudo aceptar conexión");std::string data;char buffer[65536];for(;;){ssize_t count=recv(client.value,buffer,sizeof(buffer),0);if(count<0)throw std::runtime_error("net_listen falló recibiendo datos");if(count==0)break;data.append(buffer,(size_t)count);}char host[NI_MAXHOST]={0};getnameinfo((sockaddr*)&peer,peer_size,host,sizeof(host),nullptr,0,NI_NUMERICHOST);auto result=std::make_shared<std::map<std::string,Value>>();(*result)["datos"]=data;(*result)["host"]=std::string(host);(*result)["puerto"]=(double)port;return result;}
+[[maybe_unused]] static Value cfv_net_send(const Value&host_value,const Value&port_value,const Value&data_value){if(host_value.index()!=2||data_value.index()!=2)throw std::runtime_error("net_send requiere host, puerto y texto");int port=(int)numero(port_value);if(port<1||port>65535)throw std::runtime_error("puerto inválido");addrinfo hints{};hints.ai_family=AF_UNSPEC;hints.ai_socktype=SOCK_STREAM;addrinfo*raw=nullptr;auto port_text=std::to_string(port);if(getaddrinfo(std::get<std::string>(host_value.data).c_str(),port_text.c_str(),&hints,&raw)!=0)throw std::runtime_error("no se pudo resolver el host");std::unique_ptr<addrinfo,decltype(&freeaddrinfo)>addresses(raw,freeaddrinfo);int descriptor=-1;for(auto*entry=raw;entry;entry=entry->ai_next){descriptor=socket(entry->ai_family,entry->ai_socktype,entry->ai_protocol);if(descriptor>=0&&connect(descriptor,entry->ai_addr,entry->ai_addrlen)==0)break;if(descriptor>=0)::close(descriptor);descriptor=-1;}CfvSocket connection(descriptor);if(descriptor<0)throw std::runtime_error("net_send no pudo conectar");const auto&data=std::get<std::string>(data_value.data);size_t sent=0;while(sent<data.size()){ssize_t count=send(descriptor,data.data()+sent,data.size()-sent,0);if(count<=0)throw std::runtime_error("net_send perdió la conexión");sent+=(size_t)count;}return (double)sent;}
+[[maybe_unused]] static Value cfv_net_listen(const Value&port_value,const Value&timeout_value=Value{5000.0}){int port=(int)numero(port_value),timeout=(int)numero(timeout_value);if(port<1||port>65535||timeout<0)throw std::runtime_error("puerto o timeout inválido");CfvSocket server(socket(AF_INET,SOCK_STREAM,0));if(server.value<0)throw std::runtime_error("net_listen no pudo crear socket");int reuse=1;setsockopt(server.value,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));sockaddr_in address{};address.sin_family=AF_INET;address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);address.sin_port=htons((uint16_t)port);if(bind(server.value,(sockaddr*)&address,sizeof(address))!=0||listen(server.value,1)!=0)throw std::runtime_error("net_listen no pudo abrir el puerto");fd_set set;FD_ZERO(&set);FD_SET(server.value,&set);timeval wait{timeout/1000,(timeout%1000)*1000};int ready=select(server.value+1,&set,nullptr,nullptr,&wait);if(ready==0)throw std::runtime_error("net_listen agotó el tiempo de espera");if(ready<0)throw std::runtime_error("net_listen falló esperando conexión");sockaddr_storage peer{};socklen_t peer_size=sizeof(peer);CfvSocket client(accept(server.value,(sockaddr*)&peer,&peer_size));if(client.value<0)throw std::runtime_error("net_listen no pudo aceptar conexión");std::string data;char buffer[65536];for(;;){ssize_t count=recv(client.value,buffer,sizeof(buffer),0);if(count<0)throw std::runtime_error("net_listen falló recibiendo datos");if(count==0)break;data.append(buffer,(size_t)count);}char host[NI_MAXHOST]={0};getnameinfo((sockaddr*)&peer,peer_size,host,sizeof(host),nullptr,0,NI_NUMERICHOST);auto result=std::make_shared<std::map<std::string,Value>>();(*result)["datos"]=data;(*result)["host"]=std::string(host);(*result)["puerto"]=(double)port;return result;}
 #endif
 // ── HTTP SERVER (POSIX sockets) ───────────────────────────────────────────
 #ifndef _WIN32
@@ -311,7 +311,7 @@ static std::map<int, std::shared_ptr<CfvHttpServer>> cfv_http_servers;
 static int cfv_http_server_next_id = 1;
 static std::mutex cfv_http_server_mutex;
 
-static Value cfv_servidor_http_escuchar(const Value& puerto_v) {
+[[maybe_unused]] static Value cfv_servidor_http_escuchar(const Value& puerto_v) {
     int port = (int)numero(puerto_v);
     if (port < 1 || port > 65535) throw std::runtime_error("servidor_http_escuchar: puerto invalido");
     auto srv = std::make_shared<CfvHttpServer>();
@@ -333,7 +333,7 @@ static Value cfv_servidor_http_escuchar(const Value& puerto_v) {
     return (double)id;
 }
 
-static Value cfv_servidor_http_solicitud(const Value& id_v) {
+[[maybe_unused]] static Value cfv_servidor_http_solicitud(const Value& id_v) {
     int id = (int)numero(id_v);
     std::shared_ptr<CfvHttpServer> srv;
     { std::lock_guard<std::mutex> lk(cfv_http_server_mutex); auto it = cfv_http_servers.find(id); if (it == cfv_http_servers.end()) throw std::runtime_error("servidor_http_solicitud: id invalido"); srv = it->second; }
@@ -403,7 +403,7 @@ static Value cfv_servidor_http_solicitud(const Value& id_v) {
     return Value{result};
 }
 
-static Value cfv_servidor_http_responder(const Value& id_v, const Value& estado_v, const Value& cuerpo_v, const Value& tipo_v) {
+[[maybe_unused]] static Value cfv_servidor_http_responder(const Value& id_v, const Value& estado_v, const Value& cuerpo_v, const Value& tipo_v) {
     int id = (int)numero(id_v);
     std::shared_ptr<CfvHttpServer> srv;
     { std::lock_guard<std::mutex> lk(cfv_http_server_mutex); auto it = cfv_http_servers.find(id); if (it == cfv_http_servers.end()) throw std::runtime_error("servidor_http_responder: id invalido"); srv = it->second; }
@@ -438,21 +438,21 @@ static Value cfv_servidor_http_responder(const Value& id_v, const Value& estado_
     return Value{};
 }
 
-static Value cfv_servidor_http_cerrar(const Value& id_v) {
+[[maybe_unused]] static Value cfv_servidor_http_cerrar(const Value& id_v) {
     int id = (int)numero(id_v);
     std::lock_guard<std::mutex> lk(cfv_http_server_mutex);
     cfv_http_servers.erase(id);
     return Value{};
 }
 #else
-static Value cfv_servidor_http_escuchar(const Value&){throw std::runtime_error("servidor_http_escuchar no disponible en Windows");}
-static Value cfv_servidor_http_solicitud(const Value&){throw std::runtime_error("servidor_http_solicitud no disponible en Windows");}
-static Value cfv_servidor_http_responder(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("servidor_http_responder no disponible en Windows");}
-static Value cfv_servidor_http_cerrar(const Value&){throw std::runtime_error("servidor_http_cerrar no disponible en Windows");}
+[[maybe_unused]] static Value cfv_servidor_http_escuchar(const Value&){throw std::runtime_error("servidor_http_escuchar no disponible en Windows");}
+[[maybe_unused]] static Value cfv_servidor_http_solicitud(const Value&){throw std::runtime_error("servidor_http_solicitud no disponible en Windows");}
+[[maybe_unused]] static Value cfv_servidor_http_responder(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("servidor_http_responder no disponible en Windows");}
+[[maybe_unused]] static Value cfv_servidor_http_cerrar(const Value&){throw std::runtime_error("servidor_http_cerrar no disponible en Windows");}
 #endif
 
 // ── CRYPTO (OpenSSL real si disponible, fallback pure-C++ para sha256/base64) ─
-static std::string cfv_hex_encode(const unsigned char* data, size_t len) {
+[[maybe_unused]] static std::string cfv_hex_encode(const unsigned char* data, size_t len) {
     static const char hex[] = "0123456789abcdef";
     std::string out;
     out.reserve(len * 2);
@@ -462,7 +462,7 @@ static std::string cfv_hex_encode(const unsigned char* data, size_t len) {
     }
     return out;
 }
-static std::string cfv_unhex(const std::string& s) {
+[[maybe_unused]] static std::string cfv_unhex(const std::string& s) {
     std::string out;
     for (size_t i = 0; i + 1 < s.size(); i += 2) {
         auto nib = [](char c) -> int {
@@ -477,14 +477,14 @@ static std::string cfv_unhex(const std::string& s) {
 }
 
 #ifdef CFV_WITH_OPENSSL
-static Value cfv_sha256(const Value& v) {
+[[maybe_unused]] static Value cfv_sha256(const Value& v) {
     if (v.index() != 2) throw std::runtime_error("sha256 requiere texto");
     const auto& s = std::get<std::string>(v.data);
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256((const unsigned char*)s.data(), s.size(), hash);
     return Value{cfv_hex_encode(hash, SHA256_DIGEST_LENGTH)};
 }
-static Value cfv_hmac_sha256(const Value& key_v, const Value& msg_v) {
+[[maybe_unused]] static Value cfv_hmac_sha256(const Value& key_v, const Value& msg_v) {
     if (key_v.index() != 2 || msg_v.index() != 2) throw std::runtime_error("hmac_sha256 requiere dos textos");
     const auto& key = std::get<std::string>(key_v.data);
     const auto& msg = std::get<std::string>(msg_v.data);
@@ -493,7 +493,7 @@ static Value cfv_hmac_sha256(const Value& key_v, const Value& msg_v) {
     HMAC(EVP_sha256(), key.data(), (int)key.size(), (const unsigned char*)msg.data(), msg.size(), hash, &hash_len);
     return Value{cfv_hex_encode(hash, hash_len)};
 }
-static Value cfv_aes_cifrar(const Value& key_v, const Value& texto_v) {
+[[maybe_unused]] static Value cfv_aes_cifrar(const Value& key_v, const Value& texto_v) {
     if (key_v.index() != 2 || texto_v.index() != 2) throw std::runtime_error("aes_cifrar requiere clave y texto");
     const auto& key_raw = std::get<std::string>(key_v.data);
     const auto& plaintext = std::get<std::string>(texto_v.data);
@@ -516,7 +516,7 @@ static Value cfv_aes_cifrar(const Value& key_v, const Value& texto_v) {
     std::string result = cfv_hex_encode(iv, 16) + ":" + cfv_hex_encode(ciphertext.data(), (size_t)(len1 + len2));
     return Value{result};
 }
-static Value cfv_aes_descifrar(const Value& key_v, const Value& cifrado_v) {
+[[maybe_unused]] static Value cfv_aes_descifrar(const Value& key_v, const Value& cifrado_v) {
     if (key_v.index() != 2 || cifrado_v.index() != 2) throw std::runtime_error("aes_descifrar requiere clave y cifrado");
     const auto& key_raw = std::get<std::string>(key_v.data);
     const auto& cifrado = std::get<std::string>(cifrado_v.data);
@@ -541,7 +541,7 @@ static Value cfv_aes_descifrar(const Value& key_v, const Value& cifrado_v) {
     EVP_CIPHER_CTX_free(ctx);
     return Value{std::string((char*)plain.data(), (size_t)(len1 + len2))};
 }
-static Value cfv_crypto_rand_bytes(const Value& n_v) {
+[[maybe_unused]] static Value cfv_crypto_rand_bytes(const Value& n_v) {
     int n = (int)numero(n_v);
     if (n < 1 || n > 65536) throw std::runtime_error("crypto_rand_bytes: n debe ser 1..65536");
     std::vector<unsigned char> buf((size_t)n);
@@ -550,7 +550,7 @@ static Value cfv_crypto_rand_bytes(const Value& n_v) {
 }
 #else
 // Fallback SHA-256 (pure C++ — no OpenSSL)
-static std::string cfv_sha256_pure(const std::string& s) {
+[[maybe_unused]] static std::string cfv_sha256_pure(const std::string& s) {
     // RFC 6234 SHA-256
     static const uint32_t K[64]={0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2};
     uint32_t h[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
@@ -572,11 +572,11 @@ static std::string cfv_sha256_pure(const std::string& s) {
     for(int i=0;i<8;i++){digest[i*4]=(h[i]>>24)&0xff;digest[i*4+1]=(h[i]>>16)&0xff;digest[i*4+2]=(h[i]>>8)&0xff;digest[i*4+3]=h[i]&0xff;}
     return cfv_hex_encode(digest,32);
 }
-static Value cfv_sha256(const Value& v) {
+[[maybe_unused]] static Value cfv_sha256(const Value& v) {
     if (v.index() != 2) throw std::runtime_error("sha256 requiere texto");
     return Value{cfv_sha256_pure(std::get<std::string>(v.data))};
 }
-static Value cfv_hmac_sha256(const Value& key_v, const Value& msg_v) {
+[[maybe_unused]] static Value cfv_hmac_sha256(const Value& key_v, const Value& msg_v) {
     if (key_v.index() != 2 || msg_v.index() != 2) throw std::runtime_error("hmac_sha256 requiere dos textos");
     const auto& key = std::get<std::string>(key_v.data);
     const auto& msg = std::get<std::string>(msg_v.data);
@@ -587,9 +587,9 @@ static Value cfv_hmac_sha256(const Value& key_v, const Value& msg_v) {
     for (size_t i = 0; i < 64; i++) { ipad[i] ^= k[i]; opad[i] ^= k[i]; }
     return Value{cfv_sha256_pure(opad + cfv_sha256_pure(ipad + msg))};
 }
-static Value cfv_aes_cifrar(const Value&, const Value&) { throw std::runtime_error("aes_cifrar requiere compilar con -DCFV_WITH_OPENSSL"); }
-static Value cfv_aes_descifrar(const Value&, const Value&) { throw std::runtime_error("aes_descifrar requiere compilar con -DCFV_WITH_OPENSSL"); }
-static Value cfv_crypto_rand_bytes(const Value& n_v) {
+[[maybe_unused]] static Value cfv_aes_cifrar(const Value&, const Value&) { throw std::runtime_error("aes_cifrar requiere compilar con -DCFV_WITH_OPENSSL"); }
+[[maybe_unused]] static Value cfv_aes_descifrar(const Value&, const Value&) { throw std::runtime_error("aes_descifrar requiere compilar con -DCFV_WITH_OPENSSL"); }
+[[maybe_unused]] static Value cfv_crypto_rand_bytes(const Value& n_v) {
     int n = (int)numero(n_v);
     if (n < 1 || n > 65536) throw std::runtime_error("crypto_rand_bytes: n debe ser 1..65536");
     std::vector<unsigned char> buf((size_t)n);
@@ -600,7 +600,7 @@ static Value cfv_crypto_rand_bytes(const Value& n_v) {
 }
 #endif
 
-static Value cfv_sha256_rango(const Value&contenido,const Value&inicio_v,const Value&cantidad_v){
+[[maybe_unused]] static Value cfv_sha256_rango(const Value&contenido,const Value&inicio_v,const Value&cantidad_v){
   auto bytes=std::get_if<Lista>(&contenido.data);
   if(!bytes)throw std::runtime_error("sha256_rango requiere una lista");
   const auto inicio=(size_t)numero(inicio_v);
@@ -641,7 +641,7 @@ struct CfvSDLWindow {
 };
 static std::map<int, std::shared_ptr<CfvSDLWindow>> cfv_sdl_windows;
 static int cfv_sdl_next_id = 1;
-static bool cfv_sdl_initialized = false;
+[[maybe_unused]] static bool cfv_sdl_initialized = false;
 
 static std::shared_ptr<CfvSDLWindow>& cfv_sdl_get(int id) {
     auto it = cfv_sdl_windows.find(id);
@@ -650,7 +650,7 @@ static std::shared_ptr<CfvSDLWindow>& cfv_sdl_get(int id) {
 }
 
 // sdl_iniciar(titulo, ancho, alto) → id
-static Value cfv_sdl_iniciar(const Value& titulo_v, const Value& ancho_v, const Value& alto_v) {
+[[maybe_unused]] static Value cfv_sdl_iniciar(const Value& titulo_v, const Value& ancho_v, const Value& alto_v) {
     if (!cfv_sdl_initialized) {
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) != 0)
             throw std::runtime_error(std::string("sdl_iniciar: ") + SDL_GetError());
@@ -676,7 +676,7 @@ static Value cfv_sdl_iniciar(const Value& titulo_v, const Value& ancho_v, const 
 }
 
 // sdl_limpiar(id, r, g, b) → nulo
-static Value cfv_sdl_limpiar(const Value& id_v, const Value& r_v, const Value& g_v, const Value& b_v) {
+[[maybe_unused]] static Value cfv_sdl_limpiar(const Value& id_v, const Value& r_v, const Value& g_v, const Value& b_v) {
     auto& w = cfv_sdl_get((int)numero(id_v));
     SDL_SetRenderDrawColor(w->ren, (Uint8)numero(r_v), (Uint8)numero(g_v), (Uint8)numero(b_v), 255);
     SDL_RenderClear(w->ren);
@@ -684,7 +684,7 @@ static Value cfv_sdl_limpiar(const Value& id_v, const Value& r_v, const Value& g
 }
 
 // sdl_dibujar_rect(id, x, y, ancho, alto, r, g, b, a=255) → nulo
-static Value cfv_sdl_dibujar_rect(const Value& id_v, const Value& x_v, const Value& y_v, const Value& w_v, const Value& h_v, const Value& r_v, const Value& g_v, const Value& b_v, const Value& a_v) {
+[[maybe_unused]] static Value cfv_sdl_dibujar_rect(const Value& id_v, const Value& x_v, const Value& y_v, const Value& w_v, const Value& h_v, const Value& r_v, const Value& g_v, const Value& b_v, const Value& a_v) {
     auto& wnd = cfv_sdl_get((int)numero(id_v));
     SDL_Rect rect{ (int)numero(x_v),(int)numero(y_v),(int)numero(w_v),(int)numero(h_v) };
     SDL_SetRenderDrawColor(wnd->ren,(Uint8)numero(r_v),(Uint8)numero(g_v),(Uint8)numero(b_v),(Uint8)numero(a_v));
@@ -693,7 +693,7 @@ static Value cfv_sdl_dibujar_rect(const Value& id_v, const Value& x_v, const Val
 }
 
 // sdl_dibujar_circulo(id, cx, cy, radio, r, g, b) → nulo
-static Value cfv_sdl_dibujar_circulo(const Value& id_v, const Value& cx_v, const Value& cy_v, const Value& rad_v, const Value& r_v, const Value& g_v, const Value& b_v) {
+[[maybe_unused]] static Value cfv_sdl_dibujar_circulo(const Value& id_v, const Value& cx_v, const Value& cy_v, const Value& rad_v, const Value& r_v, const Value& g_v, const Value& b_v) {
     auto& wnd = cfv_sdl_get((int)numero(id_v));
     int cx=(int)numero(cx_v), cy=(int)numero(cy_v), rad=(int)numero(rad_v);
     SDL_SetRenderDrawColor(wnd->ren,(Uint8)numero(r_v),(Uint8)numero(g_v),(Uint8)numero(b_v),255);
@@ -705,7 +705,7 @@ static Value cfv_sdl_dibujar_circulo(const Value& id_v, const Value& cx_v, const
 }
 
 // sdl_dibujar_linea(id, x1, y1, x2, y2, r, g, b) → nulo
-static Value cfv_sdl_dibujar_linea(const Value& id_v, const Value& x1_v, const Value& y1_v, const Value& x2_v, const Value& y2_v, const Value& r_v, const Value& g_v, const Value& b_v) {
+[[maybe_unused]] static Value cfv_sdl_dibujar_linea(const Value& id_v, const Value& x1_v, const Value& y1_v, const Value& x2_v, const Value& y2_v, const Value& r_v, const Value& g_v, const Value& b_v) {
     auto& wnd = cfv_sdl_get((int)numero(id_v));
     SDL_SetRenderDrawColor(wnd->ren,(Uint8)numero(r_v),(Uint8)numero(g_v),(Uint8)numero(b_v),255);
     SDL_RenderDrawLine(wnd->ren,(int)numero(x1_v),(int)numero(y1_v),(int)numero(x2_v),(int)numero(y2_v));
@@ -713,14 +713,14 @@ static Value cfv_sdl_dibujar_linea(const Value& id_v, const Value& x1_v, const V
 }
 
 // sdl_mostrar(id) → nulo
-static Value cfv_sdl_mostrar(const Value& id_v) {
+[[maybe_unused]] static Value cfv_sdl_mostrar(const Value& id_v) {
     auto& wnd = cfv_sdl_get((int)numero(id_v));
     SDL_RenderPresent(wnd->ren);
     return Value{};
 }
 
 // sdl_eventos(id) → lista de mapos {tipo, tecla, scancode, x, y, boton, rueda}
-static Value cfv_sdl_eventos(const Value& id_v) {
+[[maybe_unused]] static Value cfv_sdl_eventos(const Value& id_v) {
     (void)id_v;
     auto lista = std::make_shared<std::vector<Value>>();
     SDL_Event e;
@@ -768,7 +768,7 @@ static Value cfv_sdl_eventos(const Value& id_v) {
 }
 
 // sdl_tecla_presionada(nombre) → booleano  (estado inmediato del teclado)
-static Value cfv_sdl_tecla_presionada(const Value& nombre_v) {
+[[maybe_unused]] static Value cfv_sdl_tecla_presionada(const Value& nombre_v) {
     if (nombre_v.index()!=2) return Value{false};
     const std::string& nombre = std::get<std::string>(nombre_v.data);
     const Uint8* state = SDL_GetKeyboardState(nullptr);
@@ -778,7 +778,7 @@ static Value cfv_sdl_tecla_presionada(const Value& nombre_v) {
 }
 
 // sdl_raton() → mapa {x, y, izquierda, derecha, centro}
-static Value cfv_sdl_raton(const Value&) {
+[[maybe_unused]] static Value cfv_sdl_raton(const Value&) {
     int x, y;
     Uint32 btn = SDL_GetMouseState(&x, &y);
     auto m = std::make_shared<std::map<std::string,Value>>();
@@ -791,18 +791,18 @@ static Value cfv_sdl_raton(const Value&) {
 }
 
 // sdl_delay(ms) → nulo
-static Value cfv_sdl_delay(const Value& ms_v) {
+[[maybe_unused]] static Value cfv_sdl_delay(const Value& ms_v) {
     SDL_Delay((Uint32)numero(ms_v));
     return Value{};
 }
 
 // sdl_tiempo() → ms desde init
-static Value cfv_sdl_tiempo(const Value&) {
+[[maybe_unused]] static Value cfv_sdl_tiempo(const Value&) {
     return Value{(double)SDL_GetTicks()};
 }
 
 // sdl_tamanio_ventana(id) → mapa {ancho, alto}
-static Value cfv_sdl_tamanio_ventana(const Value& id_v) {
+[[maybe_unused]] static Value cfv_sdl_tamanio_ventana(const Value& id_v) {
     auto& wnd = cfv_sdl_get((int)numero(id_v));
     int w=0, h=0;
     SDL_GetWindowSize(wnd->win, &w, &h);
@@ -813,27 +813,27 @@ static Value cfv_sdl_tamanio_ventana(const Value& id_v) {
 }
 
 // sdl_titulo(id, titulo) → nulo
-static Value cfv_sdl_titulo(const Value& id_v, const Value& tit_v) {
+[[maybe_unused]] static Value cfv_sdl_titulo(const Value& id_v, const Value& tit_v) {
     auto& wnd = cfv_sdl_get((int)numero(id_v));
     if (tit_v.index()==2) SDL_SetWindowTitle(wnd->win, std::get<std::string>(tit_v.data).c_str());
     return Value{};
 }
 
 // sdl_abierto(id) → booleano
-static Value cfv_sdl_abierto(const Value& id_v) {
+[[maybe_unused]] static Value cfv_sdl_abierto(const Value& id_v) {
     auto it = cfv_sdl_windows.find((int)numero(id_v));
     if (it == cfv_sdl_windows.end()) return Value{false};
     return Value{it->second->open};
 }
 
 // sdl_cerrar(id) → nulo
-static Value cfv_sdl_cerrar(const Value& id_v) {
+[[maybe_unused]] static Value cfv_sdl_cerrar(const Value& id_v) {
     cfv_sdl_windows.erase((int)numero(id_v));
     return Value{};
 }
 
 // sdl_terminar() → nulo
-static Value cfv_sdl_terminar(const Value&) {
+[[maybe_unused]] static Value cfv_sdl_terminar(const Value&) {
     cfv_sdl_windows.clear();
 #ifdef CFV_WITH_SDL2_MIXER
     Mix_CloseAudio();
@@ -846,7 +846,7 @@ static Value cfv_sdl_terminar(const Value&) {
 }
 
 // sdl_dibujar_pixel(id, x, y, r, g, b) → nulo
-static Value cfv_sdl_dibujar_pixel(const Value& id_v, const Value& x_v, const Value& y_v, const Value& r_v, const Value& g_v, const Value& b_v) {
+[[maybe_unused]] static Value cfv_sdl_dibujar_pixel(const Value& id_v, const Value& x_v, const Value& y_v, const Value& r_v, const Value& g_v, const Value& b_v) {
     auto& wnd = cfv_sdl_get((int)numero(id_v));
     SDL_SetRenderDrawColor(wnd->ren,(Uint8)numero(r_v),(Uint8)numero(g_v),(Uint8)numero(b_v),255);
     SDL_RenderDrawPoint(wnd->ren,(int)numero(x_v),(int)numero(y_v));
@@ -854,7 +854,7 @@ static Value cfv_sdl_dibujar_pixel(const Value& id_v, const Value& x_v, const Va
 }
 
 // sdl_color_fondo(id, r, g, b) → alias de sdl_limpiar
-static Value cfv_sdl_color_fondo(const Value& id_v, const Value& r_v, const Value& g_v, const Value& b_v) {
+[[maybe_unused]] static Value cfv_sdl_color_fondo(const Value& id_v, const Value& r_v, const Value& g_v, const Value& b_v) {
     return cfv_sdl_limpiar(id_v, r_v, g_v, b_v);
 }
 
@@ -862,7 +862,7 @@ static Value cfv_sdl_color_fondo(const Value& id_v, const Value& r_v, const Valu
 // sdl_cargar_sonido(ruta) → id_sonido
 static std::map<int,Mix_Chunk*> cfv_sdl_sounds;
 static int cfv_sdl_sound_next = 1;
-static Value cfv_sdl_cargar_sonido(const Value& ruta_v) {
+[[maybe_unused]] static Value cfv_sdl_cargar_sonido(const Value& ruta_v) {
     if (ruta_v.index()!=2) throw std::runtime_error("sdl_cargar_sonido: requiere ruta");
     Mix_Chunk* chunk = Mix_LoadWAV(std::get<std::string>(ruta_v.data).c_str());
     if (!chunk) throw std::runtime_error(std::string("sdl_cargar_sonido: ") + Mix_GetError());
@@ -870,13 +870,13 @@ static Value cfv_sdl_cargar_sonido(const Value& ruta_v) {
     cfv_sdl_sounds[id] = chunk;
     return (double)id;
 }
-static Value cfv_sdl_reproducir_sonido(const Value& id_v) {
+[[maybe_unused]] static Value cfv_sdl_reproducir_sonido(const Value& id_v) {
     auto it = cfv_sdl_sounds.find((int)numero(id_v));
     if (it == cfv_sdl_sounds.end()) throw std::runtime_error("sdl_reproducir_sonido: id invalido");
     Mix_PlayChannel(-1, it->second, 0);
     return Value{};
 }
-static Value cfv_sdl_cargar_musica_fn(const Value& ruta_v) {
+[[maybe_unused]] static Value cfv_sdl_cargar_musica_fn(const Value& ruta_v) {
     if (ruta_v.index()!=2) throw std::runtime_error("sdl_cargar_musica: requiere ruta");
     Mix_Music* mus = Mix_LoadMUS(std::get<std::string>(ruta_v.data).c_str());
     if (!mus) throw std::runtime_error(std::string("sdl_cargar_musica: ") + Mix_GetError());
@@ -887,32 +887,32 @@ static Value cfv_sdl_cargar_musica_fn(const Value& ruta_v) {
 
 #else
 // Stubs cuando SDL2 no esta disponible
-static Value cfv_sdl_iniciar(const Value&,const Value&,const Value&){throw std::runtime_error("sdl_iniciar: compilar con -DCFV_WITH_SDL2 -lSDL2");}
-static Value cfv_sdl_limpiar(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
-static Value cfv_sdl_dibujar_rect(const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
-static Value cfv_sdl_dibujar_circulo(const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
-static Value cfv_sdl_dibujar_linea(const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
-static Value cfv_sdl_mostrar(const Value&){throw std::runtime_error("SDL2 no disponible");}
-static Value cfv_sdl_eventos(const Value&){return std::make_shared<std::vector<Value>>();}
-static Value cfv_sdl_tecla_presionada(const Value&){return Value{false};}
-static Value cfv_sdl_raton(const Value&){return std::make_shared<std::map<std::string,Value>>();}
-static Value cfv_sdl_delay(const Value& ms_v){
+[[maybe_unused]] static Value cfv_sdl_iniciar(const Value&,const Value&,const Value&){throw std::runtime_error("sdl_iniciar: compilar con -DCFV_WITH_SDL2 -lSDL2");}
+[[maybe_unused]] static Value cfv_sdl_limpiar(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+[[maybe_unused]] static Value cfv_sdl_dibujar_rect(const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+[[maybe_unused]] static Value cfv_sdl_dibujar_circulo(const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+[[maybe_unused]] static Value cfv_sdl_dibujar_linea(const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+[[maybe_unused]] static Value cfv_sdl_mostrar(const Value&){throw std::runtime_error("SDL2 no disponible");}
+[[maybe_unused]] static Value cfv_sdl_eventos(const Value&){return std::make_shared<std::vector<Value>>();}
+[[maybe_unused]] static Value cfv_sdl_tecla_presionada(const Value&){return Value{false};}
+[[maybe_unused]] static Value cfv_sdl_raton(const Value&){return std::make_shared<std::map<std::string,Value>>();}
+[[maybe_unused]] static Value cfv_sdl_delay(const Value& ms_v){
     int ms=(int)numero(ms_v);
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
     return Value{};
 }
-static Value cfv_sdl_tiempo(const Value&){return Value{(double)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()};}
-static Value cfv_sdl_tamanio_ventana(const Value&){auto m=std::make_shared<std::map<std::string,Value>>();(*m)["ancho"]=Value{800.0};(*m)["alto"]=Value{600.0};return Value{m};}
-static Value cfv_sdl_titulo(const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
-static Value cfv_sdl_abierto(const Value&){return Value{false};}
-static Value cfv_sdl_cerrar(const Value&){return Value{};}
-static Value cfv_sdl_terminar(const Value&){return Value{};}
-static Value cfv_sdl_dibujar_pixel(const Value&,const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
-static Value cfv_sdl_color_fondo(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+[[maybe_unused]] static Value cfv_sdl_tiempo(const Value&){return Value{(double)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()};}
+[[maybe_unused]] static Value cfv_sdl_tamanio_ventana(const Value&){auto m=std::make_shared<std::map<std::string,Value>>();(*m)["ancho"]=Value{800.0};(*m)["alto"]=Value{600.0};return Value{m};}
+[[maybe_unused]] static Value cfv_sdl_titulo(const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+[[maybe_unused]] static Value cfv_sdl_abierto(const Value&){return Value{false};}
+[[maybe_unused]] static Value cfv_sdl_cerrar(const Value&){return Value{};}
+[[maybe_unused]] static Value cfv_sdl_terminar(const Value&){return Value{};}
+[[maybe_unused]] static Value cfv_sdl_dibujar_pixel(const Value&,const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
+[[maybe_unused]] static Value cfv_sdl_color_fondo(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("SDL2 no disponible");}
 #ifdef CFV_WITH_SDL2_MIXER
-static Value cfv_sdl_cargar_sonido(const Value&){throw std::runtime_error("SDL2 no disponible");}
-static Value cfv_sdl_reproducir_sonido(const Value&){throw std::runtime_error("SDL2 no disponible");}
-static Value cfv_sdl_cargar_musica_fn(const Value&){throw std::runtime_error("SDL2 no disponible");}
+[[maybe_unused]] static Value cfv_sdl_cargar_sonido(const Value&){throw std::runtime_error("SDL2 no disponible");}
+[[maybe_unused]] static Value cfv_sdl_reproducir_sonido(const Value&){throw std::runtime_error("SDL2 no disponible");}
+[[maybe_unused]] static Value cfv_sdl_cargar_musica_fn(const Value&){throw std::runtime_error("SDL2 no disponible");}
 #endif
 #endif
 
@@ -926,7 +926,7 @@ static std::map<int, CfvGLContext> cfv_gl_contexts;
 static int cfv_gl_next_ctx = 1;
 
 // gl3d_iniciar(sdl_win_id) → gl_ctx_id  (crear contexto OpenGL para una ventana SDL)
-static Value cfv_gl3d_iniciar(const Value& id_v) {
+[[maybe_unused]] static Value cfv_gl3d_iniciar(const Value& id_v) {
 #ifdef CFV_WITH_SDL2
     int win_id = (int)numero(id_v);
     auto it = cfv_sdl_windows.find(win_id);
@@ -948,7 +948,7 @@ static Value cfv_gl3d_iniciar(const Value& id_v) {
 }
 
 // gl3d_limpiar(r, g, b, a) → nulo
-static Value cfv_gl3d_limpiar(const Value& r_v, const Value& g_v, const Value& b_v, const Value& a_v) {
+[[maybe_unused]] static Value cfv_gl3d_limpiar(const Value& r_v, const Value& g_v, const Value& b_v, const Value& a_v) {
     glClearColor((GLfloat)(numero(r_v)/255.0),(GLfloat)(numero(g_v)/255.0),
                  (GLfloat)(numero(b_v)/255.0),(GLfloat)(numero(a_v)/255.0));
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -956,20 +956,20 @@ static Value cfv_gl3d_limpiar(const Value& r_v, const Value& g_v, const Value& b
 }
 
 // gl3d_viewport(x, y, ancho, alto) → nulo
-static Value cfv_gl3d_viewport(const Value& x_v, const Value& y_v, const Value& w_v, const Value& h_v) {
+[[maybe_unused]] static Value cfv_gl3d_viewport(const Value& x_v, const Value& y_v, const Value& w_v, const Value& h_v) {
     glViewport((GLint)numero(x_v),(GLint)numero(y_v),(GLsizei)numero(w_v),(GLsizei)numero(h_v));
     return Value{};
 }
 
 // gl3d_profundidad(activar) → nulo
-static Value cfv_gl3d_profundidad(const Value& v) {
+[[maybe_unused]] static Value cfv_gl3d_profundidad(const Value& v) {
     if (verdad(v)) { glEnable(GL_DEPTH_TEST); glDepthFunc(GL_LESS); }
     else glDisable(GL_DEPTH_TEST);
     return Value{};
 }
 
 // gl3d_shader(tipo, codigo_glsl) → shader_id  (tipo: "vertex" o "fragment")
-static Value cfv_gl3d_shader(const Value& tipo_v, const Value& src_v) {
+[[maybe_unused]] static Value cfv_gl3d_shader(const Value& tipo_v, const Value& src_v) {
     if (tipo_v.index()!=2||src_v.index()!=2) throw std::runtime_error("gl3d_shader: requiere tipo y codigo");
     const std::string& tipo = std::get<std::string>(tipo_v.data);
     const std::string& src  = std::get<std::string>(src_v.data);
@@ -988,7 +988,7 @@ static Value cfv_gl3d_shader(const Value& tipo_v, const Value& src_v) {
 }
 
 // gl3d_programa(vert_id, frag_id) → prog_id
-static Value cfv_gl3d_programa(const Value& v_v, const Value& f_v) {
+[[maybe_unused]] static Value cfv_gl3d_programa(const Value& v_v, const Value& f_v) {
     GLuint prog = glCreateProgram();
     glAttachShader(prog, (GLuint)numero(v_v));
     glAttachShader(prog, (GLuint)numero(f_v));
@@ -1005,13 +1005,13 @@ static Value cfv_gl3d_programa(const Value& v_v, const Value& f_v) {
 }
 
 // gl3d_usar_programa(prog_id) → nulo
-static Value cfv_gl3d_usar_programa(const Value& v) {
+[[maybe_unused]] static Value cfv_gl3d_usar_programa(const Value& v) {
     glUseProgram((GLuint)numero(v));
     return Value{};
 }
 
 // gl3d_vbo(lista_numeros) → vbo_id  (crea VBO + VAO con los vertices dados)
-static Value cfv_gl3d_vbo(const Value& datos_v) {
+[[maybe_unused]] static Value cfv_gl3d_vbo(const Value& datos_v) {
     auto* lista = std::get_if<Lista>(&datos_v.data);
     auto* arr   = std::get_if<FastArray>(&datos_v.data);
     std::vector<GLfloat> verts;
@@ -1031,7 +1031,7 @@ static Value cfv_gl3d_vbo(const Value& datos_v) {
 
 // gl3d_atributo(vbo_id, index, size, stride, offset) → nulo
 // Configura un vertex attribute pointer
-static Value cfv_gl3d_atributo(const Value& vbo_v, const Value& idx_v, const Value& size_v, const Value& stride_v, const Value& off_v) {
+[[maybe_unused]] static Value cfv_gl3d_atributo(const Value& vbo_v, const Value& idx_v, const Value& size_v, const Value& stride_v, const Value& off_v) {
     uint64_t combined = (uint64_t)(int64_t)numero(vbo_v);
     GLuint vao = (GLuint)(combined >> 32);
     GLuint vbo = (GLuint)(combined & 0xFFFFFFFF);
@@ -1047,7 +1047,7 @@ static Value cfv_gl3d_atributo(const Value& vbo_v, const Value& idx_v, const Val
 }
 
 // gl3d_dibujar(vbo_id, num_vertices, modo="triangulos") → nulo
-static Value cfv_gl3d_dibujar(const Value& vbo_v, const Value& n_v, const Value& modo_v) {
+[[maybe_unused]] static Value cfv_gl3d_dibujar(const Value& vbo_v, const Value& n_v, const Value& modo_v) {
     uint64_t combined = (uint64_t)(int64_t)numero(vbo_v);
     GLuint vao = (GLuint)(combined >> 32);
     glBindVertexArray(vao);
@@ -1064,7 +1064,7 @@ static Value cfv_gl3d_dibujar(const Value& vbo_v, const Value& n_v, const Value&
 }
 
 // gl3d_uniforme_f(prog, nombre, valor) → nulo
-static Value cfv_gl3d_uniforme_f(const Value& prog_v, const Value& nom_v, const Value& val_v) {
+[[maybe_unused]] static Value cfv_gl3d_uniforme_f(const Value& prog_v, const Value& nom_v, const Value& val_v) {
     if (nom_v.index()!=2) throw std::runtime_error("gl3d_uniforme_f: requiere nombre");
     GLint loc = glGetUniformLocation((GLuint)numero(prog_v), std::get<std::string>(nom_v.data).c_str());
     glUniform1f(loc, (GLfloat)numero(val_v));
@@ -1072,7 +1072,7 @@ static Value cfv_gl3d_uniforme_f(const Value& prog_v, const Value& nom_v, const 
 }
 
 // gl3d_uniforme_vec3(prog, nombre, x, y, z) → nulo
-static Value cfv_gl3d_uniforme_vec3(const Value& prog_v, const Value& nom_v, const Value& x, const Value& y, const Value& z) {
+[[maybe_unused]] static Value cfv_gl3d_uniforme_vec3(const Value& prog_v, const Value& nom_v, const Value& x, const Value& y, const Value& z) {
     if (nom_v.index()!=2) throw std::runtime_error("gl3d_uniforme_vec3: requiere nombre");
     GLint loc = glGetUniformLocation((GLuint)numero(prog_v), std::get<std::string>(nom_v.data).c_str());
     glUniform3f(loc, (GLfloat)numero(x), (GLfloat)numero(y), (GLfloat)numero(z));
@@ -1080,7 +1080,7 @@ static Value cfv_gl3d_uniforme_vec3(const Value& prog_v, const Value& nom_v, con
 }
 
 // gl3d_uniforme_mat4(prog, nombre, lista_16) → nulo
-static Value cfv_gl3d_uniforme_mat4(const Value& prog_v, const Value& nom_v, const Value& mat_v) {
+[[maybe_unused]] static Value cfv_gl3d_uniforme_mat4(const Value& prog_v, const Value& nom_v, const Value& mat_v) {
     if (nom_v.index()!=2) throw std::runtime_error("gl3d_uniforme_mat4: requiere nombre");
     auto* lista = std::get_if<Lista>(&mat_v.data);
     if (!lista || (*lista)->size() < 16) throw std::runtime_error("gl3d_uniforme_mat4: requiere lista de 16 numeros");
@@ -1092,7 +1092,7 @@ static Value cfv_gl3d_uniforme_mat4(const Value& prog_v, const Value& nom_v, con
 }
 
 // gl3d_intercambiar(sdl_win_id) → nulo  (swap buffers)
-static Value cfv_gl3d_intercambiar(const Value& id_v) {
+[[maybe_unused]] static Value cfv_gl3d_intercambiar(const Value& id_v) {
 #ifdef CFV_WITH_SDL2
     int win_id = (int)numero(id_v);
     auto it = cfv_sdl_windows.find(win_id);
@@ -1102,7 +1102,7 @@ static Value cfv_gl3d_intercambiar(const Value& id_v) {
 }
 
 // gl3d_textura(ancho, alto, datos_rgba) → tex_id
-static Value cfv_gl3d_textura(const Value& w_v, const Value& h_v, const Value& datos_v) {
+[[maybe_unused]] static Value cfv_gl3d_textura(const Value& w_v, const Value& h_v, const Value& datos_v) {
     int w=(int)numero(w_v), h=(int)numero(h_v);
     auto* lista = std::get_if<Lista>(&datos_v.data);
     std::vector<uint8_t> px;
@@ -1117,7 +1117,7 @@ static Value cfv_gl3d_textura(const Value& w_v, const Value& h_v, const Value& d
 }
 
 // gl3d_usar_textura(tex_id, unidad=0) → nulo
-static Value cfv_gl3d_usar_textura(const Value& tex_v, const Value& unit_v) {
+[[maybe_unused]] static Value cfv_gl3d_usar_textura(const Value& tex_v, const Value& unit_v) {
     int unit = unit_v.index()==0 ? 0 : (int)numero(unit_v);
     glActiveTexture(GL_TEXTURE0 + unit);
     glBindTexture(GL_TEXTURE_2D, (GLuint)numero(tex_v));
@@ -1125,7 +1125,7 @@ static Value cfv_gl3d_usar_textura(const Value& tex_v, const Value& unit_v) {
 }
 
 // gl3d_eliminar_vbo(vbo_id) → nulo
-static Value cfv_gl3d_eliminar_vbo(const Value& vbo_v) {
+[[maybe_unused]] static Value cfv_gl3d_eliminar_vbo(const Value& vbo_v) {
     uint64_t combined = (uint64_t)(int64_t)numero(vbo_v);
     GLuint vao = (GLuint)(combined >> 32);
     GLuint vbo = (GLuint)(combined & 0xFFFFFFFF);
@@ -1135,7 +1135,7 @@ static Value cfv_gl3d_eliminar_vbo(const Value& vbo_v) {
 }
 
 // gl3d_cerrar(ctx_id) → nulo
-static Value cfv_gl3d_cerrar(const Value& v) {
+[[maybe_unused]] static Value cfv_gl3d_cerrar(const Value& v) {
 #ifdef CFV_WITH_SDL2
     auto it = cfv_gl_contexts.find((int)numero(v));
     if (it != cfv_gl_contexts.end()) {
@@ -1148,69 +1148,69 @@ static Value cfv_gl3d_cerrar(const Value& v) {
 
 #else
 // Stubs sin OpenGL
-static Value cfv_gl3d_iniciar(const Value&){throw std::runtime_error("gl3d_iniciar: compilar con -DCFV_WITH_OPENGL");}
-static Value cfv_gl3d_limpiar(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_viewport(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_profundidad(const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_shader(const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_programa(const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_usar_programa(const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_vbo(const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_atributo(const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_dibujar(const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_uniforme_f(const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_uniforme_vec3(const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_uniforme_mat4(const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_intercambiar(const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_textura(const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_usar_textura(const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_eliminar_vbo(const Value&){throw std::runtime_error("OpenGL no disponible");}
-static Value cfv_gl3d_cerrar(const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_iniciar(const Value&){throw std::runtime_error("gl3d_iniciar: compilar con -DCFV_WITH_OPENGL");}
+[[maybe_unused]] static Value cfv_gl3d_limpiar(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_viewport(const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_profundidad(const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_shader(const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_programa(const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_usar_programa(const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_vbo(const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_atributo(const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_dibujar(const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_uniforme_f(const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_uniforme_vec3(const Value&,const Value&,const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_uniforme_mat4(const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_intercambiar(const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_textura(const Value&,const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_usar_textura(const Value&,const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_eliminar_vbo(const Value&){throw std::runtime_error("OpenGL no disponible");}
+[[maybe_unused]] static Value cfv_gl3d_cerrar(const Value&){throw std::runtime_error("OpenGL no disponible");}
 #endif
 
-static Value cfv_raiz(const Value&v){double n=numero(v);if(n<0)throw std::runtime_error("no existe raíz real negativa");return std::sqrt(n);}static Value cfv_absoluto(const Value&v){return std::abs(numero(v));}static Value cfv_redondear(const Value&v){return std::round(numero(v));}static Value cfv_potencia(const Value&a,const Value&b){return std::pow(numero(a),numero(b));}
+[[maybe_unused]] static Value cfv_raiz(const Value&v){double n=numero(v);if(n<0)throw std::runtime_error("no existe raíz real negativa");return std::sqrt(n);}[[maybe_unused]] static Value cfv_absoluto(const Value&v){return std::abs(numero(v));}[[maybe_unused]] static Value cfv_redondear(const Value&v){return std::round(numero(v));}[[maybe_unused]] static Value cfv_potencia(const Value&a,const Value&b){return std::pow(numero(a),numero(b));}
 // ── nuevas funciones stdlib ────────────────────────────────────────────────
-static Value cfv_texto_mayusculas(const Value&v){if(v.index()!=2)throw std::runtime_error("texto_mayusculas requiere texto");std::string s=std::get<std::string>(v.data);for(auto&c:s)c=(char)std::toupper((unsigned char)c);return s;}
-static Value cfv_texto_minusculas(const Value&v){if(v.index()!=2)throw std::runtime_error("texto_minusculas requiere texto");std::string s=std::get<std::string>(v.data);for(auto&c:s)c=(char)std::tolower((unsigned char)c);return s;}
-static Value cfv_texto_recortar(const Value&v){if(v.index()!=2)throw std::runtime_error("texto_recortar requiere texto");std::string s=std::get<std::string>(v.data);size_t a=s.find_first_not_of(" \t\r\n");size_t b=s.find_last_not_of(" \t\r\n");if(a==std::string::npos)return std::string("");return s.substr(a,b-a+1);}
-static Value cfv_texto_empieza_con(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_empieza_con requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&pre=std::get<std::string>(p.data);return (bool)(s.size()>=pre.size()&&s.compare(0,pre.size(),pre)==0);}
-static Value cfv_texto_termina_con(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_termina_con requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&suf=std::get<std::string>(p.data);return (bool)(s.size()>=suf.size()&&s.compare(s.size()-suf.size(),suf.size(),suf)==0);}
-static Value cfv_texto_contiene(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_contiene requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&sub=std::get<std::string>(p.data);return (bool)(s.find(sub)!=std::string::npos);}
-static Value cfv_texto_indice(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_indice requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&sub=std::get<std::string>(p.data);size_t pos=s.find(sub);return pos==std::string::npos?(double)-1:(double)pos;}
-static Value cfv_texto_repetir(const Value&v,const Value&n){if(v.index()!=2)throw std::runtime_error("texto_repetir requiere texto y número");const auto&s=std::get<std::string>(v.data);int cnt=(int)numero(n);if(cnt<=0)return std::string("");std::string r;r.reserve(s.size()*(size_t)cnt);for(int i=0;i<cnt;i++)r+=s;return r;}
-static Value cfv_texto_reemplazar(const Value&v,const Value&oldV,const Value&newV){if(v.index()!=2||oldV.index()!=2||newV.index()!=2)throw std::runtime_error("texto_reemplazar requiere tres textos");std::string s=std::get<std::string>(v.data);const auto&viejo=std::get<std::string>(oldV.data);const auto&nuevo=std::get<std::string>(newV.data);if(viejo.empty())return s;size_t pos=0;while((pos=s.find(viejo,pos))!=std::string::npos){s.replace(pos,viejo.size(),nuevo);pos+=nuevo.size();}return s;}
-static Value cfv_texto_dividir(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_dividir requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&sep=std::get<std::string>(p.data);auto result=std::make_shared<std::vector<Value>>();if(sep.empty()){for(char c:s)result->push_back(Value{std::string(1,c)});return Value{result};}size_t start=0,pos=0;while((pos=s.find(sep,start))!=std::string::npos){result->push_back(Value{s.substr(start,pos-start)});start=pos+sep.size();}result->push_back(Value{s.substr(start)});return Value{result};}
-static Value cfv_texto_a_numero(const Value&v){if(v.index()!=2)throw std::runtime_error("texto_a_numero requiere texto");try{return std::stod(std::get<std::string>(v.data));}catch(...){throw std::runtime_error("texto_a_numero: no es un número válido");}}
-static Value cfv_numero_a_texto(const Value&v){return Value{texto(v)};}
-static Value cfv_piso(const Value&v){return std::floor(numero(v));}
-static Value cfv_techo(const Value&v){return std::ceil(numero(v));}
-static Value cfv_maximo(const Value&a,const Value&b){return numero(a)>=numero(b)?a:b;}
-static Value cfv_minimo(const Value&a,const Value&b){return numero(a)<=numero(b)?a:b;}
-static Value cfv_lista_ordenar(const Value&v){if(v.index()!=4)throw std::runtime_error("lista_ordenar requiere una lista");auto copy=std::make_shared<std::vector<Value>>(*std::get<Lista>(v.data));std::sort(copy->begin(),copy->end(),[](const Value&x,const Value&y){if(x.index()==2&&y.index()==2)return std::get<std::string>(x.data)<std::get<std::string>(y.data);if(x.index()==1&&y.index()==1)return std::get<double>(x.data)<std::get<double>(y.data);return false;});return Value{copy};}
-static Value cfv_lista_invertir(const Value&v){if(v.index()!=4)throw std::runtime_error("lista_invertir requiere una lista");auto copy=std::make_shared<std::vector<Value>>(*std::get<Lista>(v.data));std::reverse(copy->begin(),copy->end());return Value{copy};}
-static Value cfv_lista_contiene(const Value&v,const Value&item){if(v.index()!=4)throw std::runtime_error("lista_contiene requiere una lista");for(const auto&el:*std::get<Lista>(v.data))if(texto(el)==texto(item))return Value{true};return Value{false};}
-static Value cfv_lista_unir(const Value&v,const Value&sep){if(v.index()!=4)throw std::runtime_error("lista_unir requiere una lista");const auto&list=*std::get<Lista>(v.data);std::string separator=sep.index()==2?std::get<std::string>(sep.data):",";std::string result;for(size_t i=0;i<list.size();i++){if(i)result+=separator;result+=texto(list[i]);}return Value{result};}
-static Value cfv_lista_rango(const Value&a,const Value&b){double start=numero(a),end=numero(b);auto result=std::make_shared<std::vector<Value>>();for(double i=start;i<end;i+=1.0)result->push_back(Value{i});return Value{result};}
-static Value cfv_lista_aplanar(const Value&v){if(v.index()!=4)throw std::runtime_error("lista_aplanar requiere una lista");auto result=std::make_shared<std::vector<Value>>();std::function<void(const Value&)>flatten=[&](const Value&x){if(x.index()==4){for(const auto&el:*std::get<Lista>(x.data))flatten(el);}else{result->push_back(x);}};flatten(v);return Value{result};}
-static Value cfv_tiempo_actual(){using namespace std::chrono;return duration<double>(system_clock::now().time_since_epoch()).count();}
-static Value cfv_argumentos_global;
-static Value cfv_argumentos(){return cfv_argumentos_global;}
+[[maybe_unused]] static Value cfv_texto_mayusculas(const Value&v){if(v.index()!=2)throw std::runtime_error("texto_mayusculas requiere texto");std::string s=std::get<std::string>(v.data);for(auto&c:s)c=(char)std::toupper((unsigned char)c);return s;}
+[[maybe_unused]] static Value cfv_texto_minusculas(const Value&v){if(v.index()!=2)throw std::runtime_error("texto_minusculas requiere texto");std::string s=std::get<std::string>(v.data);for(auto&c:s)c=(char)std::tolower((unsigned char)c);return s;}
+[[maybe_unused]] static Value cfv_texto_recortar(const Value&v){if(v.index()!=2)throw std::runtime_error("texto_recortar requiere texto");std::string s=std::get<std::string>(v.data);size_t a=s.find_first_not_of(" \t\r\n");size_t b=s.find_last_not_of(" \t\r\n");if(a==std::string::npos)return std::string("");return s.substr(a,b-a+1);}
+[[maybe_unused]] static Value cfv_texto_empieza_con(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_empieza_con requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&pre=std::get<std::string>(p.data);return (bool)(s.size()>=pre.size()&&s.compare(0,pre.size(),pre)==0);}
+[[maybe_unused]] static Value cfv_texto_termina_con(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_termina_con requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&suf=std::get<std::string>(p.data);return (bool)(s.size()>=suf.size()&&s.compare(s.size()-suf.size(),suf.size(),suf)==0);}
+[[maybe_unused]] static Value cfv_texto_contiene(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_contiene requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&sub=std::get<std::string>(p.data);return (bool)(s.find(sub)!=std::string::npos);}
+[[maybe_unused]] static Value cfv_texto_indice(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_indice requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&sub=std::get<std::string>(p.data);size_t pos=s.find(sub);return pos==std::string::npos?(double)-1:(double)pos;}
+[[maybe_unused]] static Value cfv_texto_repetir(const Value&v,const Value&n){if(v.index()!=2)throw std::runtime_error("texto_repetir requiere texto y número");const auto&s=std::get<std::string>(v.data);int cnt=(int)numero(n);if(cnt<=0)return std::string("");std::string r;r.reserve(s.size()*(size_t)cnt);for(int i=0;i<cnt;i++)r+=s;return r;}
+[[maybe_unused]] static Value cfv_texto_reemplazar(const Value&v,const Value&oldV,const Value&newV){if(v.index()!=2||oldV.index()!=2||newV.index()!=2)throw std::runtime_error("texto_reemplazar requiere tres textos");std::string s=std::get<std::string>(v.data);const auto&viejo=std::get<std::string>(oldV.data);const auto&nuevo=std::get<std::string>(newV.data);if(viejo.empty())return s;size_t pos=0;while((pos=s.find(viejo,pos))!=std::string::npos){s.replace(pos,viejo.size(),nuevo);pos+=nuevo.size();}return s;}
+[[maybe_unused]] static Value cfv_texto_dividir(const Value&v,const Value&p){if(v.index()!=2||p.index()!=2)throw std::runtime_error("texto_dividir requiere dos textos");const auto&s=std::get<std::string>(v.data);const auto&sep=std::get<std::string>(p.data);auto result=std::make_shared<std::vector<Value>>();if(sep.empty()){for(char c:s)result->push_back(Value{std::string(1,c)});return Value{result};}size_t start=0,pos=0;while((pos=s.find(sep,start))!=std::string::npos){result->push_back(Value{s.substr(start,pos-start)});start=pos+sep.size();}result->push_back(Value{s.substr(start)});return Value{result};}
+[[maybe_unused]] static Value cfv_texto_a_numero(const Value&v){if(v.index()!=2)throw std::runtime_error("texto_a_numero requiere texto");try{return std::stod(std::get<std::string>(v.data));}catch(...){throw std::runtime_error("texto_a_numero: no es un número válido");}}
+[[maybe_unused]] static Value cfv_numero_a_texto(const Value&v){return Value{texto(v)};}
+[[maybe_unused]] static Value cfv_piso(const Value&v){return std::floor(numero(v));}
+[[maybe_unused]] static Value cfv_techo(const Value&v){return std::ceil(numero(v));}
+[[maybe_unused]] static Value cfv_maximo(const Value&a,const Value&b){return numero(a)>=numero(b)?a:b;}
+[[maybe_unused]] static Value cfv_minimo(const Value&a,const Value&b){return numero(a)<=numero(b)?a:b;}
+[[maybe_unused]] static Value cfv_lista_ordenar(const Value&v){if(v.index()!=4)throw std::runtime_error("lista_ordenar requiere una lista");auto copy=std::make_shared<std::vector<Value>>(*std::get<Lista>(v.data));std::sort(copy->begin(),copy->end(),[](const Value&x,const Value&y){if(x.index()==2&&y.index()==2)return std::get<std::string>(x.data)<std::get<std::string>(y.data);if(x.index()==1&&y.index()==1)return std::get<double>(x.data)<std::get<double>(y.data);return false;});return Value{copy};}
+[[maybe_unused]] static Value cfv_lista_invertir(const Value&v){if(v.index()!=4)throw std::runtime_error("lista_invertir requiere una lista");auto copy=std::make_shared<std::vector<Value>>(*std::get<Lista>(v.data));std::reverse(copy->begin(),copy->end());return Value{copy};}
+[[maybe_unused]] static Value cfv_lista_contiene(const Value&v,const Value&item){if(v.index()!=4)throw std::runtime_error("lista_contiene requiere una lista");for(const auto&el:*std::get<Lista>(v.data))if(texto(el)==texto(item))return Value{true};return Value{false};}
+[[maybe_unused]] static Value cfv_lista_unir(const Value&v,const Value&sep){if(v.index()!=4)throw std::runtime_error("lista_unir requiere una lista");const auto&list=*std::get<Lista>(v.data);std::string separator=sep.index()==2?std::get<std::string>(sep.data):",";std::string result;for(size_t i=0;i<list.size();i++){if(i)result+=separator;result+=texto(list[i]);}return Value{result};}
+[[maybe_unused]] static Value cfv_lista_rango(const Value&a,const Value&b){double start=numero(a),end=numero(b);auto result=std::make_shared<std::vector<Value>>();for(double i=start;i<end;i+=1.0)result->push_back(Value{i});return Value{result};}
+[[maybe_unused]] static Value cfv_lista_aplanar(const Value&v){if(v.index()!=4)throw std::runtime_error("lista_aplanar requiere una lista");auto result=std::make_shared<std::vector<Value>>();std::function<void(const Value&)>flatten=[&](const Value&x){if(x.index()==4){for(const auto&el:*std::get<Lista>(x.data))flatten(el);}else{result->push_back(x);}};flatten(v);return Value{result};}
+[[maybe_unused]] static Value cfv_tiempo_actual(){using namespace std::chrono;return duration<double>(system_clock::now().time_since_epoch()).count();}
+[[maybe_unused]] static Value cfv_argumentos_global;
+[[maybe_unused]] static Value cfv_argumentos(){return cfv_argumentos_global;}
 static std::mutex cfv_jit_mutex;
 static std::map<std::string,size_t>cfv_jit_counts;
-static void cfv_jit_hit(const std::string&name){std::lock_guard<std::mutex>lock(cfv_jit_mutex);++cfv_jit_counts[name];}
-static Value cfv_jit_estado(const Value&name){if(name.index()!=2)throw std::runtime_error("jit_estado requiere texto");std::lock_guard<std::mutex>lock(cfv_jit_mutex);return (double)cfv_jit_counts[std::get<std::string>(name.data)];}
-static Value cfv_jit_caliente(const Value&name){return numero(cfv_jit_estado(name))>=1000.0;}
+[[maybe_unused]] static void cfv_jit_hit(const std::string&name){std::lock_guard<std::mutex>lock(cfv_jit_mutex);++cfv_jit_counts[name];}
+[[maybe_unused]] static Value cfv_jit_estado(const Value&name){if(name.index()!=2)throw std::runtime_error("jit_estado requiere texto");std::lock_guard<std::mutex>lock(cfv_jit_mutex);return (double)cfv_jit_counts[std::get<std::string>(name.data)];}
+[[maybe_unused]] static Value cfv_jit_caliente(const Value&name){return numero(cfv_jit_estado(name))>=1000.0;}
 static std::mutex cfv_cluster_mutex;
 static std::map<std::string,std::string>cfv_cluster_symbols;
-static void cfv_cluster_register(const std::string&name,const std::string&kind){std::lock_guard<std::mutex>lock(cfv_cluster_mutex);cfv_cluster_symbols[name]=kind;}
-static Value cfv_cluster_estado(){std::lock_guard<std::mutex>lock(cfv_cluster_mutex);auto values=std::make_shared<std::vector<Value>>();for(const auto&entry:cfv_cluster_symbols)values->push_back(entry.second+":"+entry.first);return values;}
-static Value cfv_afirmar(const Value&condition,const Value&message=Value{std::string("la condición es falsa")}){if(condition.index()!=3)throw std::runtime_error("afirmar requiere booleano");if(!verdad(condition))throw std::runtime_error("afirmación fallida: "+texto(message));return Value{};}
-static Value cfv_parallel_unary(const std::function<Value(Value)>&fn,const Value&jobs){auto list=std::get_if<Lista>(&jobs.data);if(!list)throw std::runtime_error("paralelo requiere una lista");std::vector<std::future<Value>>running;running.reserve((*list)->size());for(const auto&job:**list)running.push_back(std::async(std::launch::async,[fn,job]{return fn(job);}));auto results=std::make_shared<std::vector<Value>>();results->reserve(running.size());for(auto&future:running)results->push_back(future.get());return results;}
-static Value cfv_nuget_path(const std::string&package){std::vector<std::filesystem::path>paths={cfv_base_archivos/(package+".dylib"),cfv_base_archivos/"build"/(package+".dylib"),cfv_base_archivos.parent_path()/"build"/package/(package+".dylib"),cfv_base_archivos.parent_path()/"build"/"csharp-native"/(package+".dylib")};for(const auto&path:paths)if(std::filesystem::exists(path))return path.string();return paths.front().string();}
+[[maybe_unused]] static void cfv_cluster_register(const std::string&name,const std::string&kind){std::lock_guard<std::mutex>lock(cfv_cluster_mutex);cfv_cluster_symbols[name]=kind;}
+[[maybe_unused]] static Value cfv_cluster_estado(){std::lock_guard<std::mutex>lock(cfv_cluster_mutex);auto values=std::make_shared<std::vector<Value>>();for(const auto&entry:cfv_cluster_symbols)values->push_back(entry.second+":"+entry.first);return values;}
+[[maybe_unused]] static Value cfv_afirmar(const Value&condition,const Value&message=Value{std::string("la condición es falsa")}){if(condition.index()!=3)throw std::runtime_error("afirmar requiere booleano");if(!verdad(condition))throw std::runtime_error("afirmación fallida: "+texto(message));return Value{};}
+[[maybe_unused]] static Value cfv_parallel_unary(const std::function<Value(Value)>&fn,const Value&jobs){auto list=std::get_if<Lista>(&jobs.data);if(!list)throw std::runtime_error("paralelo requiere una lista");std::vector<std::future<Value>>running;running.reserve((*list)->size());for(const auto&job:**list)running.push_back(std::async(std::launch::async,[fn,job]{return fn(job);}));auto results=std::make_shared<std::vector<Value>>();results->reserve(running.size());for(auto&future:running)results->push_back(future.get());return results;}
+[[maybe_unused]] static Value cfv_nuget_path(const std::string&package){std::vector<std::filesystem::path>paths={cfv_base_archivos/(package+".dylib"),cfv_base_archivos/"build"/(package+".dylib"),cfv_base_archivos.parent_path()/"build"/package/(package+".dylib"),cfv_base_archivos.parent_path()/"build"/"csharp-native"/(package+".dylib")};for(const auto&path:paths)if(std::filesystem::exists(path))return path.string();return paths.front().string();}
 static std::vector<CfvValue> cfv_to_abi(const Value&args,std::vector<std::string>&storage){auto p=std::get_if<Lista>(&args.data);if(!p)throw std::runtime_error("los argumentos extranjeros deben ser una lista");std::vector<CfvValue>out;storage.reserve((*p)->size());for(const auto&v:**p){if(v.index()==0)out.push_back({CFV_NULL,0,0,nullptr,nullptr,nullptr});else if(auto n=std::get_if<double>(&v.data)){if(std::floor(*n)==*n)out.push_back({CFV_INTEGER,(int64_t)*n,0,nullptr,nullptr,nullptr});else out.push_back({CFV_DECIMAL,0,*n,nullptr,nullptr,nullptr});}else if(auto s=std::get_if<std::string>(&v.data)){storage.push_back(*s);out.push_back({CFV_TEXT,0,0,storage.back().c_str(),nullptr,nullptr});}else if(auto b=std::get_if<bool>(&v.data))out.push_back({CFV_BOOLEAN,*b?1:0,0,nullptr,nullptr,nullptr});else throw std::runtime_error("ABI extranjero solo acepta números, textos, booleanos y nulo");}return out;}
 struct CfvResultGuard{CfvValue*value;~CfvResultGuard(){if(value&&value->release){auto release=value->release;auto owner=value->owner;value->release=nullptr;release(owner);}}};
-static Value cfv_from_abi(const CfvValue&v){if(v.type==CFV_NULL)return Value{};if(v.type==CFV_INTEGER)return (double)v.integer;if(v.type==CFV_DECIMAL)return v.decimal;if(v.type==CFV_TEXT)return std::string(v.text?v.text:"");if(v.type==CFV_BOOLEAN)return Value{v.integer!=0};throw std::runtime_error("tipo ABI de retorno desconocido");}
-static Value cfv_invoke_foreign(CfvForeignFunction fn,const Value&args){std::vector<std::string>storage;auto abi=cfv_to_abi(args,storage);CfvValue result{CFV_NULL,0,0,nullptr,nullptr,nullptr};CfvResultGuard guard{&result};char error[1024]={0};int status=0;try{status=fn(abi.data(),abi.size(),&result,error,sizeof(error));}catch(const std::exception&e){throw std::runtime_error(std::string("excepción C++: ")+e.what());}catch(...){throw std::runtime_error("excepción nativa desconocida");}if(status!=0)throw std::runtime_error(error[0]?error:"la función extranjera falló");return cfv_from_abi(result);}
+[[maybe_unused]] static Value cfv_from_abi(const CfvValue&v){if(v.type==CFV_NULL)return Value{};if(v.type==CFV_INTEGER)return (double)v.integer;if(v.type==CFV_DECIMAL)return v.decimal;if(v.type==CFV_TEXT)return std::string(v.text?v.text:"");if(v.type==CFV_BOOLEAN)return Value{v.integer!=0};throw std::runtime_error("tipo ABI de retorno desconocido");}
+[[maybe_unused]] static Value cfv_invoke_foreign(CfvForeignFunction fn,const Value&args){std::vector<std::string>storage;auto abi=cfv_to_abi(args,storage);CfvValue result{CFV_NULL,0,0,nullptr,nullptr,nullptr};CfvResultGuard guard{&result};char error[1024]={0};int status=0;try{status=fn(abi.data(),abi.size(),&result,error,sizeof(error));}catch(const std::exception&e){throw std::runtime_error(std::string("excepción C++: ")+e.what());}catch(...){throw std::runtime_error("excepción nativa desconocida");}if(status!=0)throw std::runtime_error(error[0]?error:"la función extranjera falló");return cfv_from_abi(result);}
 struct CfvAbiStorageV2{
 std::deque<std::string>texts;
 std::deque<std::vector<CfvValueV2>>lists;
@@ -1241,7 +1241,7 @@ return item;
 }
 static std::vector<CfvValueV2>cfv_to_abi_v2(const Value&args,CfvAbiStorageV2&storage){auto p=std::get_if<Lista>(&args.data);if(!p)throw std::runtime_error("los argumentos ABI V2 deben ser una lista");std::vector<CfvValueV2>out;out.reserve((*p)->size());for(const auto&v:**p)out.push_back(cfv_to_abi_v2_value(v,storage));return out;}
 struct CfvResultGuardV2{CfvValueV2*value;~CfvResultGuardV2(){if(value&&value->release){auto release=value->release;auto owner=value->owner;value->release=nullptr;release(owner);}}};
-static Value cfv_from_abi_v2(const CfvValueV2&v,uint32_t depth=0){
+[[maybe_unused]] static Value cfv_from_abi_v2(const CfvValueV2&v,uint32_t depth=0){
 if(depth>CFV_V2_MAX_DEPTH)throw std::runtime_error("resultado ABI V2 excede la profundidad máxima");
 if(v.struct_size<sizeof(CfvValueV2))throw std::runtime_error("resultado ABI V2 usa una estructura incompleta");
 if(v.type==CFV_NULL)return Value{};if(v.type==CFV_INTEGER)return (double)v.integer;if(v.type==CFV_DECIMAL)return v.decimal;if(v.type==CFV_BOOLEAN)return Value{v.integer!=0};
@@ -1252,10 +1252,10 @@ if(v.type==CFV_MAP){if(!v.data&&v.length)throw std::runtime_error("mapa ABI V2 t
 if(v.type==CFV_RECORD){if(!v.data)throw std::runtime_error("registro ABI V2 tiene puntero nulo");auto record=static_cast<const CfvRecordV2*>(v.data);if(record->field_count>1000000ull||(!record->fields&&record->field_count))throw std::runtime_error("registro ABI V2 inválido");auto values=std::make_shared<std::map<std::string,Value>>();(*values)["__clase"]=std::string(record->type_name?record->type_name:"",record->type_name_length);for(uint64_t i=0;i<record->field_count;++i){const auto&field=record->fields[i];if(field.value.release)throw std::runtime_error("campo ABI V2 anidado no puede tener liberador");(*values)[std::string(field.name?field.name:"",field.name_length)]=cfv_from_abi_v2(field.value,depth+1);}return values;}
 throw std::runtime_error("tipo ABI V2 de retorno desconocido");
 }
-static Value cfv_invoke_foreign_v2(CfvForeignFunctionV2 fn,const Value&args){CfvAbiStorageV2 storage;auto abi=cfv_to_abi_v2(args,storage);CfvValueV2 result{sizeof(CfvValueV2),CFV_NULL,0,0,0,0,nullptr,nullptr,nullptr};CfvResultGuardV2 guard{&result};char error[1024]={0};int status=0;try{status=fn(CFV_ABI_V2,abi.data(),abi.size(),&result,error,sizeof(error));}catch(const std::exception&e){throw std::runtime_error(std::string("excepción C++ ABI V2: ")+e.what());}catch(...){throw std::runtime_error("excepción nativa ABI V2 desconocida");}if(status!=0)throw std::runtime_error(error[0]?error:"la función extranjera ABI V2 falló");return cfv_from_abi_v2(result);}
-static Value cfv_use_cpp(const Value&name,const Value&args){if(name.index()!=2)throw std::runtime_error("el nombre C++ debe ser texto");auto key=std::get<std::string>(name.data);auto&registry2=cfv_registry_v2();auto modern=registry2.find(key);if(modern!=registry2.end())return cfv_invoke_foreign_v2(modern->second,args);auto&registry=cfv_registry();auto it=registry.find(key);if(it==registry.end())throw std::runtime_error("función C++ no registrada: "+key);return cfv_invoke_foreign(it->second,args);}
+[[maybe_unused]] static Value cfv_invoke_foreign_v2(CfvForeignFunctionV2 fn,const Value&args){CfvAbiStorageV2 storage;auto abi=cfv_to_abi_v2(args,storage);CfvValueV2 result{sizeof(CfvValueV2),CFV_NULL,0,0,0,0,nullptr,nullptr,nullptr};CfvResultGuardV2 guard{&result};char error[1024]={0};int status=0;try{status=fn(CFV_ABI_V2,abi.data(),abi.size(),&result,error,sizeof(error));}catch(const std::exception&e){throw std::runtime_error(std::string("excepción C++ ABI V2: ")+e.what());}catch(...){throw std::runtime_error("excepción nativa ABI V2 desconocida");}if(status!=0)throw std::runtime_error(error[0]?error:"la función extranjera ABI V2 falló");return cfv_from_abi_v2(result);}
+[[maybe_unused]] static Value cfv_use_cpp(const Value&name,const Value&args){if(name.index()!=2)throw std::runtime_error("el nombre C++ debe ser texto");auto key=std::get<std::string>(name.data);auto&registry2=cfv_registry_v2();auto modern=registry2.find(key);if(modern!=registry2.end())return cfv_invoke_foreign_v2(modern->second,args);auto&registry=cfv_registry();auto it=registry.find(key);if(it==registry.end())throw std::runtime_error("función C++ no registrada: "+key);return cfv_invoke_foreign(it->second,args);}
 static std::map<std::string,void*>cfv_libraries;
-static Value cfv_use_native(const Value&path,const Value&symbol,const Value&args){if(path.index()!=2||symbol.index()!=2)throw std::runtime_error("ruta y símbolo deben ser texto");auto raw=std::filesystem::path(std::get<std::string>(path.data));auto file=(raw.is_absolute()?raw:cfv_base_archivos/raw).string();auto sym=std::get<std::string>(symbol.data);void*handle=nullptr;auto found=cfv_libraries.find(file);if(found!=cfv_libraries.end())handle=found->second;else{
+[[maybe_unused]] static Value cfv_use_native(const Value&path,const Value&symbol,const Value&args){if(path.index()!=2||symbol.index()!=2)throw std::runtime_error("ruta y símbolo deben ser texto");auto raw=std::filesystem::path(std::get<std::string>(path.data));auto file=(raw.is_absolute()?raw:cfv_base_archivos/raw).string();auto sym=std::get<std::string>(symbol.data);void*handle=nullptr;auto found=cfv_libraries.find(file);if(found!=cfv_libraries.end())handle=found->second;else{
 #ifdef _WIN32
 handle=(void*)LoadLibraryA(file.c_str());
 #else
@@ -1268,27 +1268,27 @@ auto fn=(CfvForeignFunction)GetProcAddress((HMODULE)handle,sym.c_str());
 auto fn=(CfvForeignFunction)dlsym(handle,sym.c_str());
 #endif
 if(!fn)throw std::runtime_error("símbolo extranjero no encontrado: "+sym);return cfv_invoke_foreign(fn,args);}
-static Value cfv_forge_bench(const std::function<Value()>&function,const Value&count){long long iterations=(long long)numero(count);if(iterations<1||iterations>10000000)throw std::runtime_error("forge_bench requiere 1..10.000.000 iteraciones");Value result;auto started=std::chrono::steady_clock::now();for(long long i=0;i<iterations;++i)result=function();double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();auto report=std::make_shared<std::map<std::string,Value>>();(*report)["resultado"]=result;(*report)["iteraciones"]=(double)iterations;(*report)["segundos"]=seconds;(*report)["por_segundo"]=seconds>0?iterations/seconds:0;return report;}
-static Value crear_lista(std::initializer_list<Value>v){return std::make_shared<std::vector<Value>>(v);}static Value crear_mapa(std::initializer_list<std::pair<const std::string,Value>>v){return std::make_shared<std::map<std::string,Value>>(v);}static Value crear_tupla(std::initializer_list<Value>v){auto out=std::make_shared<CfvTuple>();out->values.assign(v);return out;}static Value crear_conjunto(std::initializer_list<Value>v){auto out=std::make_shared<CfvSet>();for(const auto&item:v){auto key=cfv_canonical_json(item);bool exists=false;for(const auto&current:out->values)if(cfv_canonical_json(current)==key){exists=true;break;}if(!exists)out->values.push_back(item);}std::sort(out->values.begin(),out->values.end(),[](const Value&a,const Value&b){return cfv_canonical_json(a)<cfv_canonical_json(b);});return out;}
-static Value cfv_mover(Value value){return value;}static Value cfv_prestar(Value value){return value;}static Value cfv_prestar_mut(Value value){return value;}static Value cfv_soltar_prestamo(const Value&){return Value{};}static Value cfv_destruir(const Value&){return Value{};}
-static Value cfv_algunos(Value value){return crear_mapa({{"__opcion",Value{true}},{"tiene",Value{true}},{"valor",std::move(value)}});}static Value cfv_ninguno(){return crear_mapa({{"__opcion",Value{true}},{"tiene",Value{false}},{"valor",Value{}}});}
-static Mapa cfv_opcion_mapa(const Value&value){auto map=std::get_if<Mapa>(&value.data);if(!map||(*map)->find("__opcion")==(*map)->end())throw std::runtime_error("se esperaba una opcion");return *map;}static Value cfv_es_algunos(const Value&value){auto map=cfv_opcion_mapa(value);return verdad(map->at("tiene"));}static Value cfv_desenvolver(const Value&value){auto map=cfv_opcion_mapa(value);if(!verdad(map->at("tiene")))throw std::runtime_error("no se puede desenvolver ninguno");return map->at("valor");}
+[[maybe_unused]] static Value cfv_forge_bench(const std::function<Value()>&function,const Value&count){long long iterations=(long long)numero(count);if(iterations<1||iterations>10000000)throw std::runtime_error("forge_bench requiere 1..10.000.000 iteraciones");Value result;auto started=std::chrono::steady_clock::now();for(long long i=0;i<iterations;++i)result=function();double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();auto report=std::make_shared<std::map<std::string,Value>>();(*report)["resultado"]=result;(*report)["iteraciones"]=(double)iterations;(*report)["segundos"]=seconds;(*report)["por_segundo"]=seconds>0?iterations/seconds:0;return report;}
+[[maybe_unused]] static Value crear_lista(std::initializer_list<Value>v){return std::make_shared<std::vector<Value>>(v);}[[maybe_unused]] static Value crear_mapa(std::initializer_list<std::pair<const std::string,Value>>v){return std::make_shared<std::map<std::string,Value>>(v);}[[maybe_unused]] static Value crear_tupla(std::initializer_list<Value>v){auto out=std::make_shared<CfvTuple>();out->values.assign(v);return out;}[[maybe_unused]] static Value crear_conjunto(std::initializer_list<Value>v){auto out=std::make_shared<CfvSet>();for(const auto&item:v){auto key=cfv_canonical_json(item);bool exists=false;for(const auto&current:out->values)if(cfv_canonical_json(current)==key){exists=true;break;}if(!exists)out->values.push_back(item);}std::sort(out->values.begin(),out->values.end(),[](const Value&a,const Value&b){return cfv_canonical_json(a)<cfv_canonical_json(b);});return out;}
+[[maybe_unused]] static Value cfv_mover(Value value){return value;}[[maybe_unused]] static Value cfv_prestar(Value value){return value;}[[maybe_unused]] static Value cfv_prestar_mut(Value value){return value;}[[maybe_unused]] static Value cfv_soltar_prestamo(const Value&){return Value{};}[[maybe_unused]] static Value cfv_destruir(const Value&){return Value{};}
+[[maybe_unused]] static Value cfv_algunos(Value value){return crear_mapa({{"__opcion",Value{true}},{"tiene",Value{true}},{"valor",std::move(value)}});}[[maybe_unused]] static Value cfv_ninguno(){return crear_mapa({{"__opcion",Value{true}},{"tiene",Value{false}},{"valor",Value{}}});}
+static Mapa cfv_opcion_mapa(const Value&value){auto map=std::get_if<Mapa>(&value.data);if(!map||(*map)->find("__opcion")==(*map)->end())throw std::runtime_error("se esperaba una opcion");return *map;}[[maybe_unused]] static Value cfv_es_algunos(const Value&value){auto map=cfv_opcion_mapa(value);return verdad(map->at("tiene"));}[[maybe_unused]] static Value cfv_desenvolver(const Value&value){auto map=cfv_opcion_mapa(value);if(!verdad(map->at("tiene")))throw std::runtime_error("no se puede desenvolver ninguno");return map->at("valor");}
 static std::atomic<long long>cfv_next_task{1};static std::mutex cfv_task_mutex;static std::map<long long,std::shared_future<Value>>cfv_tasks;
-static Value cfv_tarea(std::function<Value()>job){auto id=cfv_next_task.fetch_add(1);auto future=std::async(std::launch::async,std::move(job)).share();{std::lock_guard<std::mutex>lock(cfv_task_mutex);cfv_tasks.emplace(id,std::move(future));}return (double)id;}
+[[maybe_unused]] static Value cfv_tarea(std::function<Value()>job){auto id=cfv_next_task.fetch_add(1);auto future=std::async(std::launch::async,std::move(job)).share();{std::lock_guard<std::mutex>lock(cfv_task_mutex);cfv_tasks.emplace(id,std::move(future));}return (double)id;}
 static std::shared_future<Value>cfv_task_future(const Value&handle){auto id=(long long)numero(handle);std::lock_guard<std::mutex>lock(cfv_task_mutex);auto found=cfv_tasks.find(id);if(found==cfv_tasks.end())throw std::runtime_error("tarea desconocida");return found->second;}
-static Value cfv_esperar(const Value&handle){return cfv_task_future(handle).get();}static Value cfv_esperar(const Value&handle,const Value&timeout){auto future=cfv_task_future(handle);if(future.wait_for(std::chrono::milliseconds((long long)numero(timeout)))!=std::future_status::ready)throw std::runtime_error("tiempo de espera agotado");return future.get();}static Value cfv_cancelar(const Value&handle){(void)cfv_task_future(handle);return false;}
+[[maybe_unused]] static Value cfv_esperar(const Value&handle){return cfv_task_future(handle).get();}[[maybe_unused]] static Value cfv_esperar(const Value&handle,const Value&timeout){auto future=cfv_task_future(handle);if(future.wait_for(std::chrono::milliseconds((long long)numero(timeout)))!=std::future_status::ready)throw std::runtime_error("tiempo de espera agotado");return future.get();}[[maybe_unused]] static Value cfv_cancelar(const Value&handle){(void)cfv_task_future(handle);return false;}
 struct CfvChannel{size_t capacity=0;bool closed=false;std::deque<Value>values;std::mutex mutex;std::condition_variable readable,writable;};static std::atomic<long long>cfv_next_channel{1};static std::mutex cfv_channel_mutex;static std::map<long long,std::shared_ptr<CfvChannel>>cfv_channels;
 static std::shared_ptr<CfvChannel>cfv_channel(const Value&handle){auto id=(long long)numero(handle);std::lock_guard<std::mutex>lock(cfv_channel_mutex);auto found=cfv_channels.find(id);if(found==cfv_channels.end())throw std::runtime_error("canal desconocido");return found->second;}
-static Value cfv_canal(const Value&size){auto capacity=(long long)numero(size);if(capacity<0)throw std::runtime_error("capacidad de canal inválida");auto id=cfv_next_channel.fetch_add(1);auto channel=std::make_shared<CfvChannel>();channel->capacity=(size_t)capacity;{std::lock_guard<std::mutex>lock(cfv_channel_mutex);cfv_channels[id]=channel;}return (double)id;}static Value cfv_canal(){return cfv_canal(Value{0.0});}
-static Value cfv_enviar(const Value&handle,Value value){auto channel=cfv_channel(handle);std::unique_lock<std::mutex>lock(channel->mutex);channel->writable.wait(lock,[&]{return channel->closed||channel->capacity==0||channel->values.size()<channel->capacity;});if(channel->closed)throw std::runtime_error("canal cerrado");channel->values.push_back(std::move(value));lock.unlock();channel->readable.notify_one();return Value{};}static Value cfv_recibir(const Value&handle){auto channel=cfv_channel(handle);std::unique_lock<std::mutex>lock(channel->mutex);channel->readable.wait(lock,[&]{return channel->closed||!channel->values.empty();});if(channel->values.empty())throw std::runtime_error("canal cerrado y vacío");Value result=std::move(channel->values.front());channel->values.pop_front();lock.unlock();channel->writable.notify_one();return result;}static Value cfv_cerrar_canal(const Value&handle){auto channel=cfv_channel(handle);{std::lock_guard<std::mutex>lock(channel->mutex);channel->closed=true;}channel->readable.notify_all();channel->writable.notify_all();return Value{};}
-static Value indice(const Value&v,const Value&k){double n=0;if(auto p=std::get_if<std::string>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=p->size())throw std::runtime_error("índice de texto inválido");return std::string(1,p->at((size_t)n));}if(auto p=std::get_if<Lista>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de lista inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<Mapa>(&v.data)){if(k.index()!=2)throw std::runtime_error("la clave debe ser texto");auto it=(*p)->find(std::get<std::string>(k.data));if(it==(*p)->end())throw std::runtime_error("clave inexistente");return it->second;}if(auto p=std::get_if<Tupla>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->values.size())throw std::runtime_error("índice de tupla inválido");return (*p)->values.at((size_t)n);}if(auto p=std::get_if<FastArray>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de array_fast inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<DenseMatrix>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->rows)throw std::runtime_error("fila de matrix inválida");auto row=std::make_shared<std::vector<double>>((*p)->values.begin()+(size_t)n*(*p)->columns,(*p)->values.begin()+((size_t)n+1)*(*p)->columns);return row;}throw std::runtime_error("el valor no admite índices");}
-static void asignar_campo(Value&obj,const std::string&campo,Value valor,size_t tipo){auto p=std::get_if<Mapa>(&obj.data);if(!p||(*p)->find(campo)==(*p)->end())throw std::runtime_error("campo desconocido '"+campo+"'");if(tipo!=99&&valor.index()!=tipo)throw std::runtime_error("tipo incompatible para campo '"+campo+"'");(**p)[campo]=std::move(valor);}
-static void asignar(Value&destino,size_t tipo,Value valor,const std::string&nombre){if(tipo!=99&&valor.index()!=tipo)throw std::runtime_error("tipo incompatible al asignar '"+nombre+"'");destino=std::move(valor);}
-static void asignar_indice(Value container,Value key,Value valor){if(auto p=std::get_if<Lista>(&container.data)){double n=numero(key);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de lista inválido para asignación");(**p)[(size_t)n]=std::move(valor);return;}if(auto p=std::get_if<Mapa>(&container.data)){if(key.index()!=2)throw std::runtime_error("la clave debe ser texto");(**p)[std::get<std::string>(key.data)]=std::move(valor);return;}throw std::runtime_error("asignación de índice requiere lista o mapa");}
-static Value cfv_tiene_clave(const Value&obj,const Value&key){if(auto p=std::get_if<Mapa>(&obj.data)){if(key.index()!=2)return Value{false};return Value{(*p)->count(std::get<std::string>(key.data))>0};}return Value{false};}
-static Value cfv_claves(const Value&obj){if(auto p=std::get_if<Mapa>(&obj.data)){auto result=std::make_shared<std::vector<Value>>();for(const auto&[k,v]:**p)result->push_back(Value{k});return result;}throw std::runtime_error("claves requiere un mapa");}
-static Value cfv_tipo_de(const Value&v){if(v.index()==0)return std::string("nulo");if(std::get_if<double>(&v.data))return std::string("numero");if(std::get_if<std::string>(&v.data))return std::string("texto");if(std::get_if<bool>(&v.data))return std::string("booleano");if(std::get_if<Lista>(&v.data))return std::string("lista");if(std::get_if<Mapa>(&v.data))return std::string("mapa");return std::string("cualquiera");}
-static Value cfv_argumentos_programa(){return cfv_argumentos_global;}
+[[maybe_unused]] static Value cfv_canal(const Value&size){auto capacity=(long long)numero(size);if(capacity<0)throw std::runtime_error("capacidad de canal inválida");auto id=cfv_next_channel.fetch_add(1);auto channel=std::make_shared<CfvChannel>();channel->capacity=(size_t)capacity;{std::lock_guard<std::mutex>lock(cfv_channel_mutex);cfv_channels[id]=channel;}return (double)id;}[[maybe_unused]] static Value cfv_canal(){return cfv_canal(Value{0.0});}
+[[maybe_unused]] static Value cfv_enviar(const Value&handle,Value value){auto channel=cfv_channel(handle);std::unique_lock<std::mutex>lock(channel->mutex);channel->writable.wait(lock,[&]{return channel->closed||channel->capacity==0||channel->values.size()<channel->capacity;});if(channel->closed)throw std::runtime_error("canal cerrado");channel->values.push_back(std::move(value));lock.unlock();channel->readable.notify_one();return Value{};}[[maybe_unused]] static Value cfv_recibir(const Value&handle){auto channel=cfv_channel(handle);std::unique_lock<std::mutex>lock(channel->mutex);channel->readable.wait(lock,[&]{return channel->closed||!channel->values.empty();});if(channel->values.empty())throw std::runtime_error("canal cerrado y vacío");Value result=std::move(channel->values.front());channel->values.pop_front();lock.unlock();channel->writable.notify_one();return result;}[[maybe_unused]] static Value cfv_cerrar_canal(const Value&handle){auto channel=cfv_channel(handle);{std::lock_guard<std::mutex>lock(channel->mutex);channel->closed=true;}channel->readable.notify_all();channel->writable.notify_all();return Value{};}
+[[maybe_unused]] static Value indice(const Value&v,const Value&k){double n=0;if(auto p=std::get_if<std::string>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=p->size())throw std::runtime_error("índice de texto inválido");return std::string(1,p->at((size_t)n));}if(auto p=std::get_if<Lista>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de lista inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<Mapa>(&v.data)){if(k.index()!=2)throw std::runtime_error("la clave debe ser texto");auto it=(*p)->find(std::get<std::string>(k.data));if(it==(*p)->end())throw std::runtime_error("clave inexistente");return it->second;}if(auto p=std::get_if<Tupla>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->values.size())throw std::runtime_error("índice de tupla inválido");return (*p)->values.at((size_t)n);}if(auto p=std::get_if<FastArray>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de array_fast inválido");return (*p)->at((size_t)n);}if(auto p=std::get_if<DenseMatrix>(&v.data)){n=numero(k);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->rows)throw std::runtime_error("fila de matrix inválida");auto row=std::make_shared<std::vector<double>>((*p)->values.begin()+(size_t)n*(*p)->columns,(*p)->values.begin()+((size_t)n+1)*(*p)->columns);return row;}throw std::runtime_error("el valor no admite índices");}
+[[maybe_unused]] static void asignar_campo(Value&obj,const std::string&campo,Value valor,size_t tipo){auto p=std::get_if<Mapa>(&obj.data);if(!p||(*p)->find(campo)==(*p)->end())throw std::runtime_error("campo desconocido '"+campo+"'");if(tipo!=99&&valor.index()!=tipo)throw std::runtime_error("tipo incompatible para campo '"+campo+"'");(**p)[campo]=std::move(valor);}
+[[maybe_unused]] static void asignar(Value&destino,size_t tipo,Value valor,const std::string&nombre){if(tipo!=99&&valor.index()!=tipo)throw std::runtime_error("tipo incompatible al asignar '"+nombre+"'");destino=std::move(valor);}
+[[maybe_unused]] static void asignar_indice(Value container,Value key,Value valor){if(auto p=std::get_if<Lista>(&container.data)){double n=numero(key);if(n<0||std::floor(n)!=n||(size_t)n>=(*p)->size())throw std::runtime_error("índice de lista inválido para asignación");(**p)[(size_t)n]=std::move(valor);return;}if(auto p=std::get_if<Mapa>(&container.data)){if(key.index()!=2)throw std::runtime_error("la clave debe ser texto");(**p)[std::get<std::string>(key.data)]=std::move(valor);return;}throw std::runtime_error("asignación de índice requiere lista o mapa");}
+[[maybe_unused]] static Value cfv_tiene_clave(const Value&obj,const Value&key){if(auto p=std::get_if<Mapa>(&obj.data)){if(key.index()!=2)return Value{false};return Value{(*p)->count(std::get<std::string>(key.data))>0};}return Value{false};}
+[[maybe_unused]] static Value cfv_claves(const Value&obj){if(auto p=std::get_if<Mapa>(&obj.data)){auto result=std::make_shared<std::vector<Value>>();for(const auto&[k,v]:**p)result->push_back(Value{k});return result;}throw std::runtime_error("claves requiere un mapa");}
+[[maybe_unused]] static Value cfv_tipo_de(const Value&v){if(v.index()==0)return std::string("nulo");if(std::get_if<double>(&v.data))return std::string("numero");if(std::get_if<std::string>(&v.data))return std::string("texto");if(std::get_if<bool>(&v.data))return std::string("booleano");if(std::get_if<Lista>(&v.data))return std::string("lista");if(std::get_if<Mapa>(&v.data))return std::string("mapa");return std::string("cualquiera");}
+[[maybe_unused]] static Value cfv_argumentos_programa(){return cfv_argumentos_global;}
 
 Value cfv_Token(Value cfv_tipo, Value cfv_lexema, Value cfv_linea);
 Value cfv_Nodo(Value cfv_tipo, Value cfv_valor, Value cfv_hijos);
@@ -1343,37 +1343,37 @@ Value cfv_exec_bloque(Value cfv_sentencias, Value cfv_env, Value cfv_fns);
 Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns);
 Value cfv_Token(Value cfv_tipo, Value cfv_lexema, Value cfv_linea) {
   cfv_jit_hit("Token");
-  size_t cfv_tipo_tipo = cfv_tipo.index();
-  size_t cfv_lexema_tipo = cfv_lexema.index();
-  size_t cfv_linea_tipo = cfv_linea.index();
+ [[maybe_unused]] size_t cfv_tipo_tipo = cfv_tipo.index();
+ [[maybe_unused]] size_t cfv_lexema_tipo = cfv_lexema.index();
+ [[maybe_unused]] size_t cfv_linea_tipo = cfv_linea.index();
   return crear_mapa({{std::string("tipo", 4), cfv_tipo}, {std::string("lexema", 6), cfv_lexema}, {std::string("linea", 5), cfv_linea}});
   return Value{};
 }
 Value cfv_Nodo(Value cfv_tipo, Value cfv_valor, Value cfv_hijos) {
   cfv_jit_hit("Nodo");
-  size_t cfv_tipo_tipo = cfv_tipo.index();
-  size_t cfv_valor_tipo = cfv_valor.index();
-  size_t cfv_hijos_tipo = cfv_hijos.index();
+ [[maybe_unused]] size_t cfv_tipo_tipo = cfv_tipo.index();
+ [[maybe_unused]] size_t cfv_valor_tipo = cfv_valor.index();
+ [[maybe_unused]] size_t cfv_hijos_tipo = cfv_hijos.index();
   return crear_mapa({{std::string("tipo", 4), cfv_tipo}, {std::string("valor", 5), cfv_valor}, {std::string("hijos", 5), cfv_hijos}});
   return Value{};
 }
 Value cfv_nodo(Value cfv_tipo, Value cfv_valor, Value cfv_hijos) {
   cfv_jit_hit("nodo");
-  size_t cfv_tipo_tipo = cfv_tipo.index();
-  size_t cfv_valor_tipo = cfv_valor.index();
-  size_t cfv_hijos_tipo = cfv_hijos.index();
+ [[maybe_unused]] size_t cfv_tipo_tipo = cfv_tipo.index();
+ [[maybe_unused]] size_t cfv_valor_tipo = cfv_valor.index();
+ [[maybe_unused]] size_t cfv_hijos_tipo = cfv_hijos.index();
   return crear_mapa({{std::string("tipo", 4), cfv_tipo}, {std::string("valor", 5), cfv_valor}, {std::string("hijos", 5), cfv_hijos}});
   return Value{};
 }
 Value cfv_es_espacio(Value cfv_c) {
   cfv_jit_hit("es_espacio");
-  size_t cfv_c_tipo = cfv_c.index();
+ [[maybe_unused]] size_t cfv_c_tipo = cfv_c.index();
   return Value{verdad(Value{verdad(compara(cfv_c, Value{std::string(" ", 1)}, "==")) || verdad(compara(cfv_c, Value{std::string("\t", 1)}, "=="))}) || verdad(compara(cfv_c, Value{std::string("\r", 1)}, "=="))};
   return Value{};
 }
 Value cfv_es_digito(Value cfv_c) {
   cfv_jit_hit("es_digito");
-  size_t cfv_c_tipo = cfv_c.index();
+ [[maybe_unused]] size_t cfv_c_tipo = cfv_c.index();
   return Value{verdad(compara(cfv_c, Value{std::string("0", 1)}, ">=")) && verdad(compara(cfv_c, Value{std::string("9", 1)}, "<="))};
   return Value{};
 }
@@ -1398,21 +1398,21 @@ Value cfv_es_letra(Value cfv_c) {
 }
 Value cfv_es_alfanum(Value cfv_c) {
   cfv_jit_hit("es_alfanum");
-  size_t cfv_c_tipo = cfv_c.index();
+ [[maybe_unused]] size_t cfv_c_tipo = cfv_c.index();
   return Value{verdad(cfv_es_letra(cfv_c)) || verdad(cfv_es_digito(cfv_c))};
   return Value{};
 }
 Value cfv_subcadena(Value cfv_fuente, Value cfv_inicio, Value cfv_fin) {
   cfv_jit_hit("subcadena");
-  size_t cfv_fuente_tipo = cfv_fuente.index();
-  size_t cfv_inicio_tipo = cfv_inicio.index();
-  size_t cfv_fin_tipo = cfv_fin.index();
+ [[maybe_unused]] size_t cfv_fuente_tipo = cfv_fuente.index();
+ [[maybe_unused]] size_t cfv_inicio_tipo = cfv_inicio.index();
+ [[maybe_unused]] size_t cfv_fin_tipo = cfv_fin.index();
   Value cfv_resultado = Value{std::string("", 0)};
   if (cfv_resultado.index() != 2) throw std::runtime_error("tipo incompatible para resultado");
-  size_t cfv_resultado_tipo = 2;
+ [[maybe_unused]] size_t cfv_resultado_tipo = 2;
   Value cfv_i = cfv_inicio;
   if (cfv_i.index() != 1) throw std::runtime_error("tipo incompatible para i");
-  size_t cfv_i_tipo = 1;
+ [[maybe_unused]] size_t cfv_i_tipo = 1;
   while (verdad(compara(cfv_i, cfv_fin, "<"))) {
     asignar(cfv_resultado, cfv_resultado_tipo, suma(cfv_resultado, indice(cfv_fuente, cfv_i)), "resultado");
     asignar(cfv_i, cfv_i_tipo, suma(cfv_i, Value{1.0}), "i");
@@ -1422,23 +1422,23 @@ Value cfv_subcadena(Value cfv_fuente, Value cfv_inicio, Value cfv_fin) {
 }
 Value cfv_tokenizar(Value cfv_fuente) {
   cfv_jit_hit("tokenizar");
-  size_t cfv_fuente_tipo = cfv_fuente.index();
+ [[maybe_unused]] size_t cfv_fuente_tipo = cfv_fuente.index();
   Value cfv_tokens = crear_lista({});
   if (cfv_tokens.index() != 4) throw std::runtime_error("tipo incompatible para tokens");
-  size_t cfv_tokens_tipo = 4;
+ [[maybe_unused]] size_t cfv_tokens_tipo = 4;
   Value cfv_pos = Value{0.0};
   if (cfv_pos.index() != 1) throw std::runtime_error("tipo incompatible para pos");
-  size_t cfv_pos_tipo = 1;
+ [[maybe_unused]] size_t cfv_pos_tipo = 1;
   Value cfv_linea = Value{1.0};
   if (cfv_linea.index() != 1) throw std::runtime_error("tipo incompatible para linea");
-  size_t cfv_linea_tipo = 1;
+ [[maybe_unused]] size_t cfv_linea_tipo = 1;
   Value cfv_n = cfv_longitud(cfv_fuente);
   if (cfv_n.index() != 1) throw std::runtime_error("tipo incompatible para n");
-  size_t cfv_n_tipo = 1;
+ [[maybe_unused]] size_t cfv_n_tipo = 1;
   while (verdad(compara(cfv_pos, cfv_n, "<"))) {
     Value cfv_c = indice(cfv_fuente, cfv_pos);
     if (cfv_c.index() != 2) throw std::runtime_error("tipo incompatible para c");
-    size_t cfv_c_tipo = 2;
+ [[maybe_unused]] size_t cfv_c_tipo = 2;
     if (verdad(compara(cfv_c, Value{std::string("\n", 1)}, "=="))) {
       asignar(cfv_linea, cfv_linea_tipo, suma(cfv_linea, Value{1.0}), "linea");
       asignar(cfv_pos, cfv_pos_tipo, suma(cfv_pos, Value{1.0}), "pos");
@@ -1460,7 +1460,7 @@ Value cfv_tokenizar(Value cfv_fuente) {
     }     else if (verdad(cfv_es_digito(cfv_c))) {
       Value cfv_inicio = cfv_pos;
       if (cfv_inicio.index() != 1) throw std::runtime_error("tipo incompatible para inicio");
-      size_t cfv_inicio_tipo = 1;
+ [[maybe_unused]] size_t cfv_inicio_tipo = 1;
       while (verdad(Value{verdad(compara(cfv_pos, cfv_n, "<")) && verdad(cfv_es_digito(indice(cfv_fuente, cfv_pos)))})) {
         asignar(cfv_pos, cfv_pos_tipo, suma(cfv_pos, Value{1.0}), "pos");
       }
@@ -1474,35 +1474,35 @@ Value cfv_tokenizar(Value cfv_fuente) {
     }     else if (verdad(cfv_es_letra(cfv_c))) {
       Value cfv_inicio = cfv_pos;
       if (cfv_inicio.index() != 1) throw std::runtime_error("tipo incompatible para inicio");
-      size_t cfv_inicio_tipo = 1;
+ [[maybe_unused]] size_t cfv_inicio_tipo = 1;
       while (verdad(Value{verdad(compara(cfv_pos, cfv_n, "<")) && verdad(cfv_es_alfanum(indice(cfv_fuente, cfv_pos)))})) {
         asignar(cfv_pos, cfv_pos_tipo, suma(cfv_pos, Value{1.0}), "pos");
       }
       Value cfv_lex = cfv_subcadena(cfv_fuente, cfv_inicio, cfv_pos);
       if (cfv_lex.index() != 2) throw std::runtime_error("tipo incompatible para lex");
-      size_t cfv_lex_tipo = 2;
+ [[maybe_unused]] size_t cfv_lex_tipo = 2;
       (void)(cfv_agregar(cfv_tokens, cfv_Token(Value{std::string("IDENT", 5)}, cfv_lex, cfv_linea)));
     }     else if (verdad(compara(cfv_c, Value{std::string("\"", 1)}, "=="))) {
       Value cfv_linea_str = cfv_linea;
       if (cfv_linea_str.index() != 1) throw std::runtime_error("tipo incompatible para linea_str");
-      size_t cfv_linea_str_tipo = 1;
+ [[maybe_unused]] size_t cfv_linea_str_tipo = 1;
       Value cfv_literal = Value{std::string("\"", 1)};
       if (cfv_literal.index() != 2) throw std::runtime_error("tipo incompatible para literal");
-      size_t cfv_literal_tipo = 2;
+ [[maybe_unused]] size_t cfv_literal_tipo = 2;
       asignar(cfv_pos, cfv_pos_tipo, suma(cfv_pos, Value{1.0}), "pos");
       Value cfv_cerrado = Value{false};
       if (cfv_cerrado.index() != 3) throw std::runtime_error("tipo incompatible para cerrado");
-      size_t cfv_cerrado_tipo = 3;
+ [[maybe_unused]] size_t cfv_cerrado_tipo = 3;
       while (verdad(Value{verdad(compara(cfv_pos, cfv_n, "<")) && verdad(Value{!verdad(cfv_cerrado)})})) {
         Value cfv_ch = indice(cfv_fuente, cfv_pos);
         if (cfv_ch.index() != 2) throw std::runtime_error("tipo incompatible para ch");
-        size_t cfv_ch_tipo = 2;
+ [[maybe_unused]] size_t cfv_ch_tipo = 2;
         if (verdad(compara(cfv_ch, Value{std::string("\\", 1)}, "=="))) {
           asignar(cfv_pos, cfv_pos_tipo, suma(cfv_pos, Value{1.0}), "pos");
           if (verdad(compara(cfv_pos, cfv_n, "<"))) {
             Value cfv_esc = indice(cfv_fuente, cfv_pos);
             if (cfv_esc.index() != 2) throw std::runtime_error("tipo incompatible para esc");
-            size_t cfv_esc_tipo = 2;
+ [[maybe_unused]] size_t cfv_esc_tipo = 2;
             if (verdad(compara(cfv_esc, Value{std::string("n", 1)}, "=="))) {
               asignar(cfv_literal, cfv_literal_tipo, suma(cfv_literal, Value{std::string("\n", 1)}), "literal");
             }             else if (verdad(compara(cfv_esc, Value{std::string("t", 1)}, "=="))) {
@@ -1533,7 +1533,7 @@ Value cfv_tokenizar(Value cfv_fuente) {
     }  else {
       Value cfv_sym = cfv_c;
       if (cfv_sym.index() != 2) throw std::runtime_error("tipo incompatible para sym");
-      size_t cfv_sym_tipo = 2;
+ [[maybe_unused]] size_t cfv_sym_tipo = 2;
       // Check 3-char tokens first (e.g. ...)
       if (verdad(compara(suma(cfv_pos, Value{2.0}), cfv_n, "<"))) {
         Value cfv_tri = suma(suma(cfv_c, indice(cfv_fuente, suma(cfv_pos, Value{1.0}))), indice(cfv_fuente, suma(cfv_pos, Value{2.0})));
@@ -1547,7 +1547,7 @@ Value cfv_tokenizar(Value cfv_fuente) {
         if (verdad(compara(suma(cfv_pos, Value{1.0}), cfv_n, "<"))) {
           Value cfv_par = suma(cfv_c, indice(cfv_fuente, suma(cfv_pos, Value{1.0})));
           if (cfv_par.index() != 2) throw std::runtime_error("tipo incompatible para par");
-          size_t cfv_par_tipo = 2;
+ [[maybe_unused]] size_t cfv_par_tipo = 2;
           if (verdad(Value{verdad(Value{verdad(Value{verdad(Value{verdad(Value{verdad(Value{verdad(compara(cfv_par, Value{std::string("==", 2)}, "==")) || verdad(compara(cfv_par, Value{std::string("!=", 2)}, "=="))}) || verdad(compara(cfv_par, Value{std::string(">=", 2)}, "=="))}) || verdad(compara(cfv_par, Value{std::string("<=", 2)}, "=="))}) || verdad(compara(cfv_par, Value{std::string("<<", 2)}, "=="))}) || verdad(compara(cfv_par, Value{std::string(">>", 2)}, "=="))}) || verdad(compara(cfv_par, Value{std::string("->", 2)}, "==")) || verdad(compara(cfv_par, Value{std::string("??", 2)}, "==")) || verdad(compara(cfv_par, Value{std::string("?.", 2)}, "==")) || verdad(compara(cfv_par, Value{std::string("+=", 2)}, "==")) || verdad(compara(cfv_par, Value{std::string("-=", 2)}, "==")) || verdad(compara(cfv_par, Value{std::string("*=", 2)}, "==")) || verdad(compara(cfv_par, Value{std::string("/=", 2)}, "==")) || verdad(compara(cfv_par, Value{std::string("%=", 2)}, "==")) || verdad(compara(cfv_par, Value{std::string("**", 2)}, "=="))})) {
             asignar(cfv_sym, cfv_sym_tipo, cfv_par, "sym");
             asignar(cfv_pos, cfv_pos_tipo, suma(cfv_pos, Value{1.0}), "pos");
@@ -1564,31 +1564,31 @@ Value cfv_tokenizar(Value cfv_fuente) {
 }
 Value cfv_mk_parser(Value cfv_tokens) {
   cfv_jit_hit("mk_parser");
-  size_t cfv_tokens_tipo = cfv_tokens.index();
+ [[maybe_unused]] size_t cfv_tokens_tipo = cfv_tokens.index();
   return crear_mapa({{std::string("tokens", 6), cfv_tokens}, {std::string("pos", 3), Value{0.0}}});
   return Value{};
 }
 Value cfv_tok_actual(Value cfv_p) {
   cfv_jit_hit("tok_actual");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   return indice(indice(cfv_p, Value{std::string("tokens", 6)}), indice(cfv_p, Value{std::string("pos", 3)}));
   return Value{};
 }
 Value cfv_tok_anterior(Value cfv_p) {
   cfv_jit_hit("tok_anterior");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   return indice(indice(cfv_p, Value{std::string("tokens", 6)}), resta(indice(cfv_p, Value{std::string("pos", 3)}), Value{1.0}));
   return Value{};
 }
 Value cfv_al_final(Value cfv_p) {
   cfv_jit_hit("al_final");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   return compara(indice(cfv_tok_actual(cfv_p), Value{std::string("tipo", 4)}), Value{std::string("EOF", 3)}, "==");
   return Value{};
 }
 Value cfv_avanzar(Value cfv_p) {
   cfv_jit_hit("avanzar");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   if (verdad(Value{!verdad(cfv_al_final(cfv_p))})) {
     asignar_indice(cfv_p, Value{std::string("pos", 3)}, suma(indice(cfv_p, Value{std::string("pos", 3)}), Value{1.0}));
   }
@@ -1597,22 +1597,22 @@ Value cfv_avanzar(Value cfv_p) {
 }
 Value cfv_ver(Value cfv_p, Value cfv_lex) {
   cfv_jit_hit("ver");
-  size_t cfv_p_tipo = cfv_p.index();
-  size_t cfv_lex_tipo = cfv_lex.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_lex_tipo = cfv_lex.index();
   return compara(indice(cfv_tok_actual(cfv_p), Value{std::string("lexema", 6)}), cfv_lex, "==");
   return Value{};
 }
 Value cfv_ver_tipo(Value cfv_p, Value cfv_tipo) {
   cfv_jit_hit("ver_tipo");
-  size_t cfv_p_tipo = cfv_p.index();
-  size_t cfv_tipo_tipo = cfv_tipo.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_tipo_tipo = cfv_tipo.index();
   return compara(indice(cfv_tok_actual(cfv_p), Value{std::string("tipo", 4)}), cfv_tipo, "==");
   return Value{};
 }
 Value cfv_tomar(Value cfv_p, Value cfv_lex) {
   cfv_jit_hit("tomar");
-  size_t cfv_p_tipo = cfv_p.index();
-  size_t cfv_lex_tipo = cfv_lex.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_lex_tipo = cfv_lex.index();
   if (verdad(cfv_ver(cfv_p, cfv_lex))) {
     (void)(cfv_avanzar(cfv_p));
     return Value{true};
@@ -1622,29 +1622,29 @@ Value cfv_tomar(Value cfv_p, Value cfv_lex) {
 }
 Value cfv_requerir(Value cfv_p, Value cfv_lex, Value cfv_msg) {
   cfv_jit_hit("requerir");
-  size_t cfv_p_tipo = cfv_p.index();
-  size_t cfv_lex_tipo = cfv_lex.index();
-  size_t cfv_msg_tipo = cfv_msg.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_lex_tipo = cfv_lex.index();
+ [[maybe_unused]] size_t cfv_msg_tipo = cfv_msg.index();
   (void)(cfv_afirmar(cfv_ver(cfv_p, cfv_lex), suma(suma(suma(suma(suma(cfv_msg, Value{std::string(" (línea ", 9)}), cfv_a_texto(indice(cfv_tok_actual(cfv_p), Value{std::string("linea", 5)}))), Value{std::string("), se encontró '", 17)}), indice(cfv_tok_actual(cfv_p), Value{std::string("lexema", 6)})), Value{std::string("'", 1)})));
   return cfv_avanzar(cfv_p);
   return Value{};
 }
 Value cfv_requerir_tipo(Value cfv_p, Value cfv_tipo, Value cfv_msg) {
   cfv_jit_hit("requerir_tipo");
-  size_t cfv_p_tipo = cfv_p.index();
-  size_t cfv_tipo_tipo = cfv_tipo.index();
-  size_t cfv_msg_tipo = cfv_msg.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_tipo_tipo = cfv_tipo.index();
+ [[maybe_unused]] size_t cfv_msg_tipo = cfv_msg.index();
   (void)(cfv_afirmar(cfv_ver_tipo(cfv_p, cfv_tipo), suma(suma(suma(cfv_msg, Value{std::string(" (línea ", 9)}), cfv_a_texto(indice(cfv_tok_actual(cfv_p), Value{std::string("linea", 5)}))), Value{std::string(")", 1)})));
   return cfv_avanzar(cfv_p);
   return Value{};
 }
 Value cfv_parse_bloque(Value cfv_p) {
   cfv_jit_hit("parse_bloque");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   (void)(cfv_requerir(cfv_p, Value{std::string("{", 1)}, Value{std::string("Se esperaba '{'", 15)}));
   Value cfv_sentencias = crear_lista({});
   if (cfv_sentencias.index() != 4) throw std::runtime_error("tipo incompatible para sentencias");
-  size_t cfv_sentencias_tipo = 4;
+ [[maybe_unused]] size_t cfv_sentencias_tipo = 4;
   while (verdad(Value{verdad(Value{!verdad(cfv_al_final(cfv_p))}) && verdad(Value{!verdad(cfv_ver(cfv_p, Value{std::string("}", 1)}))})})) {
     (void)(cfv_agregar(cfv_sentencias, cfv_parse_sentencia(cfv_p)));
   }
@@ -1654,7 +1654,7 @@ Value cfv_parse_bloque(Value cfv_p) {
 }
 Value cfv_parse_sentencia(Value cfv_p) {
   cfv_jit_hit("parse_sentencia");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   if (verdad(Value{verdad(Value{verdad(cfv_ver(cfv_p, Value{std::string("sea", 3)})) || verdad(cfv_ver(cfv_p, Value{std::string("var", 3)}))}) || verdad(cfv_ver(cfv_p, Value{std::string("const", 5)}))})) {
     (void)(cfv_avanzar(cfv_p));
     // Destructuring: sea [a, b] = lista
@@ -1703,10 +1703,10 @@ Value cfv_parse_sentencia(Value cfv_p) {
       return cfv_nodo(Value{std::string("DestructMapa")}, Value{}, crear_lista({cfv_dval2, cfv_nombres_dm}));
     }
     Value cfv_nombre_tok = cfv_requerir_tipo(cfv_p, Value{std::string("IDENT", 5)}, Value{std::string("Se esperaba nombre de variable", 30)});
-    size_t cfv_nombre_tok_tipo = 99;
+ [[maybe_unused]] size_t cfv_nombre_tok_tipo = 99;
     Value cfv_nombre = indice(cfv_nombre_tok, Value{std::string("lexema", 6)});
     if (cfv_nombre.index() != 2) throw std::runtime_error("tipo incompatible para nombre");
-    size_t cfv_nombre_tipo = 2;
+ [[maybe_unused]] size_t cfv_nombre_tipo = 2;
     Value cfv_decl_tipo_anot = Value{}; // nulo = no annotation
     if (verdad(cfv_tomar(cfv_p, Value{std::string(":", 1)}))) {
       Value cfv_tipo_anot_tok = cfv_requerir_tipo(cfv_p, Value{std::string("IDENT", 5)}, Value{std::string("Se esperaba tipo", 16)});
@@ -1720,7 +1720,7 @@ Value cfv_parse_sentencia(Value cfv_p) {
     }
     if (verdad(cfv_tomar(cfv_p, Value{std::string("=", 1)}))) {
       Value cfv_val = cfv_parse_expresion(cfv_p);
-      size_t cfv_val_tipo = 99;
+ [[maybe_unused]] size_t cfv_val_tipo = 99;
       (void)(cfv_tomar(cfv_p, Value{std::string(";", 1)}));
       return cfv_nodo(Value{std::string("Declaracion", 11)}, cfv_nombre, crear_lista({cfv_val, cfv_decl_tipo_anot}));
     } else {
@@ -1735,7 +1735,7 @@ Value cfv_parse_sentencia(Value cfv_p) {
       return cfv_nodo(Value{std::string("Retornar", 8)}, Value{}, crear_lista({cfv_nodo(Value{std::string("Nulo", 4)}, Value{}, crear_lista({}))}));
     }
     Value cfv_val = cfv_parse_expresion(cfv_p);
-    size_t cfv_val_tipo = 99;
+ [[maybe_unused]] size_t cfv_val_tipo = 99;
     (void)(cfv_tomar(cfv_p, Value{std::string(";", 1)}));
     return cfv_nodo(Value{std::string("Retornar", 8)}, Value{}, crear_lista({cfv_val}));
   }
@@ -1823,31 +1823,31 @@ Value cfv_parse_sentencia(Value cfv_p) {
     (void)(cfv_avanzar(cfv_p));
     (void)(cfv_requerir(cfv_p, Value{std::string("(", 1)}, Value{std::string("Se esperaba '(' tras 'si'", 25)}));
     Value cfv_cond = cfv_parse_expresion(cfv_p);
-    size_t cfv_cond_tipo = 99;
+ [[maybe_unused]] size_t cfv_cond_tipo = 99;
     (void)(cfv_requerir(cfv_p, Value{std::string(")", 1)}, Value{std::string("Se esperaba ')' tras condición", 31)}));
     Value cfv_entonces = cfv_parse_bloque(cfv_p);
     if (cfv_entonces.index() != 4) throw std::runtime_error("tipo incompatible para entonces");
-    size_t cfv_entonces_tipo = 4;
+ [[maybe_unused]] size_t cfv_entonces_tipo = 4;
     Value cfv_ramas = crear_lista({cfv_cond, cfv_nodo(Value{std::string("Bloque", 6)}, Value{}, cfv_entonces)});
     if (cfv_ramas.index() != 4) throw std::runtime_error("tipo incompatible para ramas");
-    size_t cfv_ramas_tipo = 4;
+ [[maybe_unused]] size_t cfv_ramas_tipo = 4;
     while (verdad(cfv_ver(cfv_p, Value{std::string("sino", 4)}))) {
       (void)(cfv_avanzar(cfv_p));
       if (verdad(cfv_ver(cfv_p, Value{std::string("si", 2)}))) {
         (void)(cfv_avanzar(cfv_p));
         (void)(cfv_requerir(cfv_p, Value{std::string("(", 1)}, Value{std::string("Se esperaba '('", 15)}));
         Value cfv_cond2 = cfv_parse_expresion(cfv_p);
-        size_t cfv_cond2_tipo = 99;
+ [[maybe_unused]] size_t cfv_cond2_tipo = 99;
         (void)(cfv_requerir(cfv_p, Value{std::string(")", 1)}, Value{std::string("Se esperaba ')'", 15)}));
         Value cfv_blq2 = cfv_parse_bloque(cfv_p);
         if (cfv_blq2.index() != 4) throw std::runtime_error("tipo incompatible para blq2");
-        size_t cfv_blq2_tipo = 4;
+ [[maybe_unused]] size_t cfv_blq2_tipo = 4;
         (void)(cfv_agregar(cfv_ramas, cfv_cond2));
         (void)(cfv_agregar(cfv_ramas, cfv_nodo(Value{std::string("Bloque", 6)}, Value{}, cfv_blq2)));
       } else {
         Value cfv_blq_sino = cfv_parse_bloque(cfv_p);
         if (cfv_blq_sino.index() != 4) throw std::runtime_error("tipo incompatible para blq_sino");
-        size_t cfv_blq_sino_tipo = 4;
+ [[maybe_unused]] size_t cfv_blq_sino_tipo = 4;
         (void)(cfv_agregar(cfv_ramas, cfv_nodo(Value{std::string("Bloque", 6)}, Value{}, cfv_blq_sino)));
       }
     }
@@ -1857,20 +1857,20 @@ Value cfv_parse_sentencia(Value cfv_p) {
     (void)(cfv_avanzar(cfv_p));
     (void)(cfv_requerir(cfv_p, Value{std::string("(", 1)}, Value{std::string("Se esperaba '('", 15)}));
     Value cfv_cond = cfv_parse_expresion(cfv_p);
-    size_t cfv_cond_tipo = 99;
+ [[maybe_unused]] size_t cfv_cond_tipo = 99;
     (void)(cfv_requerir(cfv_p, Value{std::string(")", 1)}, Value{std::string("Se esperaba ')'", 15)}));
     Value cfv_cuerpo = cfv_parse_bloque(cfv_p);
     if (cfv_cuerpo.index() != 4) throw std::runtime_error("tipo incompatible para cuerpo");
-    size_t cfv_cuerpo_tipo = 4;
+ [[maybe_unused]] size_t cfv_cuerpo_tipo = 4;
     return cfv_nodo(Value{std::string("Mientras", 8)}, Value{}, crear_lista({cfv_cond, cfv_nodo(Value{std::string("Bloque", 6)}, Value{}, cfv_cuerpo)}));
   }
   if (verdad(cfv_ver(cfv_p, Value{std::string("para", 4)}))) {
     (void)(cfv_avanzar(cfv_p));
     Value cfv_var_tok = cfv_requerir_tipo(cfv_p, Value{std::string("IDENT", 5)}, Value{std::string("Se esperaba variable de iteración", 34)});
-    size_t cfv_var_tok_tipo = 99;
+ [[maybe_unused]] size_t cfv_var_tok_tipo = 99;
     Value cfv_var_nombre = indice(cfv_var_tok, Value{std::string("lexema", 6)});
     if (cfv_var_nombre.index() != 2) throw std::runtime_error("tipo incompatible para var_nombre");
-    size_t cfv_var_nombre_tipo = 2;
+ [[maybe_unused]] size_t cfv_var_nombre_tipo = 2;
     if (verdad(cfv_tomar(cfv_p, Value{std::string(":", 1)}))) {
       if (verdad(Value{verdad(cfv_ver_tipo(cfv_p, Value{std::string("IDENT", 5)})) && verdad(Value{!verdad(cfv_ver(cfv_p, Value{std::string("en", 2)}))})})) {
         (void)(cfv_avanzar(cfv_p));
@@ -1878,23 +1878,23 @@ Value cfv_parse_sentencia(Value cfv_p) {
     }
     (void)(cfv_requerir(cfv_p, Value{std::string("en", 2)}, Value{std::string("Se esperaba 'en' en bucle para", 30)}));
     Value cfv_col = cfv_parse_expresion(cfv_p);
-    size_t cfv_col_tipo = 99;
+ [[maybe_unused]] size_t cfv_col_tipo = 99;
     Value cfv_cuerpo = cfv_parse_bloque(cfv_p);
     if (cfv_cuerpo.index() != 4) throw std::runtime_error("tipo incompatible para cuerpo");
-    size_t cfv_cuerpo_tipo = 4;
+ [[maybe_unused]] size_t cfv_cuerpo_tipo = 4;
     return cfv_nodo(Value{std::string("Para", 4)}, cfv_var_nombre, crear_lista({cfv_col, cfv_nodo(Value{std::string("Bloque", 6)}, Value{}, cfv_cuerpo)}));
   }
   if (verdad(cfv_ver(cfv_p, Value{std::string("funcion", 7)}))) {
     (void)(cfv_avanzar(cfv_p));
     Value cfv_nombre_tok = cfv_requerir_tipo(cfv_p, Value{std::string("IDENT", 5)}, Value{std::string("Se esperaba nombre de función", 30)});
-    size_t cfv_nombre_tok_tipo = 99;
+ [[maybe_unused]] size_t cfv_nombre_tok_tipo = 99;
     Value cfv_fn_nombre = indice(cfv_nombre_tok, Value{std::string("lexema", 6)});
     if (cfv_fn_nombre.index() != 2) throw std::runtime_error("tipo incompatible para fn_nombre");
-    size_t cfv_fn_nombre_tipo = 2;
+ [[maybe_unused]] size_t cfv_fn_nombre_tipo = 2;
     (void)(cfv_requerir(cfv_p, Value{std::string("(", 1)}, Value{std::string("Se esperaba '('", 15)}));
     Value cfv_params = crear_lista({});
     if (cfv_params.index() != 4) throw std::runtime_error("tipo incompatible para params");
-    size_t cfv_params_tipo = 4;
+ [[maybe_unused]] size_t cfv_params_tipo = 4;
     while (verdad(Value{verdad(Value{!verdad(cfv_ver(cfv_p, Value{std::string(")", 1)}))}) && verdad(Value{!verdad(cfv_al_final(cfv_p))})})) {
       // Check variadic
       Value cfv_es_variadico = Value{false};
@@ -1944,7 +1944,7 @@ Value cfv_parse_sentencia(Value cfv_p) {
     }
     Value cfv_cuerpo = cfv_parse_bloque(cfv_p);
     if (cfv_cuerpo.index() != 4) throw std::runtime_error("tipo incompatible para cuerpo");
-    size_t cfv_cuerpo_tipo = 4;
+ [[maybe_unused]] size_t cfv_cuerpo_tipo = 4;
     return cfv_nodo(Value{std::string("Funcion", 7)}, cfv_fn_nombre, crear_lista({cfv_nodo(Value{std::string("Params", 6)}, Value{}, cfv_params), cfv_nodo(Value{std::string("Bloque", 6)}, Value{}, cfv_cuerpo)}));
   }
   // lanzar expr;
@@ -2156,7 +2156,7 @@ Value cfv_parse_sentencia(Value cfv_p) {
     (void)(cfv_avanzar(cfv_p));
     (void)(cfv_afirmar(cfv_ver_tipo(cfv_p, Value{std::string("STRING")}), Value{std::string("importar: se esperaba ruta de archivo entre comillas")}));
     Value cfv_ruta_tok = cfv_avanzar(cfv_p);
-    size_t cfv_ruta_tok_tipo = 99;
+ [[maybe_unused]] size_t cfv_ruta_tok_tipo = 99;
     (void)(cfv_tomar(cfv_p, Value{std::string(";")}));
     return cfv_nodo(Value{std::string("Importar")}, indice(cfv_ruta_tok, Value{std::string("lexema")}), crear_lista({}));
   }
@@ -2164,28 +2164,28 @@ Value cfv_parse_sentencia(Value cfv_p) {
     (void)(cfv_avanzar(cfv_p));
     (void)(cfv_requerir(cfv_p, Value{std::string("(", 1)}, Value{std::string("Se esperaba '('", 15)}));
     Value cfv_arg = cfv_parse_expresion(cfv_p);
-    size_t cfv_arg_tipo = 99;
+ [[maybe_unused]] size_t cfv_arg_tipo = 99;
     (void)(cfv_requerir(cfv_p, Value{std::string(")", 1)}, Value{std::string("Se esperaba ')'", 15)}));
     (void)(cfv_tomar(cfv_p, Value{std::string(";", 1)}));
     return cfv_nodo(Value{std::string("Mostrar", 7)}, Value{}, crear_lista({cfv_arg}));
   }
   Value cfv_expr = cfv_parse_expresion(cfv_p);
-  size_t cfv_expr_tipo = 99;
+ [[maybe_unused]] size_t cfv_expr_tipo = 99;
   (void)(cfv_tomar(cfv_p, Value{std::string(";", 1)}));
   return cfv_nodo(Value{std::string("Expresion", 9)}, Value{}, crear_lista({cfv_expr}));
   return Value{};
 }
 Value cfv_parse_expresion(Value cfv_p) {
   cfv_jit_hit("parse_expresion");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   return cfv_parse_asignacion(cfv_p);
   return Value{};
 }
 Value cfv_parse_asignacion(Value cfv_p) {
   cfv_jit_hit("parse_asignacion");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_izq = cfv_parse_ternario(cfv_p);
-  size_t cfv_izq_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_tipo = 99;
   // COMPOUND ASSIGNMENT
   {
     std::string cfv_cur_lx = "";
@@ -2207,7 +2207,7 @@ Value cfv_parse_asignacion(Value cfv_p) {
   if (verdad(compara(indice(cfv_tok_actual(cfv_p), Value{std::string("lexema", 6)}), Value{std::string("=", 1)}, "=="))) {
     (void)(cfv_avanzar(cfv_p));
     Value cfv_der = cfv_parse_expresion(cfv_p);
-    size_t cfv_der_tipo = 99;
+ [[maybe_unused]] size_t cfv_der_tipo = 99;
     return cfv_nodo(Value{std::string("Asignacion", 10)}, Value{}, crear_lista({cfv_izq, cfv_der}));
   }
   return cfv_izq;
@@ -2215,7 +2215,7 @@ Value cfv_parse_asignacion(Value cfv_p) {
 }
 Value cfv_parse_ternario(Value cfv_p) {
   cfv_jit_hit("parse_ternario");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_cond = cfv_parse_nulo_coalescente(cfv_p);
   if (verdad(cfv_ver(cfv_p, Value{std::string("?")}))) {
     (void)(cfv_avanzar(cfv_p));
@@ -2229,13 +2229,13 @@ Value cfv_parse_ternario(Value cfv_p) {
 }
 Value cfv_parse_nulo_coalescente(Value cfv_p) {
   cfv_jit_hit("parse_nulo_coalescente");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_izq = cfv_parse_logico_o(cfv_p);
-  size_t cfv_izq_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_tipo = 99;
   while (verdad(cfv_ver(cfv_p, Value{std::string("??")}))) {
     (void)(cfv_avanzar(cfv_p));
     Value cfv_der = cfv_parse_logico_o(cfv_p);
-    size_t cfv_der_tipo = 99;
+ [[maybe_unused]] size_t cfv_der_tipo = 99;
     asignar(cfv_izq, cfv_izq_tipo, cfv_nodo(Value{std::string("Binario")}, Value{std::string("??")}, crear_lista({cfv_izq, cfv_der})), "izq");
   }
   return cfv_izq;
@@ -2243,13 +2243,13 @@ Value cfv_parse_nulo_coalescente(Value cfv_p) {
 }
 Value cfv_parse_logico_o(Value cfv_p) {
   cfv_jit_hit("parse_logico_o");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_izq = cfv_parse_logico_y(cfv_p);
-  size_t cfv_izq_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_tipo = 99;
   while (verdad(cfv_ver(cfv_p, Value{std::string("o", 1)}))) {
     (void)(cfv_avanzar(cfv_p));
     Value cfv_der = cfv_parse_logico_y(cfv_p);
-    size_t cfv_der_tipo = 99;
+ [[maybe_unused]] size_t cfv_der_tipo = 99;
     asignar(cfv_izq, cfv_izq_tipo, cfv_nodo(Value{std::string("Binario", 7)}, Value{std::string("o", 1)}, crear_lista({cfv_izq, cfv_der})), "izq");
   }
   return cfv_izq;
@@ -2257,13 +2257,13 @@ Value cfv_parse_logico_o(Value cfv_p) {
 }
 Value cfv_parse_logico_y(Value cfv_p) {
   cfv_jit_hit("parse_logico_y");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_izq = cfv_parse_igualdad(cfv_p);
-  size_t cfv_izq_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_tipo = 99;
   while (verdad(cfv_ver(cfv_p, Value{std::string("y", 1)}))) {
     (void)(cfv_avanzar(cfv_p));
     Value cfv_der = cfv_parse_igualdad(cfv_p);
-    size_t cfv_der_tipo = 99;
+ [[maybe_unused]] size_t cfv_der_tipo = 99;
     asignar(cfv_izq, cfv_izq_tipo, cfv_nodo(Value{std::string("Binario", 7)}, Value{std::string("y", 1)}, crear_lista({cfv_izq, cfv_der})), "izq");
   }
   return cfv_izq;
@@ -2271,16 +2271,16 @@ Value cfv_parse_logico_y(Value cfv_p) {
 }
 Value cfv_parse_igualdad(Value cfv_p) {
   cfv_jit_hit("parse_igualdad");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_izq = cfv_parse_comparacion(cfv_p);
-  size_t cfv_izq_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_tipo = 99;
   while (verdad(Value{verdad(Value{verdad(cfv_ver(cfv_p, Value{std::string("==", 2)})) || verdad(cfv_ver(cfv_p, Value{std::string("!=", 2)}))}) || verdad(cfv_ver(cfv_p, Value{std::string("es", 2)}))})) {
     Value cfv_op = indice(cfv_tok_actual(cfv_p), Value{std::string("lexema", 6)});
     if (cfv_op.index() != 2) throw std::runtime_error("tipo incompatible para op");
-    size_t cfv_op_tipo = 2;
+ [[maybe_unused]] size_t cfv_op_tipo = 2;
     (void)(cfv_avanzar(cfv_p));
     Value cfv_der = cfv_parse_comparacion(cfv_p);
-    size_t cfv_der_tipo = 99;
+ [[maybe_unused]] size_t cfv_der_tipo = 99;
     asignar(cfv_izq, cfv_izq_tipo, cfv_nodo(Value{std::string("Binario", 7)}, cfv_op, crear_lista({cfv_izq, cfv_der})), "izq");
   }
   return cfv_izq;
@@ -2288,16 +2288,16 @@ Value cfv_parse_igualdad(Value cfv_p) {
 }
 Value cfv_parse_comparacion(Value cfv_p) {
   cfv_jit_hit("parse_comparacion");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_izq = cfv_parse_bit_o(cfv_p);
-  size_t cfv_izq_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_tipo = 99;
   while (verdad(Value{verdad(Value{verdad(Value{verdad(Value{verdad(cfv_ver(cfv_p, Value{std::string("<", 1)})) || verdad(cfv_ver(cfv_p, Value{std::string("<=", 2)}))}) || verdad(cfv_ver(cfv_p, Value{std::string(">", 1)}))}) || verdad(cfv_ver(cfv_p, Value{std::string(">=", 2)}))}) || verdad(cfv_ver(cfv_p, Value{std::string("en", 2)}))})) {
     Value cfv_op = indice(cfv_tok_actual(cfv_p), Value{std::string("lexema", 6)});
     if (cfv_op.index() != 2) throw std::runtime_error("tipo incompatible para op");
-    size_t cfv_op_tipo = 2;
+ [[maybe_unused]] size_t cfv_op_tipo = 2;
     (void)(cfv_avanzar(cfv_p));
     Value cfv_der = cfv_parse_bit_o(cfv_p);
-    size_t cfv_der_tipo = 99;
+ [[maybe_unused]] size_t cfv_der_tipo = 99;
     asignar(cfv_izq, cfv_izq_tipo, cfv_nodo(Value{std::string("Binario", 7)}, cfv_op, crear_lista({cfv_izq, cfv_der})), "izq");
   }
   return cfv_izq;
@@ -2305,13 +2305,13 @@ Value cfv_parse_comparacion(Value cfv_p) {
 }
 Value cfv_parse_bit_o(Value cfv_p) {
   cfv_jit_hit("parse_bit_o");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_izq = cfv_parse_bit_xor(cfv_p);
-  size_t cfv_izq_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_tipo = 99;
   while (verdad(cfv_ver(cfv_p, Value{std::string("|", 1)}))) {
     (void)(cfv_avanzar(cfv_p));
     Value cfv_der = cfv_parse_bit_xor(cfv_p);
-    size_t cfv_der_tipo = 99;
+ [[maybe_unused]] size_t cfv_der_tipo = 99;
     asignar(cfv_izq, cfv_izq_tipo, cfv_nodo(Value{std::string("Binario", 7)}, Value{std::string("|", 1)}, crear_lista({cfv_izq, cfv_der})), "izq");
   }
   return cfv_izq;
@@ -2319,13 +2319,13 @@ Value cfv_parse_bit_o(Value cfv_p) {
 }
 Value cfv_parse_bit_xor(Value cfv_p) {
   cfv_jit_hit("parse_bit_xor");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_izq = cfv_parse_bit_y(cfv_p);
-  size_t cfv_izq_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_tipo = 99;
   while (verdad(cfv_ver(cfv_p, Value{std::string("^", 1)}))) {
     (void)(cfv_avanzar(cfv_p));
     Value cfv_der = cfv_parse_bit_y(cfv_p);
-    size_t cfv_der_tipo = 99;
+ [[maybe_unused]] size_t cfv_der_tipo = 99;
     asignar(cfv_izq, cfv_izq_tipo, cfv_nodo(Value{std::string("Binario", 7)}, Value{std::string("^", 1)}, crear_lista({cfv_izq, cfv_der})), "izq");
   }
   return cfv_izq;
@@ -2333,13 +2333,13 @@ Value cfv_parse_bit_xor(Value cfv_p) {
 }
 Value cfv_parse_bit_y(Value cfv_p) {
   cfv_jit_hit("parse_bit_y");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_izq = cfv_parse_desplaz(cfv_p);
-  size_t cfv_izq_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_tipo = 99;
   while (verdad(cfv_ver(cfv_p, Value{std::string("&", 1)}))) {
     (void)(cfv_avanzar(cfv_p));
     Value cfv_der = cfv_parse_desplaz(cfv_p);
-    size_t cfv_der_tipo = 99;
+ [[maybe_unused]] size_t cfv_der_tipo = 99;
     asignar(cfv_izq, cfv_izq_tipo, cfv_nodo(Value{std::string("Binario", 7)}, Value{std::string("&", 1)}, crear_lista({cfv_izq, cfv_der})), "izq");
   }
   return cfv_izq;
@@ -2347,16 +2347,16 @@ Value cfv_parse_bit_y(Value cfv_p) {
 }
 Value cfv_parse_desplaz(Value cfv_p) {
   cfv_jit_hit("parse_desplaz");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_izq = cfv_parse_suma(cfv_p);
-  size_t cfv_izq_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_tipo = 99;
   while (verdad(Value{verdad(cfv_ver(cfv_p, Value{std::string("<<", 2)})) || verdad(cfv_ver(cfv_p, Value{std::string(">>", 2)}))})) {
     Value cfv_op = indice(cfv_tok_actual(cfv_p), Value{std::string("lexema", 6)});
     if (cfv_op.index() != 2) throw std::runtime_error("tipo incompatible para op");
-    size_t cfv_op_tipo = 2;
+ [[maybe_unused]] size_t cfv_op_tipo = 2;
     (void)(cfv_avanzar(cfv_p));
     Value cfv_der = cfv_parse_suma(cfv_p);
-    size_t cfv_der_tipo = 99;
+ [[maybe_unused]] size_t cfv_der_tipo = 99;
     asignar(cfv_izq, cfv_izq_tipo, cfv_nodo(Value{std::string("Binario", 7)}, cfv_op, crear_lista({cfv_izq, cfv_der})), "izq");
   }
   return cfv_izq;
@@ -2364,16 +2364,16 @@ Value cfv_parse_desplaz(Value cfv_p) {
 }
 Value cfv_parse_suma(Value cfv_p) {
   cfv_jit_hit("parse_suma");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_izq = cfv_parse_producto(cfv_p);
-  size_t cfv_izq_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_tipo = 99;
   while (verdad(Value{verdad(cfv_ver(cfv_p, Value{std::string("+", 1)})) || verdad(cfv_ver(cfv_p, Value{std::string("-", 1)}))})) {
     Value cfv_op = indice(cfv_tok_actual(cfv_p), Value{std::string("lexema", 6)});
     if (cfv_op.index() != 2) throw std::runtime_error("tipo incompatible para op");
-    size_t cfv_op_tipo = 2;
+ [[maybe_unused]] size_t cfv_op_tipo = 2;
     (void)(cfv_avanzar(cfv_p));
     Value cfv_der = cfv_parse_producto(cfv_p);
-    size_t cfv_der_tipo = 99;
+ [[maybe_unused]] size_t cfv_der_tipo = 99;
     asignar(cfv_izq, cfv_izq_tipo, cfv_nodo(Value{std::string("Binario", 7)}, cfv_op, crear_lista({cfv_izq, cfv_der})), "izq");
   }
   return cfv_izq;
@@ -2381,16 +2381,16 @@ Value cfv_parse_suma(Value cfv_p) {
 }
 Value cfv_parse_producto(Value cfv_p) {
   cfv_jit_hit("parse_producto");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_izq = cfv_parse_unario(cfv_p);
-  size_t cfv_izq_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_tipo = 99;
   while (verdad(Value{verdad(Value{verdad(cfv_ver(cfv_p, Value{std::string("*", 1)})) || verdad(cfv_ver(cfv_p, Value{std::string("/", 1)}))}) || verdad(cfv_ver(cfv_p, Value{std::string("%", 1)}))})) {
     Value cfv_op = indice(cfv_tok_actual(cfv_p), Value{std::string("lexema", 6)});
     if (cfv_op.index() != 2) throw std::runtime_error("tipo incompatible para op");
-    size_t cfv_op_tipo = 2;
+ [[maybe_unused]] size_t cfv_op_tipo = 2;
     (void)(cfv_avanzar(cfv_p));
     Value cfv_der = cfv_parse_unario(cfv_p);
-    size_t cfv_der_tipo = 99;
+ [[maybe_unused]] size_t cfv_der_tipo = 99;
     asignar(cfv_izq, cfv_izq_tipo, cfv_nodo(Value{std::string("Binario", 7)}, cfv_op, crear_lista({cfv_izq, cfv_der})), "izq");
   }
   return cfv_izq;
@@ -2398,7 +2398,7 @@ Value cfv_parse_producto(Value cfv_p) {
 }
 Value cfv_parse_unario(Value cfv_p) {
   cfv_jit_hit("parse_unario");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   if (verdad(cfv_ver(cfv_p, Value{std::string("no", 2)}))) {
     (void)(cfv_avanzar(cfv_p));
     return cfv_nodo(Value{std::string("Unario", 6)}, Value{std::string("no", 2)}, crear_lista({cfv_parse_unario(cfv_p)}));
@@ -2416,30 +2416,30 @@ Value cfv_parse_unario(Value cfv_p) {
 }
 Value cfv_parse_postfijo(Value cfv_p) {
   cfv_jit_hit("parse_postfijo");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_base = cfv_parse_primaria(cfv_p);
-  size_t cfv_base_tipo = 99;
+ [[maybe_unused]] size_t cfv_base_tipo = 99;
   Value cfv_continuar_pf = Value{true};
   if (cfv_continuar_pf.index() != 3) throw std::runtime_error("tipo incompatible para continuar_pf");
-  size_t cfv_continuar_pf_tipo = 3;
+ [[maybe_unused]] size_t cfv_continuar_pf_tipo = 3;
   while (verdad(cfv_continuar_pf)) {
     if (verdad(cfv_ver(cfv_p, Value{std::string("[", 1)}))) {
       (void)(cfv_avanzar(cfv_p));
       Value cfv_idx = cfv_parse_expresion(cfv_p);
-      size_t cfv_idx_tipo = 99;
+ [[maybe_unused]] size_t cfv_idx_tipo = 99;
       (void)(cfv_requerir(cfv_p, Value{std::string("]", 1)}, Value{std::string("Se esperaba ']'", 15)}));
       asignar(cfv_base, cfv_base_tipo, cfv_nodo(Value{std::string("Indice", 6)}, Value{}, crear_lista({cfv_base, cfv_idx})), "base");
     }     else if (verdad(cfv_ver(cfv_p, Value{std::string("?.")}))) {
       (void)(cfv_avanzar(cfv_p));
       Value cfv_campo_tok = cfv_requerir_tipo(cfv_p, Value{std::string("IDENT")}, Value{std::string("Se esperaba nombre de campo tras '?.'")} );
-      size_t cfv_campo_tok_tipo = 99;
+ [[maybe_unused]] size_t cfv_campo_tok_tipo = 99;
       Value cfv_campo_s = indice(cfv_campo_tok, Value{std::string("lexema")});
       if (verdad(cfv_ver(cfv_p, Value{std::string("(")}))) {
         (void)(cfv_avanzar(cfv_p));
         Value cfv_args_s = cfv_parse_argumentos(cfv_p);
         (void)(cfv_requerir(cfv_p, Value{std::string(")")}, Value{std::string("Se esperaba ')'")}));
         Value cfv_hijos_s = crear_lista({cfv_base});
-        size_t cfv_hijos_s_tipo = 4;
+ [[maybe_unused]] size_t cfv_hijos_s_tipo = 4;
         Value cfv_si2 = Value{0.0};
         while (verdad(compara(cfv_si2, cfv_longitud(cfv_args_s), "<"))) {
           (void)(cfv_agregar(cfv_hijos_s, indice(cfv_args_s, cfv_si2)));
@@ -2452,22 +2452,22 @@ Value cfv_parse_postfijo(Value cfv_p) {
     }     else if (verdad(cfv_ver(cfv_p, Value{std::string(".", 1)}))) {
       (void)(cfv_avanzar(cfv_p));
       Value cfv_campo_tok = cfv_requerir_tipo(cfv_p, Value{std::string("IDENT", 5)}, Value{std::string("Se esperaba campo", 17)});
-      size_t cfv_campo_tok_tipo = 99;
+ [[maybe_unused]] size_t cfv_campo_tok_tipo = 99;
       Value cfv_campo = indice(cfv_campo_tok, Value{std::string("lexema", 6)});
       if (cfv_campo.index() != 2) throw std::runtime_error("tipo incompatible para campo");
-      size_t cfv_campo_tipo = 2;
+ [[maybe_unused]] size_t cfv_campo_tipo = 2;
       if (verdad(cfv_ver(cfv_p, Value{std::string("(", 1)}))) {
         (void)(cfv_avanzar(cfv_p));
         Value cfv_args = cfv_parse_argumentos(cfv_p);
         if (cfv_args.index() != 4) throw std::runtime_error("tipo incompatible para args");
-        size_t cfv_args_tipo = 4;
+ [[maybe_unused]] size_t cfv_args_tipo = 4;
         (void)(cfv_requerir(cfv_p, Value{std::string(")", 1)}, Value{std::string("Se esperaba ')'", 15)}));
         Value cfv_hijos_m = crear_lista({cfv_base});
         if (cfv_hijos_m.index() != 4) throw std::runtime_error("tipo incompatible para hijos_m");
-        size_t cfv_hijos_m_tipo = 4;
+ [[maybe_unused]] size_t cfv_hijos_m_tipo = 4;
         Value cfv_mi = Value{0.0};
         if (cfv_mi.index() != 1) throw std::runtime_error("tipo incompatible para mi");
-        size_t cfv_mi_tipo = 1;
+ [[maybe_unused]] size_t cfv_mi_tipo = 1;
         while (verdad(compara(cfv_mi, cfv_longitud(cfv_args), "<"))) {
           (void)(cfv_agregar(cfv_hijos_m, indice(cfv_args, cfv_mi)));
           asignar(cfv_mi, cfv_mi_tipo, suma(cfv_mi, Value{1.0}), "mi");
@@ -2480,7 +2480,7 @@ Value cfv_parse_postfijo(Value cfv_p) {
       (void)(cfv_avanzar(cfv_p));
       Value cfv_args = cfv_parse_argumentos(cfv_p);
       if (cfv_args.index() != 4) throw std::runtime_error("tipo incompatible para args");
-      size_t cfv_args_tipo = 4;
+ [[maybe_unused]] size_t cfv_args_tipo = 4;
       (void)(cfv_requerir(cfv_p, Value{std::string(")", 1)}, Value{std::string("Se esperaba ')'", 15)}));
       asignar(cfv_base, cfv_base_tipo, cfv_nodo(Value{std::string("Llamada", 7)}, indice(cfv_base, Value{std::string("valor", 5)}), cfv_args), "base");
     }  else {
@@ -2492,10 +2492,10 @@ Value cfv_parse_postfijo(Value cfv_p) {
 }
 Value cfv_parse_argumentos(Value cfv_p) {
   cfv_jit_hit("parse_argumentos");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   Value cfv_args = crear_lista({});
   if (cfv_args.index() != 4) throw std::runtime_error("tipo incompatible para args");
-  size_t cfv_args_tipo = 4;
+ [[maybe_unused]] size_t cfv_args_tipo = 4;
   while (verdad(Value{verdad(Value{!verdad(cfv_ver(cfv_p, Value{std::string(")", 1)}))}) && verdad(Value{!verdad(cfv_al_final(cfv_p))})})) {
     (void)(cfv_agregar(cfv_args, cfv_parse_expresion(cfv_p)));
     if (verdad(Value{!verdad(cfv_ver(cfv_p, Value{std::string(")", 1)}))})) {
@@ -2507,15 +2507,15 @@ Value cfv_parse_argumentos(Value cfv_p) {
 }
 Value cfv_parse_primaria(Value cfv_p) {
   cfv_jit_hit("parse_primaria");
-  size_t cfv_p_tipo = cfv_p.index();
+ [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
   if (verdad(cfv_ver_tipo(cfv_p, Value{std::string("NUMBER", 6)}))) {
     Value cfv_tok = cfv_avanzar(cfv_p);
-    size_t cfv_tok_tipo = 99;
+ [[maybe_unused]] size_t cfv_tok_tipo = 99;
     return cfv_nodo(Value{std::string("Numero", 6)}, indice(cfv_tok, Value{std::string("lexema", 6)}), crear_lista({}));
   }
   if (verdad(cfv_ver_tipo(cfv_p, Value{std::string("STRING", 6)}))) {
     Value cfv_tok = cfv_avanzar(cfv_p);
-    size_t cfv_tok_tipo = 99;
+ [[maybe_unused]] size_t cfv_tok_tipo = 99;
     Value cfv_lex_str = indice(cfv_tok, Value{std::string("lexema", 6)});
     std::string cfv_raw_with_quotes = texto(cfv_lex_str);
     std::string cfv_raw_str = cfv_raw_with_quotes.size() >= 2 ? cfv_raw_with_quotes.substr(1, cfv_raw_with_quotes.size()-2) : cfv_raw_with_quotes;
@@ -2586,7 +2586,7 @@ Value cfv_parse_primaria(Value cfv_p) {
     (void)(cfv_avanzar(cfv_p));
     Value cfv_elementos = crear_lista({});
     if (cfv_elementos.index() != 4) throw std::runtime_error("tipo incompatible para elementos");
-    size_t cfv_elementos_tipo = 4;
+ [[maybe_unused]] size_t cfv_elementos_tipo = 4;
     while (verdad(Value{verdad(Value{!verdad(cfv_ver(cfv_p, Value{std::string("]", 1)}))}) && verdad(Value{!verdad(cfv_al_final(cfv_p))})})) {
       if (verdad(cfv_ver(cfv_p, Value{std::string("...")}))) {
         (void)(cfv_avanzar(cfv_p));
@@ -2606,13 +2606,13 @@ Value cfv_parse_primaria(Value cfv_p) {
     (void)(cfv_avanzar(cfv_p));
     Value cfv_pares = crear_lista({});
     if (cfv_pares.index() != 4) throw std::runtime_error("tipo incompatible para pares");
-    size_t cfv_pares_tipo = 4;
+ [[maybe_unused]] size_t cfv_pares_tipo = 4;
     while (verdad(Value{verdad(Value{!verdad(cfv_ver(cfv_p, Value{std::string("}", 1)}))}) && verdad(Value{!verdad(cfv_al_final(cfv_p))})})) {
       Value cfv_clave = cfv_parse_expresion(cfv_p);
-      size_t cfv_clave_tipo = 99;
+ [[maybe_unused]] size_t cfv_clave_tipo = 99;
       (void)(cfv_requerir(cfv_p, Value{std::string(":", 1)}, Value{std::string("Se esperaba ':'", 15)}));
       Value cfv_val = cfv_parse_expresion(cfv_p);
-      size_t cfv_val_tipo = 99;
+ [[maybe_unused]] size_t cfv_val_tipo = 99;
       (void)(cfv_agregar(cfv_pares, cfv_clave));
       (void)(cfv_agregar(cfv_pares, cfv_val));
       if (verdad(Value{!verdad(cfv_ver(cfv_p, Value{std::string("}", 1)}))})) {
@@ -2625,7 +2625,7 @@ Value cfv_parse_primaria(Value cfv_p) {
   if (verdad(cfv_ver(cfv_p, Value{std::string("(", 1)}))) {
     (void)(cfv_avanzar(cfv_p));
     Value cfv_ex = cfv_parse_expresion(cfv_p);
-    size_t cfv_ex_tipo = 99;
+ [[maybe_unused]] size_t cfv_ex_tipo = 99;
     (void)(cfv_requerir(cfv_p, Value{std::string(")", 1)}, Value{std::string("Se esperaba ')'", 15)}));
     return cfv_ex;
   }
@@ -2634,7 +2634,7 @@ Value cfv_parse_primaria(Value cfv_p) {
     (void)(cfv_avanzar(cfv_p));
     (void)(cfv_requerir(cfv_p, Value{std::string("(")}, Value{std::string("Se esperaba '(' en lambda")}));
     Value cfv_lparams = crear_lista({});
-    size_t cfv_lparams_tipo = 4;
+ [[maybe_unused]] size_t cfv_lparams_tipo = 4;
     while (verdad(Value{!verdad(cfv_ver(cfv_p, Value{std::string(")")})) && !verdad(cfv_al_final(cfv_p))})) {
       Value cfv_lpnom = cfv_requerir_tipo(cfv_p, Value{std::string("IDENT")}, Value{std::string("Se esperaba parametro en lambda")});
       (void)(cfv_agregar(cfv_lparams, indice(cfv_lpnom, Value{std::string("lexema")})));
@@ -2654,12 +2654,12 @@ Value cfv_parse_primaria(Value cfv_p) {
   }
   if (verdad(cfv_ver_tipo(cfv_p, Value{std::string("IDENT", 5)}))) {
     Value cfv_tok = cfv_avanzar(cfv_p);
-    size_t cfv_tok_tipo = 99;
+ [[maybe_unused]] size_t cfv_tok_tipo = 99;
     if (verdad(cfv_ver(cfv_p, Value{std::string("(", 1)}))) {
       (void)(cfv_avanzar(cfv_p));
       Value cfv_args = cfv_parse_argumentos(cfv_p);
       if (cfv_args.index() != 4) throw std::runtime_error("tipo incompatible para args");
-      size_t cfv_args_tipo = 4;
+ [[maybe_unused]] size_t cfv_args_tipo = 4;
       (void)(cfv_requerir(cfv_p, Value{std::string(")", 1)}, Value{std::string("Se esperaba ')'", 15)}));
       return cfv_nodo(Value{std::string("Llamada", 7)}, indice(cfv_tok, Value{std::string("lexema", 6)}), cfv_args);
     }
@@ -2671,12 +2671,12 @@ Value cfv_parse_primaria(Value cfv_p) {
 }
 Value cfv_parsear(Value cfv_tokens) {
   cfv_jit_hit("parsear");
-  size_t cfv_tokens_tipo = cfv_tokens.index();
+ [[maybe_unused]] size_t cfv_tokens_tipo = cfv_tokens.index();
   Value cfv_p = cfv_mk_parser(cfv_tokens);
-  size_t cfv_p_tipo = 99;
+ [[maybe_unused]] size_t cfv_p_tipo = 99;
   Value cfv_sentencias = crear_lista({});
   if (cfv_sentencias.index() != 4) throw std::runtime_error("tipo incompatible para sentencias");
-  size_t cfv_sentencias_tipo = 4;
+ [[maybe_unused]] size_t cfv_sentencias_tipo = 4;
   while (verdad(Value{!verdad(cfv_al_final(cfv_p))})) {
     (void)(cfv_agregar(cfv_sentencias, cfv_parse_sentencia(cfv_p)));
   }
@@ -2685,11 +2685,11 @@ Value cfv_parsear(Value cfv_tokens) {
 }
 Value cfv_env_buscar(Value cfv_env, Value cfv_nombre) {
   cfv_jit_hit("env_buscar");
-  size_t cfv_env_tipo = cfv_env.index();
-  size_t cfv_nombre_tipo = cfv_nombre.index();
+ [[maybe_unused]] size_t cfv_env_tipo = cfv_env.index();
+ [[maybe_unused]] size_t cfv_nombre_tipo = cfv_nombre.index();
   Value cfv_i = Value{0.0};
   if (cfv_i.index() != 1) throw std::runtime_error("tipo incompatible para i");
-  size_t cfv_i_tipo = 1;
+ [[maybe_unused]] size_t cfv_i_tipo = 1;
   while (verdad(compara(cfv_i, cfv_longitud(cfv_env), "<"))) {
     if (verdad(cfv_tiene_clave(indice(cfv_env, cfv_i), cfv_nombre))) {
       return indice(indice(cfv_env, cfv_i), cfv_nombre);
@@ -2702,11 +2702,11 @@ Value cfv_env_buscar(Value cfv_env, Value cfv_nombre) {
 }
 Value cfv_env_tiene(Value cfv_env, Value cfv_nombre) {
   cfv_jit_hit("env_tiene");
-  size_t cfv_env_tipo = cfv_env.index();
-  size_t cfv_nombre_tipo = cfv_nombre.index();
+ [[maybe_unused]] size_t cfv_env_tipo = cfv_env.index();
+ [[maybe_unused]] size_t cfv_nombre_tipo = cfv_nombre.index();
   Value cfv_i = Value{0.0};
   if (cfv_i.index() != 1) throw std::runtime_error("tipo incompatible para i");
-  size_t cfv_i_tipo = 1;
+ [[maybe_unused]] size_t cfv_i_tipo = 1;
   while (verdad(compara(cfv_i, cfv_longitud(cfv_env), "<"))) {
     if (verdad(cfv_tiene_clave(indice(cfv_env, cfv_i), cfv_nombre))) {
       return Value{true};
@@ -2718,45 +2718,45 @@ Value cfv_env_tiene(Value cfv_env, Value cfv_nombre) {
 }
 Value cfv_env_declarar(Value cfv_env, Value cfv_nombre, Value cfv_valor) {
   cfv_jit_hit("env_declarar");
-  size_t cfv_env_tipo = cfv_env.index();
-  size_t cfv_nombre_tipo = cfv_nombre.index();
-  size_t cfv_valor_tipo = cfv_valor.index();
+ [[maybe_unused]] size_t cfv_env_tipo = cfv_env.index();
+ [[maybe_unused]] size_t cfv_nombre_tipo = cfv_nombre.index();
+ [[maybe_unused]] size_t cfv_valor_tipo = cfv_valor.index();
   Value cfv_scope = indice(cfv_env, Value{0.0});
-  size_t cfv_scope_tipo = 99;
+ [[maybe_unused]] size_t cfv_scope_tipo = 99;
   asignar_indice(cfv_scope, cfv_nombre, cfv_valor);
   return Value{};
 }
 Value cfv_env_asignar(Value cfv_env, Value cfv_nombre, Value cfv_valor) {
   cfv_jit_hit("env_asignar");
-  size_t cfv_env_tipo = cfv_env.index();
-  size_t cfv_nombre_tipo = cfv_nombre.index();
-  size_t cfv_valor_tipo = cfv_valor.index();
+ [[maybe_unused]] size_t cfv_env_tipo = cfv_env.index();
+ [[maybe_unused]] size_t cfv_nombre_tipo = cfv_nombre.index();
+ [[maybe_unused]] size_t cfv_valor_tipo = cfv_valor.index();
   Value cfv_i = Value{0.0};
   if (cfv_i.index() != 1) throw std::runtime_error("tipo incompatible para i");
-  size_t cfv_i_tipo = 1;
+ [[maybe_unused]] size_t cfv_i_tipo = 1;
   while (verdad(compara(cfv_i, cfv_longitud(cfv_env), "<"))) {
     if (verdad(cfv_tiene_clave(indice(cfv_env, cfv_i), cfv_nombre))) {
       Value cfv_scope = indice(cfv_env, cfv_i);
-      size_t cfv_scope_tipo = 99;
+ [[maybe_unused]] size_t cfv_scope_tipo = 99;
       asignar_indice(cfv_scope, cfv_nombre, cfv_valor);
       return Value{0.0};
     }
     asignar(cfv_i, cfv_i_tipo, suma(cfv_i, Value{1.0}), "i");
   }
   Value cfv_scope = indice(cfv_env, Value{0.0});
-  size_t cfv_scope_tipo = 99;
+ [[maybe_unused]] size_t cfv_scope_tipo = 99;
   asignar_indice(cfv_scope, cfv_nombre, cfv_valor);
   return Value{};
 }
 Value cfv_env_nuevo_scope(Value cfv_env) {
   cfv_jit_hit("env_nuevo_scope");
-  size_t cfv_env_tipo = cfv_env.index();
+ [[maybe_unused]] size_t cfv_env_tipo = cfv_env.index();
   Value cfv_nuevo = crear_lista({crear_mapa({})});
   if (cfv_nuevo.index() != 4) throw std::runtime_error("tipo incompatible para nuevo");
-  size_t cfv_nuevo_tipo = 4;
+ [[maybe_unused]] size_t cfv_nuevo_tipo = 4;
   Value cfv_i = Value{0.0};
   if (cfv_i.index() != 1) throw std::runtime_error("tipo incompatible para i");
-  size_t cfv_i_tipo = 1;
+ [[maybe_unused]] size_t cfv_i_tipo = 1;
   while (verdad(compara(cfv_i, cfv_longitud(cfv_env), "<"))) {
     (void)(cfv_agregar(cfv_nuevo, indice(cfv_env, cfv_i)));
     asignar(cfv_i, cfv_i_tipo, suma(cfv_i, Value{1.0}), "i");
@@ -2766,7 +2766,7 @@ Value cfv_env_nuevo_scope(Value cfv_env) {
 }
 Value cfv_formato_valor(Value cfv_v) {
   cfv_jit_hit("formato_valor");
-  size_t cfv_v_tipo = cfv_v.index();
+ [[maybe_unused]] size_t cfv_v_tipo = cfv_v.index();
   if (verdad(compara(cfv_v, Value{}, "=="))) {
     return Value{std::string("nulo", 4)};
   }
@@ -2781,9 +2781,9 @@ Value cfv_formato_valor(Value cfv_v) {
 }
 Value cfv_eval_binario(Value cfv_op, Value cfv_izq, Value cfv_der) {
   cfv_jit_hit("eval_binario");
-  size_t cfv_op_tipo = cfv_op.index();
-  size_t cfv_izq_tipo = cfv_izq.index();
-  size_t cfv_der_tipo = cfv_der.index();
+ [[maybe_unused]] size_t cfv_op_tipo = cfv_op.index();
+ [[maybe_unused]] size_t cfv_izq_tipo = cfv_izq.index();
+ [[maybe_unused]] size_t cfv_der_tipo = cfv_der.index();
   if (verdad(compara(cfv_op, Value{std::string("+", 1)}, "=="))) {
     if (verdad(Value{verdad(compara(cfv_tipo_de(cfv_izq), Value{std::string("texto", 5)}, "==")) || verdad(compara(cfv_tipo_de(cfv_der), Value{std::string("texto", 5)}, "=="))})) {
       return suma(cfv_formato_valor(cfv_izq), cfv_formato_valor(cfv_der));
@@ -2858,7 +2858,7 @@ static std::mt19937_64& cfv_rng() {
   static std::mt19937_64 gen(std::random_device{}());
   return gen;
 }
-static Value cfv_aleatorio_uniforme(const Value& min_v, const Value& max_v) {
+[[maybe_unused]] static Value cfv_aleatorio_uniforme(const Value& min_v, const Value& max_v) {
   double lo = numero(min_v), hi = numero(max_v);
   if (lo >= hi) throw std::runtime_error("aleatorio_uniforme: min debe ser < max");
   std::uniform_real_distribution<double> dist(lo, hi);
@@ -2866,11 +2866,11 @@ static Value cfv_aleatorio_uniforme(const Value& min_v, const Value& max_v) {
 }
 
 // Date/time
-static Value cfv_fecha_ahora_ms_fn() {
+[[maybe_unused]] static Value cfv_fecha_ahora_ms_fn() {
   using namespace std::chrono;
   return (double)duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
-static Value cfv_fecha_ahora_fn() {
+[[maybe_unused]] static Value cfv_fecha_ahora_fn() {
   std::time_t t = std::time(nullptr);
   std::tm* tm = std::localtime(&t);
   auto m = std::make_shared<std::map<std::string,Value>>();
@@ -2885,12 +2885,12 @@ static Value cfv_fecha_ahora_fn() {
 }
 
 // Regex
-static Value cfv_regex_coincidir_fn(const Value& pat, const Value& txt) {
+[[maybe_unused]] static Value cfv_regex_coincidir_fn(const Value& pat, const Value& txt) {
   if (pat.index()!=2||txt.index()!=2) throw std::runtime_error("regex_coincidir requiere texto");
   std::regex r(std::get<std::string>(pat.data));
   return Value{std::regex_search(std::get<std::string>(txt.data), r)};
 }
-static Value cfv_regex_buscar_fn(const Value& pat, const Value& txt) {
+[[maybe_unused]] static Value cfv_regex_buscar_fn(const Value& pat, const Value& txt) {
   if (pat.index()!=2||txt.index()!=2) throw std::runtime_error("regex_buscar requiere texto");
   std::smatch m;
   const std::string& s = std::get<std::string>(txt.data);
@@ -2898,7 +2898,7 @@ static Value cfv_regex_buscar_fn(const Value& pat, const Value& txt) {
   if (std::regex_search(s, m, r)) return Value{std::string(m[0])};
   return Value{};
 }
-static Value cfv_regex_buscar_todos_fn(const Value& pat, const Value& txt) {
+[[maybe_unused]] static Value cfv_regex_buscar_todos_fn(const Value& pat, const Value& txt) {
   if (pat.index()!=2||txt.index()!=2) throw std::runtime_error("regex_buscar_todos requiere texto");
   const std::string& s = std::get<std::string>(txt.data);
   std::regex r(std::get<std::string>(pat.data));
@@ -2908,12 +2908,12 @@ static Value cfv_regex_buscar_todos_fn(const Value& pat, const Value& txt) {
   for (auto it = begin; it != end; ++it) res->push_back(Value{std::string((*it)[0])});
   return Value{res};
 }
-static Value cfv_regex_reemplazar_fn(const Value& pat, const Value& txt, const Value& rep) {
+[[maybe_unused]] static Value cfv_regex_reemplazar_fn(const Value& pat, const Value& txt, const Value& rep) {
   if (pat.index()!=2||txt.index()!=2||rep.index()!=2) throw std::runtime_error("regex_reemplazar requiere texto");
   std::regex r(std::get<std::string>(pat.data));
   return Value{std::regex_replace(std::get<std::string>(txt.data), r, std::get<std::string>(rep.data))};
 }
-static Value cfv_regex_dividir_fn(const Value& pat, const Value& txt) {
+[[maybe_unused]] static Value cfv_regex_dividir_fn(const Value& pat, const Value& txt) {
   if (pat.index()!=2||txt.index()!=2) throw std::runtime_error("regex_dividir requiere texto");
   const std::string& s = std::get<std::string>(txt.data);
   std::regex r(std::get<std::string>(pat.data));
@@ -2925,7 +2925,7 @@ static Value cfv_regex_dividir_fn(const Value& pat, const Value& txt) {
 
 // Base64
 static const std::string cfv_b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-static Value cfv_base64_codificar_fn(const Value& v) {
+[[maybe_unused]] static Value cfv_base64_codificar_fn(const Value& v) {
   if (v.index()!=2) throw std::runtime_error("base64_codificar requiere texto");
   const std::string& in = std::get<std::string>(v.data);
   std::string out; out.reserve(((in.size()+2)/3)*4);
@@ -2937,7 +2937,7 @@ static Value cfv_base64_codificar_fn(const Value& v) {
   }
   return Value{out};
 }
-static Value cfv_base64_decodificar_fn(const Value& v) {
+[[maybe_unused]] static Value cfv_base64_decodificar_fn(const Value& v) {
   if (v.index()!=2) throw std::runtime_error("base64_decodificar requiere texto");
   const std::string& in = std::get<std::string>(v.data);
   auto find=[](char c)->int{auto p=cfv_b64chars.find(c);return p==std::string::npos?-1:(int)p;};
@@ -2953,10 +2953,10 @@ static Value cfv_base64_decodificar_fn(const Value& v) {
 }
 
 // SHA256 — delega a la implementación real (OpenSSL o pure-C++)
-static Value cfv_sha256_fn(const Value& v) { return cfv_sha256(v); }
+[[maybe_unused]] static Value cfv_sha256_fn(const Value& v) { return cfv_sha256(v); }
 
 // URL encoding
-static Value cfv_url_codificar_fn(const Value& v) {
+[[maybe_unused]] static Value cfv_url_codificar_fn(const Value& v) {
   if (v.index()!=2) throw std::runtime_error("url_codificar requiere texto");
   const std::string& s = std::get<std::string>(v.data);
   std::string out; out.reserve(s.size()*3);
@@ -2967,7 +2967,7 @@ static Value cfv_url_codificar_fn(const Value& v) {
   }
   return Value{out};
 }
-static Value cfv_url_decodificar_fn(const Value& v) {
+[[maybe_unused]] static Value cfv_url_decodificar_fn(const Value& v) {
   if (v.index()!=2) throw std::runtime_error("url_decodificar requiere texto");
   const std::string& s = std::get<std::string>(v.data);
   std::string out; out.reserve(s.size());
@@ -2980,15 +2980,15 @@ static Value cfv_url_decodificar_fn(const Value& v) {
   }
   return Value{out};
 }
-static Value cfv_codigo_char_fn(const Value& v) {
+[[maybe_unused]] static Value cfv_codigo_char_fn(const Value& v) {
   if (v.index()!=2) throw std::runtime_error("codigo_char requiere texto");
   const std::string& s = std::get<std::string>(v.data);
   if (s.empty()) throw std::runtime_error("codigo_char requiere texto no vacío");
   return (double)(unsigned char)s[0];
 }
 // JSON builtins
-static Value cfv_json_serializar_fn(const Value& v) { return Value{cfv_canonical_json(v)}; }
-static Value cfv_json_bonito_fn(const Value& v, int indent=0) {
+[[maybe_unused]] static Value cfv_json_serializar_fn(const Value& v) { return Value{cfv_canonical_json(v)}; }
+[[maybe_unused]] static Value cfv_json_bonito_fn(const Value& v, int indent=0) {
   // Simple pretty-printer
   std::string pad(indent*2,' ');
   if (v.index()==0) return Value{std::string("null")};
@@ -3025,15 +3025,15 @@ static Value cfv_json_bonito_fn(const Value& v, int indent=0) {
 // ── JSON nativo (sin deps) ───────────────────────────────────────────────────
 #include <regex>
 
-static std::string cfv_json_escape_str(const std::string& s){
+[[maybe_unused]] static std::string cfv_json_escape_str(const std::string& s){
   std::string r; r.reserve(s.size()+4);
   for(unsigned char c:s){switch(c){case '"':r+="\\\"";break;case'\\':r+="\\\\";break;
     case'\n':r+="\\n";break;case'\r':r+="\\r";break;case'\t':r+="\\t";break;
     default: if(c<0x20){char b[8];snprintf(b,sizeof(b),"\\u%04x",c);r+=b;}else r+=c;}}
   return r;
 }
-static std::string cfv_valor_a_json(const Value& v);
-static std::string cfv_valor_a_json(const Value& v){
+[[maybe_unused]] static std::string cfv_valor_a_json(const Value& v);
+[[maybe_unused]] static std::string cfv_valor_a_json(const Value& v){
   switch(v.data.index()){
     case 0: return "null";
     case 1:{double d=std::get<double>(v.data);
@@ -3089,11 +3089,11 @@ struct CfvJsonParser{const std::string&s;size_t pos=0;
       if(pos<s.size()&&s[pos]=='}'){pos++;break;}
       throw std::runtime_error("json_parsear: se esperaba ',' o '}'");}return Value{m};}
 };
-static Value cfv_json_parsear_fn(const Value& v){
+[[maybe_unused]] static Value cfv_json_parsear_fn(const Value& v){
   if(v.data.index()!=2)throw std::runtime_error("json_parsear: se esperaba texto");
   CfvJsonParser p{std::get<std::string>(v.data)};return p.document();}
-static Value cfv_json_texto_fn(const Value& v){return Value{cfv_valor_a_json(v)};}
-static Value cfv_regex_grupos_fn(const Value& t,const Value& p){
+[[maybe_unused]] static Value cfv_json_texto_fn(const Value& v){return Value{cfv_valor_a_json(v)};}
+[[maybe_unused]] static Value cfv_regex_grupos_fn(const Value& t,const Value& p){
   if(t.data.index()!=2||p.data.index()!=2)throw std::runtime_error("regex_grupos: texto, patron");
   std::regex re(std::get<std::string>(p.data),std::regex::ECMAScript);
   std::smatch m;const std::string& texto=std::get<std::string>(t.data);
@@ -3107,18 +3107,18 @@ static Value cfv_regex_grupos_fn(const Value& t,const Value& p){
 #include <sqlite3.h>
 static std::map<int,sqlite3*> cfv_db_conns;
 static int cfv_db_next_id=1;
-static Value cfv_db_abrir_fn(const Value& rv){
+[[maybe_unused]] static Value cfv_db_abrir_fn(const Value& rv){
   if(rv.data.index()!=2)throw std::runtime_error("db_abrir: se esperaba ruta");
   sqlite3* db=nullptr;
   int rc=sqlite3_open(std::get<std::string>(rv.data).c_str(),&db);
   if(rc!=SQLITE_OK)throw std::runtime_error(std::string("db_abrir: ")+sqlite3_errmsg(db));
   int id=cfv_db_next_id++;cfv_db_conns[id]=db;return Value{(double)id};}
-static Value cfv_db_cerrar_fn(const Value& iv){
+[[maybe_unused]] static Value cfv_db_cerrar_fn(const Value& iv){
   int id=(int)std::get<double>(iv.data);
   auto it=cfv_db_conns.find(id);
   if(it!=cfv_db_conns.end()){sqlite3_close(it->second);cfv_db_conns.erase(it);}
   return Value{};}
-static Value cfv_db_ejecutar_fn(const Value& iv,const Value& sv){
+[[maybe_unused]] static Value cfv_db_ejecutar_fn(const Value& iv,const Value& sv){
   int id=(int)std::get<double>(iv.data);
   auto it=cfv_db_conns.find(id);
   if(it==cfv_db_conns.end())throw std::runtime_error("db_ejecutar: conexion no encontrada");
@@ -3141,7 +3141,7 @@ static std::vector<ForgeValue> cfv_db_step_rows(sqlite3* db,sqlite3_stmt* stmt){
         default:{const char* tx=(const char*)sqlite3_column_text(stmt,c);val=Value{tx?std::string(tx):std::string()};break;}
       }(*fila)[col]=val;}filas.push_back(Value{fila});}
   return filas;}
-static Value cfv_db_consulta_fn(const Value& iv,const Value& sv){
+[[maybe_unused]] static Value cfv_db_consulta_fn(const Value& iv,const Value& sv){
   int id=(int)std::get<double>(iv.data);
   auto it=cfv_db_conns.find(id);
   if(it==cfv_db_conns.end())throw std::runtime_error("db_consulta: conexion no encontrada");
@@ -3151,7 +3151,7 @@ static Value cfv_db_consulta_fn(const Value& iv,const Value& sv){
   if(rc!=SQLITE_OK)throw std::runtime_error(std::string("db_consulta: ")+sqlite3_errmsg(it->second));
   auto filas=std::make_shared<std::vector<ForgeValue>>(cfv_db_step_rows(it->second,stmt));
   sqlite3_finalize(stmt);return Value{filas};}
-static Value cfv_db_consulta_p_fn(const Value& iv,const Value& sv,const Value& pv){
+[[maybe_unused]] static Value cfv_db_consulta_p_fn(const Value& iv,const Value& sv,const Value& pv){
   int id=(int)std::get<double>(iv.data);
   auto it=cfv_db_conns.find(id);
   if(it==cfv_db_conns.end())throw std::runtime_error("db_consulta_p: conexion no encontrada");
@@ -3166,22 +3166,22 @@ static Value cfv_db_consulta_p_fn(const Value& iv,const Value& sv,const Value& p
       else if(auto* b=std::get_if<bool>(&p.data))sqlite3_bind_int(stmt,idx,*b?1:0);}}
   auto filas=std::make_shared<std::vector<ForgeValue>>(cfv_db_step_rows(it->second,stmt));
   sqlite3_finalize(stmt);return Value{filas};}
-static Value cfv_db_ultimo_id_fn(const Value& iv){
+[[maybe_unused]] static Value cfv_db_ultimo_id_fn(const Value& iv){
   int id=(int)std::get<double>(iv.data);
   auto it=cfv_db_conns.find(id);
   if(it==cfv_db_conns.end())return Value{0.0};
   return Value{(double)sqlite3_last_insert_rowid(it->second)};}
-static Value cfv_db_transaccion_fn(const Value& iv){
+[[maybe_unused]] static Value cfv_db_transaccion_fn(const Value& iv){
   int id=(int)std::get<double>(iv.data);
   auto it=cfv_db_conns.find(id);
   if(it==cfv_db_conns.end())throw std::runtime_error("db_transaccion: conexion no encontrada");
   sqlite3_exec(it->second,"BEGIN TRANSACTION",nullptr,nullptr,nullptr);return Value{};}
-static Value cfv_db_confirmar_fn(const Value& iv){
+[[maybe_unused]] static Value cfv_db_confirmar_fn(const Value& iv){
   int id=(int)std::get<double>(iv.data);
   auto it=cfv_db_conns.find(id);
   if(it==cfv_db_conns.end())throw std::runtime_error("db_confirmar: conexion no encontrada");
   sqlite3_exec(it->second,"COMMIT",nullptr,nullptr,nullptr);return Value{};}
-static Value cfv_db_revertir_fn(const Value& iv){
+[[maybe_unused]] static Value cfv_db_revertir_fn(const Value& iv){
   int id=(int)std::get<double>(iv.data);
   auto it=cfv_db_conns.find(id);
   if(it==cfv_db_conns.end())throw std::runtime_error("db_revertir: conexion no encontrada");
@@ -3236,7 +3236,7 @@ static CfvHttpResp cfv_http_do(const std::string& method,const std::string& url,
   return r;}
 #endif
 
-static Value cfv_http_post_fn(const Value& uv,const Value& bv,const Value& tv){
+[[maybe_unused]] static Value cfv_http_post_fn(const Value& uv,const Value& bv,const Value& tv){
 #ifndef _WIN32
   std::string url=uv.data.index()==2?std::get<std::string>(uv.data):"";
   std::string body=bv.data.index()==2?std::get<std::string>(bv.data):"";
@@ -3246,7 +3246,7 @@ static Value cfv_http_post_fn(const Value& uv,const Value& bv,const Value& tv){
   throw std::runtime_error("http_post: no soportado en Windows aun");
 #endif
 }
-static Value cfv_http_put_fn(const Value& uv,const Value& bv){
+[[maybe_unused]] static Value cfv_http_put_fn(const Value& uv,const Value& bv){
 #ifndef _WIN32
   std::string url=uv.data.index()==2?std::get<std::string>(uv.data):"";
   std::string body=bv.data.index()==2?std::get<std::string>(bv.data):"";
@@ -3255,7 +3255,7 @@ static Value cfv_http_put_fn(const Value& uv,const Value& bv){
   throw std::runtime_error("http_put: no soportado en Windows aun");
 #endif
 }
-static Value cfv_http_delete_fn(const Value& uv){
+[[maybe_unused]] static Value cfv_http_delete_fn(const Value& uv){
 #ifndef _WIN32
   std::string url=uv.data.index()==2?std::get<std::string>(uv.data):"";
   return Value{cfv_http_do("DELETE",url).body};
@@ -3263,7 +3263,7 @@ static Value cfv_http_delete_fn(const Value& uv){
   throw std::runtime_error("http_delete: no soportado en Windows aun");
 #endif
 }
-static Value cfv_http_solicitud_fn(const Value& mv,const Value& uv,const Value& ov){
+[[maybe_unused]] static Value cfv_http_solicitud_fn(const Value& mv,const Value& uv,const Value& ov){
 #ifndef _WIN32
   std::string method=mv.data.index()==2?std::get<std::string>(mv.data):"GET";
   std::string url=uv.data.index()==2?std::get<std::string>(uv.data):"";
@@ -3288,39 +3288,39 @@ static Value cfv_http_solicitud_fn(const Value& mv,const Value& uv,const Value& 
 struct CfvCanal{std::deque<ForgeValue>q;std::mutex mu;std::condition_variable cv;bool closed=false;};
 static std::map<int,std::shared_ptr<CfvCanal>> cfv_canales;
 static int cfv_canal_next_id=1;
-static Value cfv_canal_nuevo_fn(const Value&){
+[[maybe_unused]] static Value cfv_canal_nuevo_fn(const Value&){
   auto ch=std::make_shared<CfvCanal>();int id=cfv_canal_next_id++;cfv_canales[id]=ch;return Value{(double)id};}
-static Value cfv_canal_enviar_fn(const Value& iv,const Value& val){
+[[maybe_unused]] static Value cfv_canal_enviar_fn(const Value& iv,const Value& val){
   int id=(int)std::get<double>(iv.data);
   auto it=cfv_canales.find(id);if(it==cfv_canales.end())throw std::runtime_error("canal_enviar: no encontrado");
   {std::lock_guard<std::mutex> lk(it->second->mu);it->second->q.push_back(val);}
   it->second->cv.notify_one();return Value{};}
-static Value cfv_canal_recibir_fn(const Value& iv){
+[[maybe_unused]] static Value cfv_canal_recibir_fn(const Value& iv){
   int id=(int)std::get<double>(iv.data);
   auto it=cfv_canales.find(id);if(it==cfv_canales.end())throw std::runtime_error("canal_recibir: no encontrado");
   std::unique_lock<std::mutex> lk(it->second->mu);
   it->second->cv.wait(lk,[&]{return!it->second->q.empty()||it->second->closed;});
   if(it->second->q.empty())return Value{};
   Value v=it->second->q.front();it->second->q.pop_front();return v;}
-static Value cfv_canal_cerrar_fn(const Value& iv){
+[[maybe_unused]] static Value cfv_canal_cerrar_fn(const Value& iv){
   int id=(int)std::get<double>(iv.data);
   auto it=cfv_canales.find(id);
   if(it!=cfv_canales.end()){{std::lock_guard<std::mutex> lk(it->second->mu);it->second->closed=true;}
     it->second->cv.notify_all();}return Value{};}
-static Value cfv_canal_tam_fn(const Value& iv){
+[[maybe_unused]] static Value cfv_canal_tam_fn(const Value& iv){
   int id=(int)std::get<double>(iv.data);
   auto it=cfv_canales.find(id);if(it==cfv_canales.end())return Value{0.0};
   std::lock_guard<std::mutex> lk(it->second->mu);return Value{(double)it->second->q.size()};}
-static Value cfv_hilo_dormir_fn(const Value& ms){
+[[maybe_unused]] static Value cfv_hilo_dormir_fn(const Value& ms){
   double d=ms.data.index()==1?std::get<double>(ms.data):0;
   std::this_thread::sleep_for(std::chrono::milliseconds((int)d));return Value{};}
 
 // ── Sistema / Proceso / Env ───────────────────────────────────────────────────
-static Value cfv_env_obtener_fn(const Value& nv){
+[[maybe_unused]] static Value cfv_env_obtener_fn(const Value& nv){
   if(nv.data.index()!=2)return Value{};
   const char* v=std::getenv(std::get<std::string>(nv.data).c_str());
   return v?Value{std::string(v)}:Value{};}
-static Value cfv_env_establecer_fn(const Value& nv,const Value& vv){
+[[maybe_unused]] static Value cfv_env_establecer_fn(const Value& nv,const Value& vv){
   if(nv.data.index()!=2)return Value{};
   std::string n=std::get<std::string>(nv.data),v=vv.data.index()==2?std::get<std::string>(vv.data):"";
 #ifdef _WIN32
@@ -3329,7 +3329,7 @@ static Value cfv_env_establecer_fn(const Value& nv,const Value& vv){
   setenv(n.c_str(),v.c_str(),1);
 #endif
   return Value{};}
-static Value cfv_proceso_ejecutar_fn(const Value& cv){
+[[maybe_unused]] static Value cfv_proceso_ejecutar_fn(const Value& cv){
   if(cv.data.index()!=2)throw std::runtime_error("proceso_ejecutar: se esperaba texto");
   std::string cmd=std::get<std::string>(cv.data);
   FILE* pipe=popen(cmd.c_str(),"r");
@@ -3338,12 +3338,12 @@ static Value cfv_proceso_ejecutar_fn(const Value& cv){
   int rc=pclose(pipe);
   auto resp=std::make_shared<std::map<std::string,ForgeValue>>();
   (*resp)["salida"]=Value{r};(*resp)["codigo"]=Value{(double)(rc>>8)};return Value{resp};}
-static Value cfv_salir_fn(const Value& cv){
+[[maybe_unused]] static Value cfv_salir_fn(const Value& cv){
   std::exit(cv.data.index()==1?(int)std::get<double>(cv.data):0);return Value{};}
-static Value cfv_pausa_fn(const Value& ms){
+[[maybe_unused]] static Value cfv_pausa_fn(const Value& ms){
   double d=ms.data.index()==1?std::get<double>(ms.data):0;
   std::this_thread::sleep_for(std::chrono::milliseconds((int)d));return Value{};}
-static Value cfv_limpiar_pantalla_fn(const Value&){
+[[maybe_unused]] static Value cfv_limpiar_pantalla_fn(const Value&){
 #ifdef _WIN32
   system("cls");
 #else
@@ -3352,7 +3352,7 @@ static Value cfv_limpiar_pantalla_fn(const Value&){
   return Value{};}
 
 // ── Fecha y Tiempo ────────────────────────────────────────────────────────────
-static Value cfv_fecha_ahora_fn(const Value&){
+[[maybe_unused]] static Value cfv_fecha_ahora_fn(const Value&){
   auto now=std::chrono::system_clock::now();
   auto t=std::chrono::system_clock::to_time_t(now);
   struct tm ti;
@@ -3377,7 +3377,7 @@ static Value cfv_fecha_ahora_fn(const Value&){
   char hora[12];strftime(hora,sizeof(hora),"%H:%M:%S",&ti);
   (*mp)["hora_texto"]=Value{std::string(hora)};
   return Value{mp};}
-static Value cfv_fecha_formatear_fn(const Value& fv,const Value& fmt_v){
+[[maybe_unused]] static Value cfv_fecha_formatear_fn(const Value& fv,const Value& fmt_v){
   double ts=0;
   if(auto* mp=std::get_if<Mapa>(&fv.data)){if((*mp)->count("timestamp"))ts=std::get<double>((**mp)["timestamp"].data);}
   else if(fv.data.index()==1)ts=std::get<double>(fv.data);
@@ -3389,67 +3389,67 @@ static Value cfv_fecha_formatear_fn(const Value& fv,const Value& fmt_v){
 #endif
   std::string fmt=fmt_v.data.index()==2?std::get<std::string>(fmt_v.data):"%Y-%m-%d %H:%M:%S";
   char buf[256];strftime(buf,sizeof(buf),fmt.c_str(),&ti);return Value{std::string(buf)};}
-static Value cfv_tiempo_ms_fn(const Value&){
+[[maybe_unused]] static Value cfv_tiempo_ms_fn(const Value&){
   auto now=std::chrono::system_clock::now().time_since_epoch();
   return Value{(double)std::chrono::duration_cast<std::chrono::milliseconds>(now).count()};}
-static Value cfv_tiempo_segundos_fn(const Value&){
+[[maybe_unused]] static Value cfv_tiempo_segundos_fn(const Value&){
   return Value{(double)std::chrono::duration_cast<std::chrono::seconds>(
     std::chrono::system_clock::now().time_since_epoch()).count()};}
 
 // ── Colecciones extra ─────────────────────────────────────────────────────────
-static Value cfv_lista_unica_fn(const Value& lv){
+[[maybe_unused]] static Value cfv_lista_unica_fn(const Value& lv){
   if(lv.data.index()!=4)return lv;
   auto& src=*std::get<Lista>(lv.data);
   auto r=std::make_shared<std::vector<ForgeValue>>();
   for(auto& e:src){bool found=false;
     for(auto& x:*r)if(verdad(compara(x,e,"==")))found=true;
     if(!found)r->push_back(e);}return Value{r};}
-static Value cfv_lista_aplanar_fn(const Value& lv){
+[[maybe_unused]] static Value cfv_lista_aplanar_fn(const Value& lv){
   if(lv.data.index()!=4)return lv;
   auto r=std::make_shared<std::vector<ForgeValue>>();
   for(auto& e:*std::get<Lista>(lv.data)){
     if(e.data.index()==4){for(auto& x:*std::get<Lista>(e.data))r->push_back(x);}
     else r->push_back(e);}return Value{r};}
-static Value cfv_lista_zip_fn(const Value& av,const Value& bv){
+[[maybe_unused]] static Value cfv_lista_zip_fn(const Value& av,const Value& bv){
   if(av.data.index()!=4||bv.data.index()!=4)throw std::runtime_error("lista_zip: se esperaban dos listas");
   auto& a=*std::get<Lista>(av.data);auto& b=*std::get<Lista>(bv.data);
   auto r=std::make_shared<std::vector<ForgeValue>>();
   size_t n=std::min(a.size(),b.size());
   for(size_t i=0;i<n;i++){auto p=std::make_shared<std::vector<ForgeValue>>();p->push_back(a[i]);p->push_back(b[i]);r->push_back(Value{p});}
   return Value{r};}
-static Value cfv_mapa_claves_fn(const Value& mv){
+[[maybe_unused]] static Value cfv_mapa_claves_fn(const Value& mv){
   if(mv.data.index()!=5)throw std::runtime_error("mapa_claves: se esperaba mapa");
   auto r=std::make_shared<std::vector<ForgeValue>>();
   for(auto&[k,v]:*std::get<Mapa>(mv.data))r->push_back(Value{k});return Value{r};}
-static Value cfv_mapa_valores_fn(const Value& mv){
+[[maybe_unused]] static Value cfv_mapa_valores_fn(const Value& mv){
   if(mv.data.index()!=5)throw std::runtime_error("mapa_valores: se esperaba mapa");
   auto r=std::make_shared<std::vector<ForgeValue>>();
   for(auto&[k,v]:*std::get<Mapa>(mv.data))r->push_back(v);return Value{r};}
-static Value cfv_mapa_entradas_fn(const Value& mv){
+[[maybe_unused]] static Value cfv_mapa_entradas_fn(const Value& mv){
   if(mv.data.index()!=5)throw std::runtime_error("mapa_entradas: se esperaba mapa");
   auto r=std::make_shared<std::vector<ForgeValue>>();
   for(auto&[k,v]:*std::get<Mapa>(mv.data)){
     auto p=std::make_shared<std::vector<ForgeValue>>();p->push_back(Value{k});p->push_back(v);r->push_back(Value{p});}
   return Value{r};}
-static Value cfv_mapa_fusionar_fn(const Value& av,const Value& bv){
+[[maybe_unused]] static Value cfv_mapa_fusionar_fn(const Value& av,const Value& bv){
   if(av.data.index()!=5||bv.data.index()!=5)throw std::runtime_error("mapa_fusionar: se esperaban dos mapas");
   auto r=std::make_shared<std::map<std::string,ForgeValue>>(*std::get<Mapa>(av.data));
   for(auto&[k,v]:*std::get<Mapa>(bv.data))(*r)[k]=v;return Value{r};}
 
 // ── Texto extra ───────────────────────────────────────────────────────────────
-static Value cfv_texto_relleno_fn(const Value& tv,const Value& nv,const Value& cv){
+[[maybe_unused]] static Value cfv_texto_relleno_fn(const Value& tv,const Value& nv,const Value& cv){
   std::string t=tv.data.index()==2?std::get<std::string>(tv.data):"";
   int n=nv.data.index()==1?(int)std::get<double>(nv.data):0;
   std::string c=cv.data.index()==2?std::get<std::string>(cv.data):" ";
   if(c.empty())c=" ";
   while((int)t.size()<n)t=c.substr(0,1)+t;return Value{t};}
-static Value cfv_texto_relleno_der_fn(const Value& tv,const Value& nv,const Value& cv){
+[[maybe_unused]] static Value cfv_texto_relleno_der_fn(const Value& tv,const Value& nv,const Value& cv){
   std::string t=tv.data.index()==2?std::get<std::string>(tv.data):"";
   int n=nv.data.index()==1?(int)std::get<double>(nv.data):0;
   std::string c=cv.data.index()==2?std::get<std::string>(cv.data):" ";
   if(c.empty())c=" ";
   while((int)t.size()<n)t+=c.substr(0,1);return Value{t};}
-static Value cfv_texto_formato_fn(const Value& tv,const Value& args){
+[[maybe_unused]] static Value cfv_texto_formato_fn(const Value& tv,const Value& args){
   // texto_formato("Hola {0}, tienes {1} anos", ["Maria", 25])
   if(tv.data.index()!=2)throw std::runtime_error("texto_formato: se esperaba texto");
   std::string tpl=std::get<std::string>(tv.data);std::string r;
@@ -3470,38 +3470,38 @@ static Value cfv_texto_formato_fn(const Value& tv,const Value& args){
 #include <filesystem>
 namespace fs = std::filesystem;
 
-static Value cfv_archivo_copiar_fn(const Value& src, const Value& dst){
+[[maybe_unused]] static Value cfv_archivo_copiar_fn(const Value& src, const Value& dst){
   if(src.index()!=2||dst.index()!=2) throw std::runtime_error("archivo_copiar: se esperaba (texto,texto)");
   try{ fs::copy_file(std::get<std::string>(src.data), std::get<std::string>(dst.data),
        fs::copy_options::overwrite_existing); return Value{true}; }
   catch(const std::exception& e){ throw std::runtime_error(std::string("archivo_copiar: ")+e.what()); }
 }
-static Value cfv_archivo_mover_fn(const Value& src, const Value& dst){
+[[maybe_unused]] static Value cfv_archivo_mover_fn(const Value& src, const Value& dst){
   if(src.index()!=2||dst.index()!=2) throw std::runtime_error("archivo_mover: se esperaba (texto,texto)");
   try{ fs::rename(std::get<std::string>(src.data), std::get<std::string>(dst.data)); return Value{true}; }
   catch(const std::exception& e){ throw std::runtime_error(std::string("archivo_mover: ")+e.what()); }
 }
-static Value cfv_archivo_eliminar_fn(const Value& p){
+[[maybe_unused]] static Value cfv_archivo_eliminar_fn(const Value& p){
   if(p.index()!=2) throw std::runtime_error("archivo_eliminar: se esperaba texto");
   try{ fs::remove(std::get<std::string>(p.data)); return Value{true}; }
   catch(const std::exception& e){ throw std::runtime_error(std::string("archivo_eliminar: ")+e.what()); }
 }
-static Value cfv_archivo_tam_fn(const Value& p){
+[[maybe_unused]] static Value cfv_archivo_tam_fn(const Value& p){
   if(p.index()!=2) throw std::runtime_error("archivo_tam: se esperaba texto");
   try{ return Value{(double)fs::file_size(std::get<std::string>(p.data))}; }
   catch(...){ return Value{-1.0}; }
 }
-static Value cfv_directorio_crear_fn(const Value& p){
+[[maybe_unused]] static Value cfv_directorio_crear_fn(const Value& p){
   if(p.index()!=2) throw std::runtime_error("directorio_crear: se esperaba texto");
   try{ fs::create_directories(std::get<std::string>(p.data)); return Value{true}; }
   catch(const std::exception& e){ throw std::runtime_error(std::string("directorio_crear: ")+e.what()); }
 }
-static Value cfv_directorio_eliminar_fn(const Value& p){
+[[maybe_unused]] static Value cfv_directorio_eliminar_fn(const Value& p){
   if(p.index()!=2) throw std::runtime_error("directorio_eliminar: se esperaba texto");
   try{ fs::remove_all(std::get<std::string>(p.data)); return Value{true}; }
   catch(const std::exception& e){ throw std::runtime_error(std::string("directorio_eliminar: ")+e.what()); }
 }
-static Value cfv_directorio_listar_fn(const Value& p){
+[[maybe_unused]] static Value cfv_directorio_listar_fn(const Value& p){
   if(p.index()!=2) throw std::runtime_error("directorio_listar: se esperaba texto");
   Lista out = std::make_shared<std::vector<Value>>();
   try{
@@ -3510,7 +3510,7 @@ static Value cfv_directorio_listar_fn(const Value& p){
   } catch(...){}
   return Value{out};
 }
-static Value cfv_directorio_listar_rec_fn(const Value& p){
+[[maybe_unused]] static Value cfv_directorio_listar_rec_fn(const Value& p){
   if(p.index()!=2) throw std::runtime_error("directorio_listar_rec: se esperaba texto");
   Lista out = std::make_shared<std::vector<Value>>();
   try{
@@ -3520,7 +3520,7 @@ static Value cfv_directorio_listar_rec_fn(const Value& p){
   return Value{out};
 }
 // ruta_*
-static Value cfv_ruta_unir_fn(const Value& args){
+[[maybe_unused]] static Value cfv_ruta_unir_fn(const Value& args){
   if(args.index()!=4) throw std::runtime_error("ruta_unir: se esperaba lista");
   auto lp = std::get<Lista>(args.data);
   fs::path r;
@@ -3530,44 +3530,44 @@ static Value cfv_ruta_unir_fn(const Value& args){
   }
   return Value{r.string()};
 }
-static Value cfv_ruta_directorio_fn(const Value& p){
+[[maybe_unused]] static Value cfv_ruta_directorio_fn(const Value& p){
   if(p.index()!=2) throw std::runtime_error("ruta_directorio: se esperaba texto");
   return Value{fs::path(std::get<std::string>(p.data)).parent_path().string()};
 }
-static Value cfv_ruta_nombre_fn(const Value& p){
+[[maybe_unused]] static Value cfv_ruta_nombre_fn(const Value& p){
   if(p.index()!=2) throw std::runtime_error("ruta_nombre: se esperaba texto");
   return Value{fs::path(std::get<std::string>(p.data)).filename().string()};
 }
-static Value cfv_ruta_extension_fn(const Value& p){
+[[maybe_unused]] static Value cfv_ruta_extension_fn(const Value& p){
   if(p.index()!=2) throw std::runtime_error("ruta_extension: se esperaba texto");
   return Value{fs::path(std::get<std::string>(p.data)).extension().string()};
 }
-static Value cfv_ruta_sin_extension_fn(const Value& p){
+[[maybe_unused]] static Value cfv_ruta_sin_extension_fn(const Value& p){
   if(p.index()!=2) throw std::runtime_error("ruta_sin_extension: se esperaba texto");
   return Value{fs::path(std::get<std::string>(p.data)).stem().string()};
 }
-static Value cfv_ruta_absoluta_fn(const Value& p){
+[[maybe_unused]] static Value cfv_ruta_absoluta_fn(const Value& p){
   if(p.index()!=2) throw std::runtime_error("ruta_absoluta: se esperaba texto");
   try{ return Value{fs::absolute(std::get<std::string>(p.data)).string()}; }
   catch(const std::exception& e){ throw std::runtime_error(std::string("ruta_absoluta: ")+e.what()); }
 }
-static Value cfv_es_directorio_fn(const Value& p){
+[[maybe_unused]] static Value cfv_es_directorio_fn(const Value& p){
   if(p.index()!=2) return Value{false};
   return Value{fs::is_directory(std::get<std::string>(p.data))};
 }
-static Value cfv_es_archivo_fn2(const Value& p){
+[[maybe_unused]] static Value cfv_es_archivo_fn2(const Value& p){
   if(p.index()!=2) return Value{false};
   return Value{fs::is_regular_file(std::get<std::string>(p.data))};
 }
 // numero_formato
-static Value cfv_numero_formato_fn(const Value& nv, const Value& dv){
+[[maybe_unused]] static Value cfv_numero_formato_fn(const Value& nv, const Value& dv){
   double n = nv.index()==1?std::get<double>(nv.data):0.0;
   int d = dv.index()==1?(int)std::get<double>(dv.data):2;
   std::ostringstream ss; ss<<std::fixed<<std::setprecision(d)<<n;
   return Value{ss.str()};
 }
 // texto_repetir
-static Value cfv_texto_repetir_fn(const Value& tv, const Value& nv){
+[[maybe_unused]] static Value cfv_texto_repetir_fn(const Value& tv, const Value& nv){
   if(tv.index()!=2) throw std::runtime_error("texto_repetir: se esperaba texto");
   int n = nv.index()==1?(int)std::get<double>(nv.data):0;
   std::string r; const std::string& s=std::get<std::string>(tv.data);
@@ -3575,14 +3575,15 @@ static Value cfv_texto_repetir_fn(const Value& tv, const Value& nv){
   return Value{r};
 }
 // texto_invertir
-static Value cfv_texto_invertir_fn(const Value& tv){
+[[maybe_unused]] static Value cfv_texto_invertir_fn(const Value& tv){
   if(tv.index()!=2) throw std::runtime_error("texto_invertir: se esperaba texto");
   std::string s=std::get<std::string>(tv.data);
   std::reverse(s.begin(),s.end()); return Value{s};
 }
 // lista_reducir (fold)
-static Value cfv_lista_reducir_fn(const Value& lv, const Value& fn, const Value& ini,
-                                   Value cfv_env, Value cfv_fns){
+[[maybe_unused]] static Value cfv_lista_reducir_fn(const Value& lv, const Value& fn, const Value& ini,
+                                   [[maybe_unused]] Value cfv_env,
+                                   [[maybe_unused]] Value cfv_fns){
   if(lv.index()!=3) throw std::runtime_error("lista_reducir: se esperaba lista");
   auto lp=std::get<Lista>(lv.data);
   Value acc=ini;
@@ -3610,12 +3611,12 @@ static Value cfv_lista_reducir_fn(const Value& lv, const Value& fn, const Value&
 // lista_filtrar builtin (redundant with stdlib but fast)
 // lista_mapear builtin (fast path)
 // numero_abs
-static Value cfv_numero_abs_fn(const Value& v){
+[[maybe_unused]] static Value cfv_numero_abs_fn(const Value& v){
   if(v.index()!=1) throw std::runtime_error("numero_abs: se esperaba numero");
   return Value{std::abs(std::get<double>(v.data))};
 }
 // numero_max / numero_min de lista
-static Value cfv_lista_max_fn(const Value& lv){
+[[maybe_unused]] static Value cfv_lista_max_fn(const Value& lv){
   if(lv.index()!=4) throw std::runtime_error("lista_max: se esperaba lista");
   auto lp=std::get<Lista>(lv.data);
   if(lp->empty()) return Value{};
@@ -3623,7 +3624,7 @@ static Value cfv_lista_max_fn(const Value& lv){
   for(auto& v: *lp) if(v.index()==1){ double x=std::get<double>(v.data); if(first||x>m){m=x;first=false;} }
   return first?Value{}:Value{m};
 }
-static Value cfv_lista_min_fn(const Value& lv){
+[[maybe_unused]] static Value cfv_lista_min_fn(const Value& lv){
   if(lv.index()!=4) throw std::runtime_error("lista_min: se esperaba lista");
   auto lp=std::get<Lista>(lv.data);
   if(lp->empty()) return Value{};
@@ -3631,13 +3632,13 @@ static Value cfv_lista_min_fn(const Value& lv){
   for(auto& v: *lp) if(v.index()==1){ double x=std::get<double>(v.data); if(first||x<m){m=x;first=false;} }
   return first?Value{}:Value{m};
 }
-static Value cfv_lista_suma_fn(const Value& lv){
+[[maybe_unused]] static Value cfv_lista_suma_fn(const Value& lv){
   if(lv.index()!=4) throw std::runtime_error("lista_suma: se esperaba lista");
   auto lp=std::get<Lista>(lv.data);
   double s=0; for(auto& v: *lp) if(v.index()==1) s+=std::get<double>(v.data);
   return Value{s};
 }
-static Value cfv_lista_promedio_fn(const Value& lv){
+[[maybe_unused]] static Value cfv_lista_promedio_fn(const Value& lv){
   if(lv.index()!=4) throw std::runtime_error("lista_promedio: se esperaba lista");
   auto lp=std::get<Lista>(lv.data);
   if(lp->empty()) return Value{};
@@ -3646,7 +3647,7 @@ static Value cfv_lista_promedio_fn(const Value& lv){
   return c>0?Value{s/c}:Value{};
 }
 // texto_contar_ocurrencias
-static Value cfv_texto_contar_fn(const Value& tv, const Value& sv){
+[[maybe_unused]] static Value cfv_texto_contar_fn(const Value& tv, const Value& sv){
   if(tv.index()!=2||sv.index()!=2) throw std::runtime_error("texto_contar: se esperaba (texto,texto)");
   const std::string& t=std::get<std::string>(tv.data);
   const std::string& s=std::get<std::string>(sv.data);
@@ -3656,7 +3657,7 @@ static Value cfv_texto_contar_fn(const Value& tv, const Value& sv){
   return Value{(double)cnt};
 }
 // texto_indices (find all positions)
-static Value cfv_texto_posiciones_fn(const Value& tv, const Value& sv){
+[[maybe_unused]] static Value cfv_texto_posiciones_fn(const Value& tv, const Value& sv){
   if(tv.index()!=2||sv.index()!=2) throw std::runtime_error("texto_posiciones: se esperaba (texto,texto)");
   const std::string& t=std::get<std::string>(tv.data);
   const std::string& s=std::get<std::string>(sv.data);
@@ -3667,7 +3668,7 @@ static Value cfv_texto_posiciones_fn(const Value& tv, const Value& sv){
   return Value{out};
 }
 // ── Lista extra helpers ────────────────────────────────────────────────────────
-static Value cfv_lista_slice_fn(const Value& lv, const Value& dv, const Value& hv){
+[[maybe_unused]] static Value cfv_lista_slice_fn(const Value& lv, const Value& dv, const Value& hv){
   if(lv.index()!=4) throw std::runtime_error("lista_slice: se esperaba lista");
   auto lp=std::get<Lista>(lv.data);
   int n=(int)lp->size();
@@ -3679,7 +3680,7 @@ static Value cfv_lista_slice_fn(const Value& lv, const Value& dv, const Value& h
   Lista out=std::make_shared<std::vector<Value>>(lp->begin()+d,lp->begin()+h);
   return Value{out};
 }
-static Value cfv_lista_buscar_fn(const Value& lv, const Value& tv){
+[[maybe_unused]] static Value cfv_lista_buscar_fn(const Value& lv, const Value& tv){
   if(lv.index()!=4) throw std::runtime_error("lista_buscar: se esperaba lista");
   auto lp=std::get<Lista>(lv.data);
   for(int i=0;i<(int)lp->size();i++){
@@ -3687,30 +3688,30 @@ static Value cfv_lista_buscar_fn(const Value& lv, const Value& tv){
   }
   return Value{-1.0};
 }
-static Value cfv_lista_contiene_fn(const Value& lv, const Value& tv){
+[[maybe_unused]] static Value cfv_lista_contiene_fn(const Value& lv, const Value& tv){
   if(lv.index()!=4) throw std::runtime_error("lista_contiene: se esperaba lista");
   auto lp=std::get<Lista>(lv.data);
   for(auto& v: *lp) if(verdad(compara(v,tv,"=="))) return Value{true};
   return Value{false};
 }
-static Value cfv_lista_contar_elem_fn(const Value& lv, const Value& tv){
+[[maybe_unused]] static Value cfv_lista_contar_elem_fn(const Value& lv, const Value& tv){
   if(lv.index()!=4) throw std::runtime_error("lista_contar_elem: se esperaba lista");
   auto lp=std::get<Lista>(lv.data);
   int c=0; for(auto& v: *lp) if(verdad(compara(v,tv,"=="))) c++;
   return Value{(double)c};
 }
-static Value cfv_lista_invertir_fn(const Value& lv){
+[[maybe_unused]] static Value cfv_lista_invertir_fn(const Value& lv){
   if(lv.index()!=4) throw std::runtime_error("lista_invertir: se esperaba lista");
   auto lp=std::get<Lista>(lv.data);
   Lista out=std::make_shared<std::vector<Value>>(lp->rbegin(),lp->rend());
   return Value{out};
 }
-static Value cfv_lista_rellenar_fn(const Value& nv, const Value& tv){
+[[maybe_unused]] static Value cfv_lista_rellenar_fn(const Value& nv, const Value& tv){
   int n=nv.index()==1?(int)std::get<double>(nv.data):0;
   Lista out=std::make_shared<std::vector<Value>>(n,tv);
   return Value{out};
 }
-static Value cfv_lista_cada_n_fn(const Value& lv, const Value& nv){
+[[maybe_unused]] static Value cfv_lista_cada_n_fn(const Value& lv, const Value& nv){
   if(lv.index()!=4) throw std::runtime_error("lista_cada_n: se esperaba lista");
   auto lp=std::get<Lista>(lv.data);
   int step=nv.index()==1?(int)std::get<double>(nv.data):1;
@@ -3720,24 +3721,24 @@ static Value cfv_lista_cada_n_fn(const Value& lv, const Value& nv){
   return Value{out};
 }
 // texto extra
-static Value cfv_texto_es_numero_fn(const Value& tv){
+[[maybe_unused]] static Value cfv_texto_es_numero_fn(const Value& tv){
   if(tv.index()!=2) return Value{false};
   const std::string& s=std::get<std::string>(tv.data);
   if(s.empty()) return Value{false};
   try{ size_t pos; const double parsed = std::stod(s,&pos); (void)parsed; return Value{pos==s.size()}; }
   catch(...){ return Value{false}; }
 }
-static Value cfv_numero_es_entero_fn(const Value& v){
+[[maybe_unused]] static Value cfv_numero_es_entero_fn(const Value& v){
   if(v.index()!=1) return Value{false};
   double d=std::get<double>(v.data);
   return Value{d==std::floor(d)&&!std::isinf(d)&&!std::isnan(d)};
 }
-static Value cfv_numero_es_nan_fn(const Value& v){
+[[maybe_unused]] static Value cfv_numero_es_nan_fn(const Value& v){
   if(v.index()!=1) return Value{false};
   return Value{std::isnan(std::get<double>(v.data))};
 }
 // Generar rango con paso
-static Value cfv_rango_paso_fn(const Value& dv, const Value& hv, const Value& sv){
+[[maybe_unused]] static Value cfv_rango_paso_fn(const Value& dv, const Value& hv, const Value& sv){
   double d=dv.index()==1?std::get<double>(dv.data):0;
   double h=hv.index()==1?std::get<double>(hv.data):0;
   double s=sv.index()==1?std::get<double>(sv.data):1;
@@ -3748,7 +3749,7 @@ static Value cfv_rango_paso_fn(const Value& dv, const Value& hv, const Value& sv
   return Value{out};
 }
 // Mapa extra
-static Value cfv_mapa_filtrar_claves_fn(const Value& mv, const Value& lv){
+[[maybe_unused]] static Value cfv_mapa_filtrar_claves_fn(const Value& mv, const Value& lv){
   if(mv.index()!=5) throw std::runtime_error("mapa_filtrar_claves: se esperaba mapa");
   if(lv.index()!=4) throw std::runtime_error("mapa_filtrar_claves: se esperaba lista");
   auto mp=std::get<Mapa>(mv.data);
@@ -3762,7 +3763,7 @@ static Value cfv_mapa_filtrar_claves_fn(const Value& mv, const Value& lv){
   }
   return Value{out};
 }
-static Value cfv_mapa_omitir_claves_fn(const Value& mv, const Value& lv){
+[[maybe_unused]] static Value cfv_mapa_omitir_claves_fn(const Value& mv, const Value& lv){
   if(mv.index()!=5) throw std::runtime_error("mapa_omitir_claves: se esperaba mapa");
   if(lv.index()!=4) throw std::runtime_error("mapa_omitir_claves: se esperaba lista");
   auto mp=std::get<Mapa>(mv.data);
@@ -3774,7 +3775,7 @@ static Value cfv_mapa_omitir_claves_fn(const Value& mv, const Value& lv){
   return Value{out};
 }
 // Texto — unir lista con separador
-static Value cfv_texto_unir_fn(const Value& lv, const Value& sv){
+[[maybe_unused]] static Value cfv_texto_unir_fn(const Value& lv, const Value& sv){
   if(lv.index()!=4) throw std::runtime_error("texto_unir: se esperaba lista");
   auto lp=std::get<Lista>(lv.data);
   std::string sep=sv.index()==2?std::get<std::string>(sv.data):"";
@@ -3797,7 +3798,7 @@ static Value cfv_texto_unir_fn(const Value& lv, const Value& sv){
 static std::unordered_map<int, PGconn*> cfv_pg_pool;
 static int cfv_pg_next_id = 1;
 
-static Value cfv_pg_conectar_fn(const Value& conn_str_v) {
+[[maybe_unused]] static Value cfv_pg_conectar_fn(const Value& conn_str_v) {
   std::string cs = conn_str_v.index()==2 ? std::get<std::string>(conn_str_v.data) : "";
   PGconn* conn = PQconnectdb(cs.c_str());
   if (PQstatus(conn) != CONNECTION_OK) {
@@ -3810,13 +3811,13 @@ static Value cfv_pg_conectar_fn(const Value& conn_str_v) {
   return Value{(double)id};
 }
 
-static Value cfv_pg_cerrar_fn(const Value& id_v) {
+[[maybe_unused]] static Value cfv_pg_cerrar_fn(const Value& id_v) {
   int id = (int)std::get<double>(id_v.data);
   if (cfv_pg_pool.count(id)) { PQfinish(cfv_pg_pool[id]); cfv_pg_pool.erase(id); }
   return Value{};
 }
 
-static Value cfv_pg_query_fn(const Value& id_v, const Value& sql_v) {
+[[maybe_unused]] static Value cfv_pg_query_fn(const Value& id_v, const Value& sql_v) {
   int id = (int)std::get<double>(id_v.data);
   if (!cfv_pg_pool.count(id)) throw std::runtime_error("pg_query: conexión inválida");
   std::string sql = std::get<std::string>(sql_v.data);
@@ -3855,12 +3856,12 @@ static Value cfv_pg_query_fn(const Value& id_v, const Value& sql_v) {
   return Value{ret};
 }
 
-static Value cfv_pg_exec_fn(const Value& id_v, const Value& sql_v) {
+[[maybe_unused]] static Value cfv_pg_exec_fn(const Value& id_v, const Value& sql_v) {
   // alias de query para DML (INSERT/UPDATE/DELETE)
   return cfv_pg_query_fn(id_v, sql_v);
 }
 
-static Value cfv_pg_escapar_fn(const Value& id_v, const Value& str_v) {
+[[maybe_unused]] static Value cfv_pg_escapar_fn(const Value& id_v, const Value& str_v) {
   int id = (int)std::get<double>(id_v.data);
   if (!cfv_pg_pool.count(id)) throw std::runtime_error("pg_escapar: conexión inválida");
   std::string s = str_v.index()==2 ? std::get<std::string>(str_v.data) : "";
@@ -3871,11 +3872,11 @@ static Value cfv_pg_escapar_fn(const Value& id_v, const Value& str_v) {
 }
 #else
 // Stubs cuando no se compila con PG
-static Value cfv_pg_conectar_fn(const Value&){throw std::runtime_error("pg_conectar: compilar con -DCFV_WITH_PGSQL -lpq");}
-static Value cfv_pg_cerrar_fn(const Value&){throw std::runtime_error("pg_cerrar: compilar con -DCFV_WITH_PGSQL -lpq");}
-static Value cfv_pg_query_fn(const Value&, const Value&){throw std::runtime_error("pg_query: compilar con -DCFV_WITH_PGSQL -lpq");}
-static Value cfv_pg_exec_fn(const Value&, const Value&){throw std::runtime_error("pg_exec: compilar con -DCFV_WITH_PGSQL -lpq");}
-static Value cfv_pg_escapar_fn(const Value&, const Value&){throw std::runtime_error("pg_escapar: compilar con -DCFV_WITH_PGSQL -lpq");}
+[[maybe_unused]] static Value cfv_pg_conectar_fn(const Value&){throw std::runtime_error("pg_conectar: compilar con -DCFV_WITH_PGSQL -lpq");}
+[[maybe_unused]] static Value cfv_pg_cerrar_fn(const Value&){throw std::runtime_error("pg_cerrar: compilar con -DCFV_WITH_PGSQL -lpq");}
+[[maybe_unused]] static Value cfv_pg_query_fn(const Value&, const Value&){throw std::runtime_error("pg_query: compilar con -DCFV_WITH_PGSQL -lpq");}
+[[maybe_unused]] static Value cfv_pg_exec_fn(const Value&, const Value&){throw std::runtime_error("pg_exec: compilar con -DCFV_WITH_PGSQL -lpq");}
+[[maybe_unused]] static Value cfv_pg_escapar_fn(const Value&, const Value&){throw std::runtime_error("pg_escapar: compilar con -DCFV_WITH_PGSQL -lpq");}
 #endif
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3885,7 +3886,7 @@ static Value cfv_pg_escapar_fn(const Value&, const Value&){throw std::runtime_er
 static std::unordered_map<int, MYSQL*> cfv_mysql_pool;
 static int cfv_mysql_next_id = 1;
 
-static Value cfv_mysql_conectar_fn(const Value& conf_v) {
+[[maybe_unused]] static Value cfv_mysql_conectar_fn(const Value& conf_v) {
   if (conf_v.index()!=5) throw std::runtime_error("mysql_conectar: se esperaba mapa {host,usuario,password,db,puerto}");
   auto& m = *std::get<Mapa>(conf_v.data);
   auto g = [&](const std::string& k, const std::string& def="") -> std::string {
@@ -3906,13 +3907,13 @@ static Value cfv_mysql_conectar_fn(const Value& conf_v) {
   return Value{(double)id};
 }
 
-static Value cfv_mysql_cerrar_fn(const Value& id_v) {
+[[maybe_unused]] static Value cfv_mysql_cerrar_fn(const Value& id_v) {
   int id = (int)std::get<double>(id_v.data);
   if (cfv_mysql_pool.count(id)) { mysql_close(cfv_mysql_pool[id]); cfv_mysql_pool.erase(id); }
   return Value{};
 }
 
-static Value cfv_mysql_query_fn(const Value& id_v, const Value& sql_v) {
+[[maybe_unused]] static Value cfv_mysql_query_fn(const Value& id_v, const Value& sql_v) {
   int id = (int)std::get<double>(id_v.data);
   if (!cfv_mysql_pool.count(id)) throw std::runtime_error("mysql_query: conexión inválida");
   MYSQL* con = cfv_mysql_pool[id];
@@ -3944,7 +3945,7 @@ static Value cfv_mysql_query_fn(const Value& id_v, const Value& sql_v) {
   return Value{ret};
 }
 
-static Value cfv_mysql_escapar_fn(const Value& id_v, const Value& str_v) {
+[[maybe_unused]] static Value cfv_mysql_escapar_fn(const Value& id_v, const Value& str_v) {
   int id = (int)std::get<double>(id_v.data);
   if (!cfv_mysql_pool.count(id)) throw std::runtime_error("mysql_escapar: conexión inválida");
   std::string s = str_v.index()==2 ? std::get<std::string>(str_v.data) : "";
@@ -3953,10 +3954,10 @@ static Value cfv_mysql_escapar_fn(const Value& id_v, const Value& str_v) {
   return Value{std::string(buf.data())};
 }
 #else
-static Value cfv_mysql_conectar_fn(const Value&){throw std::runtime_error("mysql_conectar: compilar con -DCFV_WITH_MYSQL -lmysqlclient");}
-static Value cfv_mysql_cerrar_fn(const Value&){throw std::runtime_error("mysql_cerrar: compilar con -DCFV_WITH_MYSQL -lmysqlclient");}
-static Value cfv_mysql_query_fn(const Value&, const Value&){throw std::runtime_error("mysql_query: compilar con -DCFV_WITH_MYSQL -lmysqlclient");}
-static Value cfv_mysql_escapar_fn(const Value&, const Value&){throw std::runtime_error("mysql_escapar: compilar con -DCFV_WITH_MYSQL -lmysqlclient");}
+[[maybe_unused]] static Value cfv_mysql_conectar_fn(const Value&){throw std::runtime_error("mysql_conectar: compilar con -DCFV_WITH_MYSQL -lmysqlclient");}
+[[maybe_unused]] static Value cfv_mysql_cerrar_fn(const Value&){throw std::runtime_error("mysql_cerrar: compilar con -DCFV_WITH_MYSQL -lmysqlclient");}
+[[maybe_unused]] static Value cfv_mysql_query_fn(const Value&, const Value&){throw std::runtime_error("mysql_query: compilar con -DCFV_WITH_MYSQL -lmysqlclient");}
+[[maybe_unused]] static Value cfv_mysql_escapar_fn(const Value&, const Value&){throw std::runtime_error("mysql_escapar: compilar con -DCFV_WITH_MYSQL -lmysqlclient");}
 #endif
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3964,7 +3965,7 @@ static Value cfv_mysql_escapar_fn(const Value&, const Value&){throw std::runtime
 // ═══════════════════════════════════════════════════════════════════════════════
 #ifndef _WIN32
 // SHA-1 para el handshake WebSocket (implementación mínima)
-static void cfv_ws_sha1(const uint8_t* data, size_t len, uint8_t out[20]) {
+[[maybe_unused]] static void cfv_ws_sha1(const uint8_t* data, size_t len, uint8_t out[20]) {
   uint32_t h0=0x67452301,h1=0xEFCDAB89,h2=0x98BADCFE,h3=0x10325476,h4=0xC3D2E1F0;
   std::vector<uint8_t> msg(data, data+len);
   msg.push_back(0x80);
@@ -3991,7 +3992,7 @@ static void cfv_ws_sha1(const uint8_t* data, size_t len, uint8_t out[20]) {
   for(int i=0;i<5;i++){out[i*4]=(hs[i]>>24)&0xff;out[i*4+1]=(hs[i]>>16)&0xff;out[i*4+2]=(hs[i]>>8)&0xff;out[i*4+3]=hs[i]&0xff;}
 }
 
-static std::string cfv_ws_base64_encode(const uint8_t* data, size_t len) {
+[[maybe_unused]] static std::string cfv_ws_base64_encode(const uint8_t* data, size_t len) {
   static const char* t="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   std::string r;
   for(size_t i=0;i<len;i+=3){
@@ -4008,7 +4009,7 @@ static std::unordered_map<int,CfvWsClient> cfv_ws_clients;
 static std::unordered_map<int,int> cfv_ws_servers; // server_id → server_fd
 static int cfv_ws_next_id = 1;
 
-static Value cfv_ws_escuchar_fn(const Value& puerto_v) {
+[[maybe_unused]] static Value cfv_ws_escuchar_fn(const Value& puerto_v) {
   int puerto = (int)std::get<double>(puerto_v.data);
   int sfd = socket(AF_INET, SOCK_STREAM, 0);
   if(sfd<0) throw std::runtime_error("ws_escuchar: socket falló");
@@ -4022,7 +4023,7 @@ static Value cfv_ws_escuchar_fn(const Value& puerto_v) {
 }
 
 // Hacer handshake HTTP→WS
-static bool cfv_ws_do_handshake(CfvWsClient& cli) {
+[[maybe_unused]] static bool cfv_ws_do_handshake(CfvWsClient& cli) {
   // Buscar fin de headers HTTP
   auto pos = cli.buf.find("\r\n\r\n");
   if(pos==std::string::npos) return false;
@@ -4045,7 +4046,7 @@ static bool cfv_ws_do_handshake(CfvWsClient& cli) {
   return true;
 }
 
-static Value cfv_ws_aceptar_fn(const Value& srv_v) {
+[[maybe_unused]] static Value cfv_ws_aceptar_fn(const Value& srv_v) {
   int srv_id = (int)std::get<double>(srv_v.data);
   if(!cfv_ws_servers.count(srv_id)) throw std::runtime_error("ws_aceptar: servidor inválido");
   int sfd = cfv_ws_servers[srv_id];
@@ -4061,7 +4062,7 @@ static Value cfv_ws_aceptar_fn(const Value& srv_v) {
   return Value{(double)id};
 }
 
-static Value cfv_ws_recibir_fn(const Value& cli_v) {
+[[maybe_unused]] static Value cfv_ws_recibir_fn(const Value& cli_v) {
   int cli_id = (int)std::get<double>(cli_v.data);
   if(!cfv_ws_clients.count(cli_id)) return Value{};
   auto& cli = cfv_ws_clients[cli_id];
@@ -4072,7 +4073,7 @@ static Value cfv_ws_recibir_fn(const Value& cli_v) {
   if(cli.buf.size()<2) return Value{};
   // Decodificar frame WebSocket
   uint8_t* b=(uint8_t*)cli.buf.data();
-  bool fin=(b[0]&0x80)!=0; int op=b[0]&0x0f;
+  int op=b[0]&0x0f;
   bool masked=(b[1]&0x80)!=0; uint64_t plen=b[1]&0x7f;
   size_t hdr=2;
   if(plen==126){if(cli.buf.size()<4)return Value{};plen=(b[2]<<8)|b[3];hdr=4;}
@@ -4088,7 +4089,7 @@ static Value cfv_ws_recibir_fn(const Value& cli_v) {
   return Value{payload};
 }
 
-static Value cfv_ws_enviar_fn(const Value& cli_v, const Value& msg_v) {
+[[maybe_unused]] static Value cfv_ws_enviar_fn(const Value& cli_v, const Value& msg_v) {
   int cli_id=(int)std::get<double>(cli_v.data);
   if(!cfv_ws_clients.count(cli_id)) return Value{false};
   std::string payload=msg_v.index()==2?std::get<std::string>(msg_v.data):cfv_valor_a_json(msg_v);
@@ -4102,7 +4103,7 @@ static Value cfv_ws_enviar_fn(const Value& cli_v, const Value& msg_v) {
   return Value{true};
 }
 
-static Value cfv_ws_broadcast_fn(const Value& srv_v, const Value& msg_v) {
+[[maybe_unused]] static Value cfv_ws_broadcast_fn([[maybe_unused]] const Value& srv_v, const Value& msg_v) {
   // Envía a todos los clientes del servidor (simplificado: envía a todos los clientes conectados)
   int enviados=0;
   for(auto& kv:cfv_ws_clients){
@@ -4111,7 +4112,7 @@ static Value cfv_ws_broadcast_fn(const Value& srv_v, const Value& msg_v) {
   return Value{(double)enviados};
 }
 
-static Value cfv_ws_cerrar_fn(const Value& cli_v) {
+[[maybe_unused]] static Value cfv_ws_cerrar_fn(const Value& cli_v) {
   int cli_id=(int)std::get<double>(cli_v.data);
   if(!cfv_ws_clients.count(cli_id)) return Value{};
   uint8_t frame[2]={0x88,0x00}; // close frame
@@ -4121,29 +4122,29 @@ static Value cfv_ws_cerrar_fn(const Value& cli_v) {
   return Value{};
 }
 
-static Value cfv_ws_cerrar_servidor_fn(const Value& srv_v) {
+[[maybe_unused]] static Value cfv_ws_cerrar_servidor_fn(const Value& srv_v) {
   int id=(int)std::get<double>(srv_v.data);
   if(cfv_ws_servers.count(id)){close(cfv_ws_servers[id]);cfv_ws_servers.erase(id);}
   return Value{};
 }
 #else
 // Stubs Windows
-static Value cfv_ws_escuchar_fn(const Value&){throw std::runtime_error("ws_escuchar: no soportado en Windows aún");}
-static Value cfv_ws_aceptar_fn(const Value&){throw std::runtime_error("ws_aceptar: no soportado en Windows aún");}
-static Value cfv_ws_recibir_fn(const Value&){throw std::runtime_error("ws_recibir: no soportado en Windows aún");}
-static Value cfv_ws_enviar_fn(const Value&, const Value&){throw std::runtime_error("ws_enviar: no soportado en Windows aún");}
-static Value cfv_ws_broadcast_fn(const Value&, const Value&){throw std::runtime_error("ws_broadcast: no soportado en Windows aún");}
-static Value cfv_ws_cerrar_fn(const Value&){throw std::runtime_error("ws_cerrar: no soportado en Windows aún");}
-static Value cfv_ws_cerrar_servidor_fn(const Value&){throw std::runtime_error("ws_cerrar_servidor: no soportado en Windows aún");}
+[[maybe_unused]] static Value cfv_ws_escuchar_fn(const Value&){throw std::runtime_error("ws_escuchar: no soportado en Windows aún");}
+[[maybe_unused]] static Value cfv_ws_aceptar_fn(const Value&){throw std::runtime_error("ws_aceptar: no soportado en Windows aún");}
+[[maybe_unused]] static Value cfv_ws_recibir_fn(const Value&){throw std::runtime_error("ws_recibir: no soportado en Windows aún");}
+[[maybe_unused]] static Value cfv_ws_enviar_fn(const Value&, const Value&){throw std::runtime_error("ws_enviar: no soportado en Windows aún");}
+[[maybe_unused]] static Value cfv_ws_broadcast_fn(const Value&, const Value&){throw std::runtime_error("ws_broadcast: no soportado en Windows aún");}
+[[maybe_unused]] static Value cfv_ws_cerrar_fn(const Value&){throw std::runtime_error("ws_cerrar: no soportado en Windows aún");}
+[[maybe_unused]] static Value cfv_ws_cerrar_servidor_fn(const Value&){throw std::runtime_error("ws_cerrar_servidor: no soportado en Windows aún");}
 #endif
 // ── fin WebSocket ─────────────────────────────────────────────────────────────
 
 Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cfv_fns) {
   cfv_jit_hit("eval_builtin");
-  size_t cfv_nombre_tipo = cfv_nombre.index();
-  size_t cfv_args_tipo = cfv_args.index();
-  size_t cfv_env_tipo = cfv_env.index();
-  size_t cfv_fns_tipo = cfv_fns.index();
+ [[maybe_unused]] size_t cfv_nombre_tipo = cfv_nombre.index();
+ [[maybe_unused]] size_t cfv_args_tipo = cfv_args.index();
+ [[maybe_unused]] size_t cfv_env_tipo = cfv_env.index();
+ [[maybe_unused]] size_t cfv_fns_tipo = cfv_fns.index();
   if (verdad(compara(cfv_nombre, Value{std::string("mostrar", 7)}, "=="))) {
     (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("mostrar requiere un argumento", 29)}));
     mostrar(indice(cfv_args, Value{0.0}));
@@ -4202,6 +4203,10 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
   if (verdad(compara(cfv_nombre, Value{std::string("sys_run", 7)}, "=="))) {
     (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("sys_run requiere un argumento", 29)}));
     return cfv_sys_run(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sys_info", 8)}, "=="))) {
+    (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{0.0}, "=="), Value{std::string("sys_info no recibe argumentos", 30)}));
+    return cfv_sys_info();
   }
   if (verdad(compara(cfv_nombre, Value{std::string("existe_archivo", 14)}, "=="))) {
     (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("existe_archivo requiere un argumento", 36)}));
@@ -4768,22 +4773,18 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
     return cfv_json_bonito_fn(indice(cfv_args, Value{0.0}));
   }
   // ── Regex ──────────────────────────────────────────────────────────────────
-  // regex_coincidir(texto, patron), regex_buscar(texto, patron), etc.
-  // cfv_regex_*_fn toma (patron, texto) — intercambiar args
+  // API pública estable: regex_*(patron, texto, ...).
   if (verdad(compara(cfv_nombre, Value{std::string("regex_coincidir")}, "=="))) {
-    return cfv_regex_coincidir_fn(indice(cfv_args,Value{1.0}),indice(cfv_args,Value{0.0}));
+    return cfv_regex_coincidir_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
   }
   if (verdad(compara(cfv_nombre, Value{std::string("regex_buscar")}, "=="))) {
-    // regex_buscar(texto, patron) -> lista de todos los matches
-    return cfv_regex_buscar_todos_fn(indice(cfv_args,Value{1.0}),indice(cfv_args,Value{0.0}));
+    return cfv_regex_buscar_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
   }
   if (verdad(compara(cfv_nombre, Value{std::string("regex_buscar_primero")}, "=="))) {
-    // regex_buscar_primero(texto, patron) -> primer match o nulo
-    return cfv_regex_buscar_fn(indice(cfv_args,Value{1.0}),indice(cfv_args,Value{0.0}));
+    return cfv_regex_buscar_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
   }
   if (verdad(compara(cfv_nombre, Value{std::string("regex_reemplazar")}, "=="))) {
-    // regex_reemplazar(texto, patron, reemplazo)
-    return cfv_regex_reemplazar_fn(indice(cfv_args,Value{1.0}),indice(cfv_args,Value{0.0}),indice(cfv_args,Value{2.0}));
+    return cfv_regex_reemplazar_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}));
   }
   if (verdad(compara(cfv_nombre, Value{std::string("regex_grupos")}, "=="))) {
     // regex_grupos(texto, patron)
@@ -5057,22 +5058,22 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
 }
 Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
   cfv_jit_hit("eval_expr");
-  size_t cfv_nodo_e_tipo = cfv_nodo_e.index();
-  size_t cfv_env_tipo = cfv_env.index();
-  size_t cfv_fns_tipo = cfv_fns.index();
+ [[maybe_unused]] size_t cfv_nodo_e_tipo = cfv_nodo_e.index();
+ [[maybe_unused]] size_t cfv_env_tipo = cfv_env.index();
+ [[maybe_unused]] size_t cfv_fns_tipo = cfv_fns.index();
   Value cfv_t = indice(cfv_nodo_e, Value{std::string("tipo", 4)});
   if (cfv_t.index() != 2) throw std::runtime_error("tipo incompatible para t");
-  size_t cfv_t_tipo = 2;
+ [[maybe_unused]] size_t cfv_t_tipo = 2;
   if (verdad(compara(cfv_t, Value{std::string("Numero", 6)}, "=="))) {
     return cfv_a_numero(indice(cfv_nodo_e, Value{std::string("valor", 5)}));
   }
   if (verdad(compara(cfv_t, Value{std::string("Texto", 5)}, "=="))) {
     Value cfv_raw = indice(cfv_nodo_e, Value{std::string("valor", 5)});
     if (cfv_raw.index() != 2) throw std::runtime_error("tipo incompatible para raw");
-    size_t cfv_raw_tipo = 2;
+ [[maybe_unused]] size_t cfv_raw_tipo = 2;
     Value cfv_n = cfv_longitud(cfv_raw);
     if (cfv_n.index() != 1) throw std::runtime_error("tipo incompatible para n");
-    size_t cfv_n_tipo = 1;
+ [[maybe_unused]] size_t cfv_n_tipo = 1;
     return cfv_subcadena(cfv_raw, Value{1.0}, resta(cfv_n, Value{1.0}));
   }
   if (verdad(compara(cfv_t, Value{std::string("Booleano", 8)}, "=="))) {
@@ -5087,10 +5088,10 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
   if (verdad(compara(cfv_t, Value{std::string("Lista", 5)}, "=="))) {
     Value cfv_resultado = crear_lista({});
     if (cfv_resultado.index() != 4) throw std::runtime_error("tipo incompatible para resultado");
-    size_t cfv_resultado_tipo = 4;
+ [[maybe_unused]] size_t cfv_resultado_tipo = 4;
     Value cfv_i = Value{0.0};
     if (cfv_i.index() != 1) throw std::runtime_error("tipo incompatible para i");
-    size_t cfv_i_tipo = 1;
+ [[maybe_unused]] size_t cfv_i_tipo = 1;
     while (verdad(compara(cfv_i, cfv_longitud(indice(cfv_nodo_e, Value{std::string("hijos", 5)})), "<"))) {
       {
         Value cfv_elem_node = indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), cfv_i);
@@ -5111,17 +5112,17 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
   }
   if (verdad(compara(cfv_t, Value{std::string("Mapa", 4)}, "=="))) {
     Value cfv_resultado = crear_mapa({});
-    size_t cfv_resultado_tipo = 99;
+ [[maybe_unused]] size_t cfv_resultado_tipo = 99;
     Value cfv_i = Value{0.0};
     if (cfv_i.index() != 1) throw std::runtime_error("tipo incompatible para i");
-    size_t cfv_i_tipo = 1;
+ [[maybe_unused]] size_t cfv_i_tipo = 1;
     while (verdad(compara(cfv_i, cfv_longitud(indice(cfv_nodo_e, Value{std::string("hijos", 5)})), "<"))) {
       Value cfv_clave_v = cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), cfv_i), cfv_env, cfv_fns);
-      size_t cfv_clave_v_tipo = 99;
+ [[maybe_unused]] size_t cfv_clave_v_tipo = 99;
       Value cfv_val_v = cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), suma(cfv_i, Value{1.0})), cfv_env, cfv_fns);
-      size_t cfv_val_v_tipo = 99;
+ [[maybe_unused]] size_t cfv_val_v_tipo = 99;
       Value cfv_res_m = cfv_resultado;
-      size_t cfv_res_m_tipo = 99;
+ [[maybe_unused]] size_t cfv_res_m_tipo = 99;
       asignar_indice(cfv_res_m, cfv_clave_v, cfv_val_v);
       asignar(cfv_i, cfv_i_tipo, suma(cfv_i, Value{2.0}), "i");
     }
@@ -5129,7 +5130,7 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
   }
   if (verdad(compara(cfv_t, Value{std::string("Unario", 6)}, "=="))) {
     Value cfv_operando = cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
-    size_t cfv_operando_tipo = 99;
+ [[maybe_unused]] size_t cfv_operando_tipo = 99;
     if (verdad(compara(indice(cfv_nodo_e, Value{std::string("valor", 5)}), Value{std::string("-", 1)}, "=="))) {
       return resta(Value{0.0}, cfv_operando);
     }
@@ -5143,7 +5144,7 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
   if (verdad(compara(cfv_t, Value{std::string("Binario", 7)}, "=="))) {
     if (verdad(compara(indice(cfv_nodo_e, Value{std::string("valor", 5)}), Value{std::string("y", 1)}, "=="))) {
       Value cfv_izq_v = cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
-      size_t cfv_izq_v_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_v_tipo = 99;
       if (verdad(Value{!verdad(cfv_izq_v)})) {
         return Value{false};
       }
@@ -5151,7 +5152,7 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
     }
     if (verdad(compara(indice(cfv_nodo_e, Value{std::string("valor", 5)}), Value{std::string("o", 1)}, "=="))) {
       Value cfv_izq_v = cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
-      size_t cfv_izq_v_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_v_tipo = 99;
       if (verdad(cfv_izq_v)) {
         return Value{true};
       }
@@ -5213,24 +5214,24 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
       return Value{false};
     }
     Value cfv_izq = cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
-    size_t cfv_izq_tipo = 99;
+ [[maybe_unused]] size_t cfv_izq_tipo = 99;
     Value cfv_der = cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), Value{1.0}), cfv_env, cfv_fns);
-    size_t cfv_der_tipo = 99;
+ [[maybe_unused]] size_t cfv_der_tipo = 99;
     return cfv_eval_binario(cfv_op_b, cfv_izq, cfv_der);
   }
   if (verdad(compara(cfv_t, Value{std::string("Indice", 6)}, "=="))) {
     Value cfv_base = cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
-    size_t cfv_base_tipo = 99;
+ [[maybe_unused]] size_t cfv_base_tipo = 99;
     Value cfv_idx = cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), Value{1.0}), cfv_env, cfv_fns);
-    size_t cfv_idx_tipo = 99;
+ [[maybe_unused]] size_t cfv_idx_tipo = 99;
     return indice(cfv_base, cfv_idx);
   }
   if (verdad(compara(cfv_t, Value{std::string("Campo", 5)}, "=="))) {
     Value cfv_base = cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
-    size_t cfv_base_tipo = 99;
+ [[maybe_unused]] size_t cfv_base_tipo = 99;
     Value cfv_campo = indice(cfv_nodo_e, Value{std::string("valor", 5)});
     if (cfv_campo.index() != 2) throw std::runtime_error("tipo incompatible para campo");
-    size_t cfv_campo_tipo = 2;
+ [[maybe_unused]] size_t cfv_campo_tipo = 2;
     if (verdad(Value{verdad(compara(cfv_campo, Value{std::string("longitud", 8)}, "==")) || verdad(compara(cfv_campo, Value{std::string("length", 6)}, "=="))})) {
       return cfv_longitud(cfv_base);
     }
@@ -5238,24 +5239,24 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
   }
   if (verdad(compara(cfv_t, Value{std::string("Asignacion", 10)}, "=="))) {
     Value cfv_objetivo = indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), Value{0.0});
-    size_t cfv_objetivo_tipo = 99;
+ [[maybe_unused]] size_t cfv_objetivo_tipo = 99;
     Value cfv_nuevo_val = cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), Value{1.0}), cfv_env, cfv_fns);
-    size_t cfv_nuevo_val_tipo = 99;
+ [[maybe_unused]] size_t cfv_nuevo_val_tipo = 99;
     if (verdad(compara(indice(cfv_objetivo, Value{std::string("tipo", 4)}), Value{std::string("Identificador", 13)}, "=="))) {
       (void)(cfv_env_asignar(cfv_env, indice(cfv_objetivo, Value{std::string("valor", 5)}), cfv_nuevo_val));
     }     else if (verdad(compara(indice(cfv_objetivo, Value{std::string("tipo", 4)}), Value{std::string("Indice", 6)}, "=="))) {
       Value cfv_base = cfv_eval_expr(indice(indice(cfv_objetivo, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
-      size_t cfv_base_tipo = 99;
+ [[maybe_unused]] size_t cfv_base_tipo = 99;
       Value cfv_idx = cfv_eval_expr(indice(indice(cfv_objetivo, Value{std::string("hijos", 5)}), Value{1.0}), cfv_env, cfv_fns);
-      size_t cfv_idx_tipo = 99;
+ [[maybe_unused]] size_t cfv_idx_tipo = 99;
       Value cfv_b = cfv_base;
-      size_t cfv_b_tipo = 99;
+ [[maybe_unused]] size_t cfv_b_tipo = 99;
       asignar_indice(cfv_b, cfv_idx, cfv_nuevo_val);
     }     else if (verdad(compara(indice(cfv_objetivo, Value{std::string("tipo", 4)}), Value{std::string("Campo", 5)}, "=="))) {
       Value cfv_base = cfv_eval_expr(indice(indice(cfv_objetivo, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
-      size_t cfv_base_tipo = 99;
+ [[maybe_unused]] size_t cfv_base_tipo = 99;
       Value cfv_b = cfv_base;
-      size_t cfv_b_tipo = 99;
+ [[maybe_unused]] size_t cfv_b_tipo = 99;
       asignar_indice(cfv_b, indice(cfv_objetivo, Value{std::string("valor", 5)}), cfv_nuevo_val);
     }
     return cfv_nuevo_val;
@@ -5263,19 +5264,19 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
   if (verdad(compara(cfv_t, Value{std::string("Llamada", 7)}, "=="))) {
     Value cfv_nombre_fn = indice(cfv_nodo_e, Value{std::string("valor", 5)});
     if (cfv_nombre_fn.index() != 2) throw std::runtime_error("tipo incompatible para nombre_fn");
-    size_t cfv_nombre_fn_tipo = 2;
+ [[maybe_unused]] size_t cfv_nombre_fn_tipo = 2;
     Value cfv_args_eval = crear_lista({});
     if (cfv_args_eval.index() != 4) throw std::runtime_error("tipo incompatible para args_eval");
-    size_t cfv_args_eval_tipo = 4;
+ [[maybe_unused]] size_t cfv_args_eval_tipo = 4;
     Value cfv_ai = Value{0.0};
     if (cfv_ai.index() != 1) throw std::runtime_error("tipo incompatible para ai");
-    size_t cfv_ai_tipo = 1;
+ [[maybe_unused]] size_t cfv_ai_tipo = 1;
     while (verdad(compara(cfv_ai, cfv_longitud(indice(cfv_nodo_e, Value{std::string("hijos", 5)})), "<"))) {
       (void)(cfv_agregar(cfv_args_eval, cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), cfv_ai), cfv_env, cfv_fns)));
       asignar(cfv_ai, cfv_ai_tipo, suma(cfv_ai, Value{1.0}), "ai");
     }
     Value cfv_res_b = cfv_eval_builtin(cfv_nombre_fn, cfv_args_eval, cfv_env, cfv_fns);
-    size_t cfv_res_b_tipo = 99;
+ [[maybe_unused]] size_t cfv_res_b_tipo = 99;
     if (verdad(compara(cfv_res_b, Value{std::string("__no_builtin__", 14)}, "!="))) {
       if (verdad(compara(cfv_res_b, Value{std::string("__ok__", 6)}, "=="))) {
         return Value{};
@@ -5377,14 +5378,14 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
     }
     (void)(cfv_afirmar(cfv_tiene_clave(cfv_fns, cfv_nombre_fn), suma(suma(Value{std::string("función desconocida '", 22)}, cfv_nombre_fn), Value{std::string("'", 1)})));
     Value cfv_fn_def = indice(cfv_fns, cfv_nombre_fn);
-    size_t cfv_fn_def_tipo = 99;
+ [[maybe_unused]] size_t cfv_fn_def_tipo = 99;
     CfvCallFrame cfv_frame_fn(texto(cfv_nombre_fn));
     Value cfv_params = indice(cfv_fn_def, Value{std::string("params", 6)});
     if (cfv_params.index() != 4) throw std::runtime_error("tipo incompatible para params");
-    size_t cfv_params_tipo = 4;
+ [[maybe_unused]] size_t cfv_params_tipo = 4;
     Value cfv_cuerpo_fn = indice(cfv_fn_def, Value{std::string("cuerpo", 6)});
     if (cfv_cuerpo_fn.index() != 4) throw std::runtime_error("tipo incompatible para cuerpo_fn");
-    size_t cfv_cuerpo_fn_tipo = 4;
+ [[maybe_unused]] size_t cfv_cuerpo_fn_tipo = 4;
     // Use captured env (closure) if available, else fresh scope
     Value cfv_fn_base_env;
     if (cfv_fn_def.index() == 5) {
@@ -5396,10 +5397,10 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
     if (cfv_fn_base_env.index() != 4) cfv_fn_base_env = crear_lista({crear_mapa({})});
     Value cfv_fn_env = cfv_fn_base_env;
     if (cfv_fn_env.index() != 4) throw std::runtime_error("tipo incompatible para fn_env");
-    size_t cfv_fn_env_tipo = 4;
+ [[maybe_unused]] size_t cfv_fn_env_tipo = 4;
     Value cfv_pi = Value{0.0};
     if (cfv_pi.index() != 1) throw std::runtime_error("tipo incompatible para pi");
-    size_t cfv_pi_tipo = 1;
+ [[maybe_unused]] size_t cfv_pi_tipo = 1;
     Value cfv_ai2 = Value{0.0};
     while (verdad(compara(cfv_pi, cfv_longitud(cfv_params), "<"))) {
       Value cfv_param_entry = indice(cfv_params, cfv_pi);
@@ -5443,7 +5444,7 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
     }
     Value cfv_senal = cfv_exec_bloque(cfv_cuerpo_fn, cfv_fn_env, cfv_fns);
     if (cfv_senal.index() != 4) throw std::runtime_error("tipo incompatible para senal");
-    size_t cfv_senal_tipo = 4;
+ [[maybe_unused]] size_t cfv_senal_tipo = 4;
     if (verdad(compara(indice(cfv_senal, Value{0.0}), Value{std::string("retornar", 8)}, "=="))) {
       return indice(cfv_senal, Value{1.0});
     }
@@ -5451,16 +5452,16 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
   }
   if (verdad(compara(cfv_t, Value{std::string("MetodoLlamada", 13)}, "=="))) {
     Value cfv_base = cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
-    size_t cfv_base_tipo = 99;
+ [[maybe_unused]] size_t cfv_base_tipo = 99;
     Value cfv_metodo = indice(cfv_nodo_e, Value{std::string("valor", 5)});
     if (cfv_metodo.index() != 2) throw std::runtime_error("tipo incompatible para metodo");
-    size_t cfv_metodo_tipo = 2;
+ [[maybe_unused]] size_t cfv_metodo_tipo = 2;
     Value cfv_args_m = crear_lista({});
     if (cfv_args_m.index() != 4) throw std::runtime_error("tipo incompatible para args_m");
-    size_t cfv_args_m_tipo = 4;
+ [[maybe_unused]] size_t cfv_args_m_tipo = 4;
     Value cfv_mi = Value{1.0};
     if (cfv_mi.index() != 1) throw std::runtime_error("tipo incompatible para mi");
-    size_t cfv_mi_tipo = 1;
+ [[maybe_unused]] size_t cfv_mi_tipo = 1;
     while (verdad(compara(cfv_mi, cfv_longitud(indice(cfv_nodo_e, Value{std::string("hijos", 5)})), "<"))) {
       (void)(cfv_agregar(cfv_args_m, cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), cfv_mi), cfv_env, cfv_fns)));
       asignar(cfv_mi, cfv_mi_tipo, suma(cfv_mi, Value{1.0}), "mi");
@@ -5630,16 +5631,16 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
 }
 Value cfv_exec_bloque(Value cfv_sentencias, Value cfv_env, Value cfv_fns) {
   cfv_jit_hit("exec_bloque");
-  size_t cfv_sentencias_tipo = cfv_sentencias.index();
-  size_t cfv_env_tipo = cfv_env.index();
-  size_t cfv_fns_tipo = cfv_fns.index();
+ [[maybe_unused]] size_t cfv_sentencias_tipo = cfv_sentencias.index();
+ [[maybe_unused]] size_t cfv_env_tipo = cfv_env.index();
+ [[maybe_unused]] size_t cfv_fns_tipo = cfv_fns.index();
   Value cfv_i = Value{0.0};
   if (cfv_i.index() != 1) throw std::runtime_error("tipo incompatible para i");
-  size_t cfv_i_tipo = 1;
+ [[maybe_unused]] size_t cfv_i_tipo = 1;
   while (verdad(compara(cfv_i, cfv_longitud(cfv_sentencias), "<"))) {
     Value cfv_senal = cfv_exec_stmt(indice(cfv_sentencias, cfv_i), cfv_env, cfv_fns);
     if (cfv_senal.index() != 4) throw std::runtime_error("tipo incompatible para senal");
-    size_t cfv_senal_tipo = 4;
+ [[maybe_unused]] size_t cfv_senal_tipo = 4;
     if (verdad(compara(indice(cfv_senal, Value{0.0}), Value{std::string("normal", 6)}, "!="))) {
       return cfv_senal;
     }
@@ -5650,12 +5651,12 @@ Value cfv_exec_bloque(Value cfv_sentencias, Value cfv_env, Value cfv_fns) {
 }
 Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
   cfv_jit_hit("exec_stmt");
-  size_t cfv_stmt_tipo = cfv_stmt.index();
-  size_t cfv_env_tipo = cfv_env.index();
-  size_t cfv_fns_tipo = cfv_fns.index();
+ [[maybe_unused]] size_t cfv_stmt_tipo = cfv_stmt.index();
+ [[maybe_unused]] size_t cfv_env_tipo = cfv_env.index();
+ [[maybe_unused]] size_t cfv_fns_tipo = cfv_fns.index();
   Value cfv_t = indice(cfv_stmt, Value{std::string("tipo", 4)});
   if (cfv_t.index() != 2) throw std::runtime_error("tipo incompatible para t");
-  size_t cfv_t_tipo = 2;
+ [[maybe_unused]] size_t cfv_t_tipo = 2;
   if (verdad(compara(cfv_t, Value{std::string("Declaracion", 11)}, "=="))) {
     Value cfv_val = cfv_eval_expr(indice(indice(cfv_stmt, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
     // Runtime type annotation checking
@@ -5695,13 +5696,13 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
   }
   if (verdad(compara(cfv_t, Value{std::string("Mostrar", 7)}, "=="))) {
     Value cfv_val = cfv_eval_expr(indice(indice(cfv_stmt, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
-    size_t cfv_val_tipo = 99;
+ [[maybe_unused]] size_t cfv_val_tipo = 99;
     mostrar(cfv_val);
     return crear_lista({Value{std::string("normal", 6)}, Value{}});
   }
   if (verdad(compara(cfv_t, Value{std::string("Retornar", 8)}, "=="))) {
     Value cfv_val = cfv_eval_expr(indice(indice(cfv_stmt, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
-    size_t cfv_val_tipo = 99;
+ [[maybe_unused]] size_t cfv_val_tipo = 99;
     return crear_lista({Value{std::string("retornar", 8)}, cfv_val});
   }
   if (verdad(compara(cfv_t, Value{std::string("Romper", 6)}, "=="))) {
@@ -5713,41 +5714,41 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
   if (verdad(compara(cfv_t, Value{std::string("Si", 2)}, "=="))) {
     Value cfv_hijos = indice(cfv_stmt, Value{std::string("hijos", 5)});
     if (cfv_hijos.index() != 4) throw std::runtime_error("tipo incompatible para hijos");
-    size_t cfv_hijos_tipo = 4;
+ [[maybe_unused]] size_t cfv_hijos_tipo = 4;
     Value cfv_n_hijos = cfv_longitud(cfv_hijos);
     if (cfv_n_hijos.index() != 1) throw std::runtime_error("tipo incompatible para n_hijos");
-    size_t cfv_n_hijos_tipo = 1;
+ [[maybe_unused]] size_t cfv_n_hijos_tipo = 1;
     Value cfv_i = Value{0.0};
     if (cfv_i.index() != 1) throw std::runtime_error("tipo incompatible para i");
-    size_t cfv_i_tipo = 1;
+ [[maybe_unused]] size_t cfv_i_tipo = 1;
     Value cfv_ejecutado = Value{false};
     if (cfv_ejecutado.index() != 3) throw std::runtime_error("tipo incompatible para ejecutado");
-    size_t cfv_ejecutado_tipo = 3;
+ [[maybe_unused]] size_t cfv_ejecutado_tipo = 3;
     while (verdad(Value{verdad(compara(cfv_i, cfv_n_hijos, "<")) && verdad(Value{!verdad(cfv_ejecutado)})})) {
       Value cfv_es_ultimo = compara(cfv_i, resta(cfv_n_hijos, Value{1.0}), "==");
       if (cfv_es_ultimo.index() != 3) throw std::runtime_error("tipo incompatible para es_ultimo");
-      size_t cfv_es_ultimo_tipo = 3;
+ [[maybe_unused]] size_t cfv_es_ultimo_tipo = 3;
       if (verdad(Value{verdad(compara(indice(indice(cfv_hijos, cfv_i), Value{std::string("tipo", 4)}), Value{std::string("Bloque", 6)}, "==")) && verdad(cfv_es_ultimo)})) {
         Value cfv_scope_si = cfv_env_nuevo_scope(cfv_env);
         if (cfv_scope_si.index() != 4) throw std::runtime_error("tipo incompatible para scope_si");
-        size_t cfv_scope_si_tipo = 4;
+ [[maybe_unused]] size_t cfv_scope_si_tipo = 4;
         Value cfv_senal = cfv_exec_bloque(indice(indice(cfv_hijos, cfv_i), Value{std::string("hijos", 5)}), cfv_scope_si, cfv_fns);
         if (cfv_senal.index() != 4) throw std::runtime_error("tipo incompatible para senal");
-        size_t cfv_senal_tipo = 4;
+ [[maybe_unused]] size_t cfv_senal_tipo = 4;
         asignar(cfv_ejecutado, cfv_ejecutado_tipo, Value{true}, "ejecutado");
         if (verdad(compara(indice(cfv_senal, Value{0.0}), Value{std::string("normal", 6)}, "!="))) {
           return cfv_senal;
         }
       }       else if (verdad(compara(indice(indice(cfv_hijos, cfv_i), Value{std::string("tipo", 4)}), Value{std::string("Bloque", 6)}, "!="))) {
         Value cfv_cond_val = cfv_eval_expr(indice(cfv_hijos, cfv_i), cfv_env, cfv_fns);
-        size_t cfv_cond_val_tipo = 99;
+ [[maybe_unused]] size_t cfv_cond_val_tipo = 99;
         if (verdad(cfv_cond_val)) {
           Value cfv_scope_si = cfv_env_nuevo_scope(cfv_env);
           if (cfv_scope_si.index() != 4) throw std::runtime_error("tipo incompatible para scope_si");
-          size_t cfv_scope_si_tipo = 4;
+ [[maybe_unused]] size_t cfv_scope_si_tipo = 4;
           Value cfv_senal = cfv_exec_bloque(indice(indice(cfv_hijos, suma(cfv_i, Value{1.0})), Value{std::string("hijos", 5)}), cfv_scope_si, cfv_fns);
           if (cfv_senal.index() != 4) throw std::runtime_error("tipo incompatible para senal");
-          size_t cfv_senal_tipo = 4;
+ [[maybe_unused]] size_t cfv_senal_tipo = 4;
           asignar(cfv_ejecutado, cfv_ejecutado_tipo, Value{true}, "ejecutado");
           if (verdad(compara(indice(cfv_senal, Value{0.0}), Value{std::string("normal", 6)}, "!="))) {
             return cfv_senal;
@@ -5816,24 +5817,24 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
   }
   if (verdad(compara(cfv_t, Value{std::string("Mientras", 8)}, "=="))) {
     Value cfv_cond_nodo = indice(indice(cfv_stmt, Value{std::string("hijos", 5)}), Value{0.0});
-    size_t cfv_cond_nodo_tipo = 99;
+ [[maybe_unused]] size_t cfv_cond_nodo_tipo = 99;
     Value cfv_cuerpo_nodo = indice(indice(cfv_stmt, Value{std::string("hijos", 5)}), Value{1.0});
-    size_t cfv_cuerpo_nodo_tipo = 99;
+ [[maybe_unused]] size_t cfv_cuerpo_nodo_tipo = 99;
     Value cfv_continuar_bucle = Value{true};
     if (cfv_continuar_bucle.index() != 3) throw std::runtime_error("tipo incompatible para continuar_bucle");
-    size_t cfv_continuar_bucle_tipo = 3;
+ [[maybe_unused]] size_t cfv_continuar_bucle_tipo = 3;
     while (verdad(cfv_continuar_bucle)) {
       Value cfv_cond_val = cfv_eval_expr(cfv_cond_nodo, cfv_env, cfv_fns);
-      size_t cfv_cond_val_tipo = 99;
+ [[maybe_unused]] size_t cfv_cond_val_tipo = 99;
       if (verdad(Value{!verdad(cfv_cond_val)})) {
         asignar(cfv_continuar_bucle, cfv_continuar_bucle_tipo, Value{false}, "continuar_bucle");
       } else {
         Value cfv_scope_w = cfv_env_nuevo_scope(cfv_env);
         if (cfv_scope_w.index() != 4) throw std::runtime_error("tipo incompatible para scope_w");
-        size_t cfv_scope_w_tipo = 4;
+ [[maybe_unused]] size_t cfv_scope_w_tipo = 4;
         Value cfv_senal = cfv_exec_bloque(indice(cfv_cuerpo_nodo, Value{std::string("hijos", 5)}), cfv_scope_w, cfv_fns);
         if (cfv_senal.index() != 4) throw std::runtime_error("tipo incompatible para senal");
-        size_t cfv_senal_tipo = 4;
+ [[maybe_unused]] size_t cfv_senal_tipo = 4;
         if (verdad(compara(indice(cfv_senal, Value{0.0}), Value{std::string("romper", 6)}, "=="))) {
           asignar(cfv_continuar_bucle, cfv_continuar_bucle_tipo, Value{false}, "continuar_bucle");
         }
@@ -5847,11 +5848,11 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
   if (verdad(compara(cfv_t, Value{std::string("Para", 4)}, "=="))) {
     Value cfv_var_nombre = indice(cfv_stmt, Value{std::string("valor", 5)});
     if (cfv_var_nombre.index() != 2) throw std::runtime_error("tipo incompatible para var_nombre");
-    size_t cfv_var_nombre_tipo = 2;
+ [[maybe_unused]] size_t cfv_var_nombre_tipo = 2;
     Value cfv_coleccion_val = cfv_eval_expr(indice(indice(cfv_stmt, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
-    size_t cfv_coleccion_val_tipo = 99;
+ [[maybe_unused]] size_t cfv_coleccion_val_tipo = 99;
     Value cfv_cuerpo_nodo = indice(indice(cfv_stmt, Value{std::string("hijos", 5)}), Value{1.0});
-    size_t cfv_cuerpo_nodo_tipo = 99;
+ [[maybe_unused]] size_t cfv_cuerpo_nodo_tipo = 99;
     // Lazy range detection
     if (cfv_coleccion_val.index() == 5) {
       auto cfv_mp_rango = std::get_if<Mapa>(&cfv_coleccion_val.data);
@@ -5874,21 +5875,21 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
     }
     Value cfv_idx = Value{0.0};
     if (cfv_idx.index() != 1) throw std::runtime_error("tipo incompatible para idx");
-    size_t cfv_idx_tipo = 1;
+ [[maybe_unused]] size_t cfv_idx_tipo = 1;
     Value cfv_tam = cfv_longitud(cfv_coleccion_val);
     if (cfv_tam.index() != 1) throw std::runtime_error("tipo incompatible para tam");
-    size_t cfv_tam_tipo = 1;
+ [[maybe_unused]] size_t cfv_tam_tipo = 1;
     Value cfv_continuar_para = Value{true};
     if (cfv_continuar_para.index() != 3) throw std::runtime_error("tipo incompatible para continuar_para");
-    size_t cfv_continuar_para_tipo = 3;
+ [[maybe_unused]] size_t cfv_continuar_para_tipo = 3;
     while (verdad(Value{verdad(compara(cfv_idx, cfv_tam, "<")) && verdad(cfv_continuar_para)})) {
       Value cfv_scope_p = cfv_env_nuevo_scope(cfv_env);
       if (cfv_scope_p.index() != 4) throw std::runtime_error("tipo incompatible para scope_p");
-      size_t cfv_scope_p_tipo = 4;
+ [[maybe_unused]] size_t cfv_scope_p_tipo = 4;
       (void)(cfv_env_declarar(cfv_scope_p, cfv_var_nombre, indice(cfv_coleccion_val, cfv_idx)));
       Value cfv_senal = cfv_exec_bloque(indice(cfv_cuerpo_nodo, Value{std::string("hijos", 5)}), cfv_scope_p, cfv_fns);
       if (cfv_senal.index() != 4) throw std::runtime_error("tipo incompatible para senal");
-      size_t cfv_senal_tipo = 4;
+ [[maybe_unused]] size_t cfv_senal_tipo = 4;
       if (verdad(compara(indice(cfv_senal, Value{0.0}), Value{std::string("romper", 6)}, "=="))) {
         asignar(cfv_continuar_para, cfv_continuar_para_tipo, Value{false}, "continuar_para");
       }
@@ -5902,26 +5903,26 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
   if (verdad(compara(cfv_t, Value{std::string("Funcion", 7)}, "=="))) {
     Value cfv_fn_nombre = indice(cfv_stmt, Value{std::string("valor", 5)});
     if (cfv_fn_nombre.index() != 2) throw std::runtime_error("tipo incompatible para fn_nombre");
-    size_t cfv_fn_nombre_tipo = 2;
+ [[maybe_unused]] size_t cfv_fn_nombre_tipo = 2;
     Value cfv_params_nodo = indice(indice(cfv_stmt, Value{std::string("hijos", 5)}), Value{0.0});
-    size_t cfv_params_nodo_tipo = 99;
+ [[maybe_unused]] size_t cfv_params_nodo_tipo = 99;
     Value cfv_cuerpo_nodo = indice(indice(cfv_stmt, Value{std::string("hijos", 5)}), Value{1.0});
-    size_t cfv_cuerpo_nodo_tipo = 99;
+ [[maybe_unused]] size_t cfv_cuerpo_nodo_tipo = 99;
     auto cfv_fn_def_map = std::make_shared<std::map<std::string,Value>>();
     (*cfv_fn_def_map)["params"] = indice(cfv_params_nodo, Value{std::string("hijos", 5)});
     (*cfv_fn_def_map)["cuerpo"] = indice(cfv_cuerpo_nodo, Value{std::string("hijos", 5)});
     (*cfv_fn_def_map)["env"]    = cfv_env; // capture definition environment (closure)
     Value cfv_fn_def = Value{cfv_fn_def_map};
-    size_t cfv_fn_def_tipo = 99;
+ [[maybe_unused]] size_t cfv_fn_def_tipo = 99;
     Value cfv_fns_m = cfv_fns;
-    size_t cfv_fns_m_tipo = 99;
+ [[maybe_unused]] size_t cfv_fns_m_tipo = 99;
     asignar_indice(cfv_fns_m, cfv_fn_nombre, cfv_fn_def);
     return crear_lista({Value{std::string("normal", 6)}, Value{}});
   }
   if (verdad(compara(cfv_t, Value{std::string("Bloque", 6)}, "=="))) {
     Value cfv_scope_b = cfv_env_nuevo_scope(cfv_env);
     if (cfv_scope_b.index() != 4) throw std::runtime_error("tipo incompatible para scope_b");
-    size_t cfv_scope_b_tipo = 4;
+ [[maybe_unused]] size_t cfv_scope_b_tipo = 4;
     return cfv_exec_bloque(indice(cfv_stmt, Value{std::string("hijos", 5)}), cfv_scope_b, cfv_fns);
   }
   if (verdad(compara(cfv_t, Value{std::string("Asignacion", 10)}, "=="))) {
@@ -6178,7 +6179,8 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
   return crear_lista({Value{std::string("normal", 6)}, Value{}});
   return Value{};
 }
-Value cfv_llamar_metodo(Value objeto,const std::string& nombre,std::vector<Value> args){
+Value cfv_llamar_metodo(Value objeto,[[maybe_unused]] const std::string& nombre,
+                         [[maybe_unused]] std::vector<Value> args){
   auto clase=texto(indice(objeto,Value{std::string("__clase")}));
   throw std::runtime_error("método desconocido");
 }
@@ -6186,7 +6188,7 @@ Value cfv_llamar_metodo(Value objeto,const std::string& nombre,std::vector<Value
 // ── C-Forge Public C API (para usar como shared library / plugin) ──────────
 // Compilar como shared lib:
 //   g++ -std=c++20 -O2 -shared -fPIC -o libcforge.so cforgev.cpp [flags]
-// Luego desde C/C#/Java:
+// Integración opcional mediante el ABI nativo de C-Forge:
 //   cfv_init() → cfv_run_file("script.cfv") → cfv_shutdown()
 
 struct CfvContext {
@@ -6214,7 +6216,7 @@ void cfv_context_destroy(void* ctx_ptr) {
 }
 
 // Helper: crear entorno global fresco
-static Value cfv_make_env() { return crear_lista({crear_mapa({})}); }
+[[maybe_unused]] static Value cfv_make_env() { return crear_lista({crear_mapa({})}); }
 
 // Ejecutar un archivo .cfv. Retorna 0 en exito, 1 en error.
 int cfv_run_file(const char* path) {
@@ -6271,7 +6273,7 @@ const char* cfv_eval_json(const char* code) {
 }
 
 // Obtener version del interprete
-const char* cfv_version() { return "2.6.0-dev"; }
+const char* cfv_version() { return "2.6.0"; }
 
 // Verificar disponibilidad de SDL2
 int cfv_has_sdl2() {
@@ -6293,9 +6295,9 @@ int cfv_has_openssl() {
 
 } // extern "C"
 
-static void cfv_print_cli_help() {
+[[maybe_unused]] static void cfv_print_cli_help() {
   std::cout
-    << "C-Forge 2.6.0-dev\n"
+    << "C-Forge 2.6.0\n"
     << "Uso:\n"
     << "  cforge archivo.cfv              Ejecutar un programa\n"
     << "  cforge run archivo.cfv          Ejecutar un programa\n"
@@ -6307,7 +6309,7 @@ static void cfv_print_cli_help() {
     << "  cforge --help                   Mostrar esta ayuda\n";
 }
 
-static std::string cfv_read_source_or_throw(const std::filesystem::path& path) {
+[[maybe_unused]] static std::string cfv_read_source_or_throw(const std::filesystem::path& path) {
   std::ifstream input(path);
   if (!input) {
     throw std::runtime_error("no se pudo abrir '" + path.string() + "'");
@@ -6406,56 +6408,56 @@ int main(int argc, char** argv){
   }
   Value cfv_args_cfv = cfv_argumentos_programa();
   if (cfv_args_cfv.index() != 4) throw std::runtime_error("tipo incompatible para args_cfv");
-  size_t cfv_args_cfv_tipo = 4;
+ [[maybe_unused]] size_t cfv_args_cfv_tipo = 4;
   cfv_share_symbol("args_cfv", &cfv_args_cfv);
   (void)(cfv_afirmar(compara(cfv_longitud(cfv_args_cfv), Value{1.0}, ">="), Value{std::string("uso: cforge.cfv programa.cfv [argumentos...]", 45)}));
   Value cfv_ruta_programa = indice(cfv_args_cfv, Value{0.0});
   if (cfv_ruta_programa.index() != 2) throw std::runtime_error("tipo incompatible para ruta_programa");
-  size_t cfv_ruta_programa_tipo = 2;
+ [[maybe_unused]] size_t cfv_ruta_programa_tipo = 2;
   cfv_share_symbol("ruta_programa", &cfv_ruta_programa);
   Value cfv_fuente_programa = cfv_leer_archivo(cfv_ruta_programa);
   if (cfv_fuente_programa.index() != 2) throw std::runtime_error("tipo incompatible para fuente_programa");
-  size_t cfv_fuente_programa_tipo = 2;
+ [[maybe_unused]] size_t cfv_fuente_programa_tipo = 2;
   cfv_share_symbol("fuente_programa", &cfv_fuente_programa);
   (void)(cfv_afirmar(compara(cfv_longitud(cfv_fuente_programa), Value{0.0}, ">"), suma(suma(Value{std::string("no se pudo leer '", 17)}, cfv_ruta_programa), Value{std::string("'", 1)})));
   Value cfv_tokens_prog = cfv_tokenizar(cfv_fuente_programa);
   if (cfv_tokens_prog.index() != 4) throw std::runtime_error("tipo incompatible para tokens_prog");
-  size_t cfv_tokens_prog_tipo = 4;
+ [[maybe_unused]] size_t cfv_tokens_prog_tipo = 4;
   cfv_share_symbol("tokens_prog", &cfv_tokens_prog);
   Value cfv_ast_prog = cfv_parsear(cfv_tokens_prog);
   if (cfv_ast_prog.index() != 4) throw std::runtime_error("tipo incompatible para ast_prog");
-  size_t cfv_ast_prog_tipo = 4;
+ [[maybe_unused]] size_t cfv_ast_prog_tipo = 4;
   cfv_share_symbol("ast_prog", &cfv_ast_prog);
   Value cfv_entorno_global = crear_lista({crear_mapa({})});
   if (cfv_entorno_global.index() != 4) throw std::runtime_error("tipo incompatible para entorno_global");
-  size_t cfv_entorno_global_tipo = 4;
+ [[maybe_unused]] size_t cfv_entorno_global_tipo = 4;
   cfv_share_symbol("entorno_global", &cfv_entorno_global);
   Value cfv_funciones_globales = crear_mapa({});
-  size_t cfv_funciones_globales_tipo = 99;
+ [[maybe_unused]] size_t cfv_funciones_globales_tipo = 99;
   cfv_share_symbol("funciones_globales", &cfv_funciones_globales);
   Value cfv_args_usuario = crear_lista({});
   if (cfv_args_usuario.index() != 4) throw std::runtime_error("tipo incompatible para args_usuario");
-  size_t cfv_args_usuario_tipo = 4;
+ [[maybe_unused]] size_t cfv_args_usuario_tipo = 4;
   cfv_share_symbol("args_usuario", &cfv_args_usuario);
   Value cfv_ai_main = Value{1.0};
   if (cfv_ai_main.index() != 1) throw std::runtime_error("tipo incompatible para ai_main");
-  size_t cfv_ai_main_tipo = 1;
+ [[maybe_unused]] size_t cfv_ai_main_tipo = 1;
   cfv_share_symbol("ai_main", &cfv_ai_main);
   while (verdad(compara(cfv_ai_main, cfv_longitud(cfv_args_cfv), "<"))) {
     (void)(cfv_agregar(cfv_args_usuario, indice(cfv_args_cfv, cfv_ai_main)));
     asignar(cfv_ai_main, cfv_ai_main_tipo, suma(cfv_ai_main, Value{1.0}), "ai_main");
   }
   Value cfv_eg = indice(cfv_entorno_global, Value{0.0});
-  size_t cfv_eg_tipo = 99;
+ [[maybe_unused]] size_t cfv_eg_tipo = 99;
   cfv_share_symbol("eg", &cfv_eg);
   asignar_indice(cfv_eg, Value{std::string("__args__", 8)}, cfv_args_usuario);
   Value cfv_fg = cfv_funciones_globales;
-  size_t cfv_fg_tipo = 99;
+ [[maybe_unused]] size_t cfv_fg_tipo = 99;
   cfv_share_symbol("fg", &cfv_fg);
   asignar_indice(cfv_fg, Value{std::string("__prog_args__", 13)}, cfv_args_usuario);
   Value cfv_resultado_final = cfv_exec_bloque(cfv_ast_prog, cfv_entorno_global, cfv_funciones_globales);
   if (cfv_resultado_final.index() != 4) throw std::runtime_error("tipo incompatible para resultado_final");
-  size_t cfv_resultado_final_tipo = 4;
+ [[maybe_unused]] size_t cfv_resultado_final_tipo = 4;
   cfv_share_symbol("resultado_final", &cfv_resultado_final);
   if (verdad(compara(indice(cfv_resultado_final, Value{0.0}), Value{std::string("retornar", 8)}, "=="))) {
     mostrar(suma(Value{std::string("Programa retornó: ", 19)}, cfv_formato_valor(indice(cfv_resultado_final, Value{1.0}))));

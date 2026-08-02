@@ -8,7 +8,7 @@ la licencia propietaria incluida represente la decisión de Vemoris Group.
 ```bash
 git init
 git add .
-git commit -m "C-Forge 1.4.1 definitive"
+git commit -m "Release C-Forge 2.6.0 stable"
 git branch -M main
 git remote add origin https://github.com/VemorisGroup/C-Forge.git
 git push -u origin main
@@ -17,14 +17,14 @@ git push -u origin main
 La configuración `.gitignore` evita subir builds, SDKs locales, cachés,
 temporales y paquetes de distribución duplicados.
 
-Para una versión descargable, crea y publica el tag `v1.4.1`. El workflow
-`Publicar paquetes` prueba y genera automáticamente:
+Para una versión descargable, crea y publica el tag `v2.6.0`. El workflow
+`Publicar C-Forge nativo` ejecuta los gates y genera automáticamente:
 
-- Archivo portable para macOS.
-- Archivo portable para Linux.
-- ZIP portable y ejecutable autónomo para Windows.
+- Binario nativo para macOS.
+- Binario nativo para Linux x64.
+- Ejecutable nativo para Windows x64.
 - Paquete `.deb` para Debian/Ubuntu.
-- Fórmula Homebrew y manifiesto WinGet con SHA-256.
+- Archivo `SHA256SUMS` para verificar las descargas.
 
 Consulta [`DISTRIBUCION.md`](DISTRIBUCION.md) para publicar los índices de cada
 gestor. Los catálogos oficiales tienen procesos de revisión externos.

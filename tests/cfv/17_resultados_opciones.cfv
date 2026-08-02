@@ -1,0 +1,16 @@
+importar "errores"
+
+sea exitoso = ok(42)
+sea fallido = err("fallo")
+afirmar(es_ok(exitoso), "ok debe producir un resultado exitoso")
+afirmar(es_err(fallido), "err debe producir un resultado fallido")
+afirmar(desenvolver(exitoso) == 42, "desenvolver debe recuperar el valor")
+afirmar(desenvolver_o(fallido, 7) == 7, "desenvolver_o debe usar el valor alternativo")
+
+sea presente = algunos("C-Forge")
+sea ausente = ninguno()
+afirmar(es_presente(presente), "algunos debe estar presente")
+afirmar(no es_presente(ausente), "ninguno debe estar ausente")
+afirmar(obtener_o(ausente, "estable") == "estable", "opción alternativa incorrecta")
+
+mostrar("[OK] resultados y opciones")

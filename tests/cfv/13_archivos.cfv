@@ -1,0 +1,11 @@
+// Escritura, lectura y existencia de archivos desde el runtime nativo.
+sea ruta = "/tmp/cforge-prueba-archivos.txt"
+escribir_archivo(ruta, "C-Forge")
+
+afirmar(existe_archivo(ruta), "el archivo escrito debe existir")
+afirmar(leer_archivo(ruta) == "C-Forge", "el contenido leído debe coincidir")
+
+escribir_archivo(ruta, "C-Forge 2.6")
+afirmar(leer_archivo(ruta) == "C-Forge 2.6", "la reescritura debe reemplazar el contenido")
+
+mostrar("[OK] archivos")

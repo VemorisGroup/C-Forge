@@ -28,18 +28,18 @@ jobs:
         run: |
           make clean
           make build
-          make check
-          make test
+          make release-check
           cp cforge "${{ matrix.artifact }}"
 
       - name: Construir en Windows
         if: runner.os == 'Windows'
-        shell: cmd
+        shell: pwsh
         run: |
           cl /std:c++20 /EHsc /O2 /Fe:cforge.exe cforgev.cpp ws2_32.lib
-          cforge.exe --version
-          cforge.exe test tests\cfv\01_nucleo.cfv
-          copy cforge.exe ${{ matrix.artifact }}
+          $env:CFORGE_STDLIB = "$PWD\stdlib"
+          .\cforge.exe --version
+          Get-ChildItem tests\cfv\*.cfv | ForEach-Object { & .\cforge.exe test $_.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
+          Copy-Item cforge.exe "${{ matrix.artifact }}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -66,6 +66,10 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
+      - name: Generar sumas SHA-256
+        run: |
+          cd release-assets
+          sha256sum * > SHA256SUMS
       - name: Publicar artefactos verificados
         env:
           GH_TOKEN: ${{ github.token }}

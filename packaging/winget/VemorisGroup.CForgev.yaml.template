@@ -1,11 +1,11 @@
 # Sustituir VERSION y SHA256 durante la publicación del ejecutable nativo.
-PackageIdentifier: VemorisGroup.CForgev
+PackageIdentifier: VemorisGroup.CForge
 PackageVersion: VERSION
 PackageLocale: es-CL
 Publisher: Vemoris Group
 PackageName: C-Forge
 License: Proprietary
-ShortDescription: Lenguaje de programación experimental C-Forge
+ShortDescription: Lenguaje de programación C-Forge
 PackageUrl: https://github.com/VemorisGroup/C-Forge
 InstallerType: portable
 Commands:

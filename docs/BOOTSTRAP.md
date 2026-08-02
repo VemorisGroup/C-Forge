@@ -35,6 +35,9 @@ make clean
 make build
 make check
 make test
+make stdlib-load-check
+make malformed-check
+make sanitize-check
 make backend-check
 make install-check
 ```
@@ -54,4 +57,6 @@ Antes de reactivar Stage 2/3 se necesita una prueba escrita en C-Forge que:
 4. compare Stage 2 y Stage 3 de forma reproducible;
 5. falle de forma limpia si aparece una dependencia externa no autorizada.
 
-Hasta superar ese gate, C-Forge permanece en **Developer Preview**.
+El runtime y el lenguaje 2.6 tienen un contrato estable independiente de este
+hito. El autoalojamiento permanece planeado y no se presenta como una capacidad
+disponible hasta superar este gate.

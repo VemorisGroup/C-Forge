@@ -1,0 +1,13 @@
+importar "fisica2d"
+importar "fisica3d"
+
+sea a = vec2(3, 4)
+afirmar(vec2_magnitud(a) == 5, "magnitud vec2 incorrecta")
+sea b = vec2_suma(a, vec2(1, 2))
+afirmar(b["x"] == 4 y b["y"] == 6, "suma vec2 incorrecta")
+afirmar(vec2_punto(vec2(1, 0), vec2(0, 1)) == 0, "producto punto vec2 incorrecto")
+
+sea c = vec3_cruzado(vec3(1, 0, 0), vec3(0, 1, 0))
+afirmar(c["x"] == 0 y c["y"] == 0 y c["z"] == 1, "producto cruzado vec3 incorrecto")
+
+mostrar("[OK] vectores")

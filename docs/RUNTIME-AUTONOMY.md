@@ -1,13 +1,13 @@
 # Autonomía del runtime y backends directos
 
-## Estado verificable en 2.6.0-dev
+## Estado verificable en 2.6.0 estable
 
 El ejecutable `cforge` puede interpretar programas `.cfv` sin Python, JVM,
 .NET ni Node. El motor distribuido se construye desde `cforgev.cpp` con un
 compilador C++20; por ello la *toolchain* completa todavía no es autónoma.
 
 La biblioteca estándar activa contiene únicamente fuentes `.cfv`. El gate
-local comprueba los 34 módulos y ejecuta diez archivos de prueba nativos:
+local carga realmente los 30 módulos y ejecuta veinte archivos de prueba nativos:
 
 ```sh
 make clean
@@ -15,6 +15,7 @@ make build
 make check
 make test
 make install-check
+make release-check
 ```
 
 ## Backends de código máquina directo
@@ -51,4 +52,7 @@ C-Forge solo se declarará autónomo cuando una distribución limpia pueda:
 4. instalar, probar y desinstalar el motor y la biblioteca estándar;
 5. superar CI y validación física en macOS, Linux y Windows.
 
-Hasta entonces el estado correcto es **Developer Preview**.
+La falta de autoalojamiento completo no impide que el runtime distribuido tenga
+un contrato estable: los usuarios finales ejecutan el binario `cforge` sin
+Python, JVM, .NET ni Node. La autonomía completa de la *toolchain* permanece
+como un objetivo separado y no se anuncia como terminada.

@@ -1,14 +1,18 @@
 # Preparación para producción
 
-C-Forge 2.6.0-dev es un **Developer Preview**. No está certificado para bancos,
-salud, infraestructura crítica ni sistemas donde un fallo pueda causar daños.
+C-Forge 2.6.0 posee un **núcleo estable** para aplicaciones generales. No está
+certificado para bancos, salud, infraestructura crítica ni sistemas donde un
+fallo pueda causar daños. Estabilidad técnica y certificación regulatoria son
+compromisos distintos.
 
 ## Verificado en el repositorio
 
 - El motor C++20 se construye sin avisos con el gate oficial en macOS ARM64.
 - El ejecutable interpreta `.cfv` sin Python, JVM, .NET ni Node.
-- 34 módulos `.cfv` pasan análisis sintáctico y carga.
-- 10 archivos de prueba nativos pasan localmente.
+- 30 módulos `.cfv` pasan análisis sintáctico y carga real.
+- 20 archivos de prueba nativos pasan localmente y bajo ASan/UBSan.
+- Cinco clases de entradas dañadas se rechazan sin abortar el proceso.
+- El contrato del CLI se comprueba automáticamente.
 - La instalación aislada instala motor y biblioteca estándar y ejecuta una
   prueba real.
 - Los emisores directos generan cabeceras Mach-O ARM64, ELF x64 y PE x64 para
@@ -17,7 +21,7 @@ salud, infraestructura crítica ni sistemas donde un fallo pueda causar daños.
 
 ## No verificado o no terminado
 
-- Cobertura funcional exhaustiva de los 34 módulos.
+- Cobertura funcional exhaustiva de los módulos experimentales.
 - Toolchain autoalojada reproducible Stage 2/3.
 - Backends directos para el lenguaje completo.
 - Sandboxing fuerte de archivos, procesos y red.
@@ -36,7 +40,9 @@ make check
 make test
 make backend-check
 make install-check
+make release-check
 ```
 
-Un resultado verde solo respalda el alcance anterior. No debe interpretarse
-como una certificación de seguridad o preparación bancaria.
+Un resultado verde respalda el contrato estable descrito en
+`capabilities.json`. No debe interpretarse como una certificación regulatoria o
+preparación bancaria.

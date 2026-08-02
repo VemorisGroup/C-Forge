@@ -16,7 +16,7 @@ reproducible. Este archivo sustituye promesas absolutas por criterios técnicos.
   o data races en el corpus y fuzzing acordados.
 - El ownership, préstamos, regiones, `Option` y `unsafe` deben formar parte de una
   especificación formal antes de prometer seguridad sin GC.
-- Los objetos de Python, JVM, .NET y JavaScript conservan las reglas de sus runtimes.
+- Los runtimes extranjeros no forman parte del núcleo activo de C-Forge.
 
 ## LLVM y plataformas
 
@@ -32,4 +32,6 @@ reproducible. Este archivo sustituye promesas absolutas por criterios técnicos.
 - Versiones LTS, política de vulnerabilidades, builds reproducibles y artefactos firmados.
 - Recuperación, observabilidad, pruebas de carga y compatibilidad hacia atrás.
 
-Hasta cumplir todas las puertas relevantes, C-Forge conserva la etiqueta Developer Preview.
+Las capacidades que no cumplen su puerta permanecen marcadas como
+`experimental`, `partial`, `planned` o `not-certified`; esto no rebaja el
+contrato del núcleo estable.

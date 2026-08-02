@@ -5,7 +5,7 @@
 set -e
 
 REPO="VemorisGroup/C-Forge"
-VERSION="2.6.0-dev"
+VERSION="2.6.0"
 INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="cforge"
 STDLIB_DIR="/usr/local/lib/cforge/stdlib"

@@ -7,9 +7,8 @@ JavaScript, TypeScript, JVM, .NET, Node ni otro runtime. Stage 0 usa C++ solo
 para arrancar el proceso de autoalojamiento. Stage 1 y generaciones posteriores
 se escribirán en C-Forge.
 
-Los puentes históricos permanecen temporalmente en Developer Preview para no
-romper ejemplos existentes, pero no forman parte del núcleo autónomo ni definen
-la arquitectura futura. No se añadirán nuevos puentes durante el bootstrap.
+Los puentes históricos fueron retirados del motor activo. No forman parte del
+núcleo, de la biblioteca estable ni de la arquitectura futura.
 
 ## Capacidades que deben ser propias
 
@@ -46,4 +45,6 @@ Una instalación limpia debe poder:
 4. ejecutar la biblioteca estándar nativa;
 5. informar claramente cualquier capacidad todavía no implementada.
 
-Hasta cumplirlo, el estado público seguirá siendo Developer Preview.
+Este criterio corresponde a la autonomía completa de la *toolchain*. C-Forge
+2.6 es estable como runtime distribuido; no se anuncia todavía como compilador
+autoalojado.

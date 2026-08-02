@@ -1,17 +1,17 @@
 {
   "schema": 2,
-  "language_version": "2.6.0-dev",
-  "overall_status": "developer-preview",
+  "language_version": "2.6.0",
+  "overall_status": "stable",
   "product_direction": "C-Forge autónomo: programas, biblioteca estándar y pruebas en .cfv; C++ reservado al bootstrap nativo.",
   "quality_gate": {
     "build_command": "make clean && make build",
     "syntax_command": "make check",
-    "test_command": "make test",
+    "test_command": "make release-check",
     "required_outcome": "todos los comandos terminan con código 0",
     "python_required": false
   },
   "statuses": [
-    "verified-preview",
+    "verified-stable",
     "experimental",
     "partial",
     "planned",
@@ -21,7 +21,7 @@
     {
       "id": "native-engine",
       "name": "Motor nativo de C-Forge",
-      "status": "verified-preview",
+      "status": "verified-stable",
       "scope": "Lexer, parser y ejecución de programas .cfv en un ejecutable nativo. Incluye REPL, funciones, closures, clases, excepciones y colecciones.",
       "evidence": [
         "cforgev.cpp",
@@ -34,7 +34,7 @@
     {
       "id": "native-cli",
       "name": "CLI autónomo",
-      "status": "verified-preview",
+      "status": "verified-stable",
       "scope": "Ejecución, REPL, versión, ayuda, check, test y validación no destructiva de formato sin Python.",
       "evidence": [
         "cforgev.cpp",
@@ -45,21 +45,22 @@
     {
       "id": "cfv-standard-library",
       "name": "Biblioteca estándar en C-Forge",
-      "status": "verified-preview",
-      "scope": "34 módulos .cfv que pasan análisis sintáctico y carga real. Diez pruebas nativas cubren el núcleo y una selección de biblioteca; la cobertura funcional de cada módulo seguirá ampliándose antes de declararla estable.",
+      "status": "verified-stable",
+      "scope": "30 módulos .cfv pasan análisis sintáctico y carga real. Veinte pruebas nativas cubren el núcleo y la biblioteca estable. Los módulos de red, bases de datos, criptografía y gráficos conservan estado experimental independiente.",
       "evidence": [
         "stdlib/",
         "tests/cfv/05_stdlib_matematica.cfv",
         "tests/cfv/06_stdlib_lista.cfv",
         "tests/cfv/07_json_texto.cfv",
         "tests/cfv/09_stdlib_algoritmos.cfv",
-        "tests/cfv/10_stdlib_mapa.cfv"
+        "tests/cfv/10_stdlib_mapa.cfv",
+        "tests/cfv/20_sistema.cfv"
       ]
     },
     {
       "id": "native-json",
       "name": "JSON nativo",
-      "status": "verified-preview",
+      "status": "verified-stable",
       "scope": "Parseo y serialización integrados en el motor.",
       "evidence": [
         "cforgev.cpp"

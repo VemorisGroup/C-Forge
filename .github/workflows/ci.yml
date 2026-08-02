@@ -48,10 +48,7 @@ jobs:
 
       - name: Gate nativo completo
         run: |
-          make check
-          make test
-          make backend-check
-          make install-check
+          make release-check CXX=${{ matrix.cxx }}
 
       - name: Smoke test básico
         run: |
@@ -118,15 +115,14 @@ jobs:
         shell: cmd
         run: cl /std:c++20 /EHsc /O2 /Fe:cforge.exe cforgev.cpp ws2_32.lib
 
-      - name: Ejecutar pruebas esenciales
+      - name: Ejecutar gate estable en Windows
         shell: pwsh
         run: |
+          $env:CFORGE_STDLIB = "$PWD\stdlib"
           .\cforge.exe --version
-          .\cforge.exe check tests/cfv/01_nucleo.cfv
-          .\cforge.exe test tests/cfv/01_nucleo.cfv
-          .\cforge.exe test tests/cfv/02_funciones.cfv
-          .\cforge.exe test tests/cfv/03_colecciones.cfv
-          .\cforge.exe test tests/cfv/04_errores.cfv
+          Get-ChildItem stdlib\*.cfv | ForEach-Object { & .\cforge.exe check $_.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
+          Get-ChildItem tests\cfv\*.cfv | ForEach-Object { & .\cforge.exe check $_.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
+          Get-ChildItem tests\cfv\*.cfv | ForEach-Object { & .\cforge.exe test $_.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
 
   # ── Docker build ────────────────────────────────────────────────────────────
   docker:

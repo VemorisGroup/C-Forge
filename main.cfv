@@ -1,7 +1,7 @@
 // Demostración oficial de C-Forge 2.6.
 // Este programa usa únicamente sintaxis y biblioteca nativa de C-Forge.
 
-mostrar("=== C-Forge 2.6 Developer Preview ===")
+mostrar("=== C-Forge 2.6 estable ===")
 
 sea proyecto = {
     "nombre": "C-Forge",

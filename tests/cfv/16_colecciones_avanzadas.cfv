@@ -1,0 +1,22 @@
+importar "colecciones"
+
+sea cola = cola_nueva()
+cola_encolar(cola, 10)
+cola_encolar(cola, 20)
+afirmar(cola_frente(cola) == 10, "la cola debe conservar FIFO")
+afirmar(cola_desencolar(cola) == 10, "desencolar debe devolver el primero")
+afirmar(cola_tam(cola) == 1, "tamaño de cola incorrecto")
+
+sea pila = pila_nueva()
+pila_push(pila, "a")
+pila_push(pila, "b")
+afirmar(pila_tope(pila) == "b", "la pila debe conservar LIFO")
+afirmar(pila_pop(pila) == "b", "pop debe devolver el último")
+
+sea heap = heap_nuevo()
+heap_insertar(heap, 7)
+heap_insertar(heap, 2)
+heap_insertar(heap, 5)
+afirmar(heap_extraer_min(heap) == 2, "el heap debe extraer el mínimo")
+
+mostrar("[OK] colecciones avanzadas")

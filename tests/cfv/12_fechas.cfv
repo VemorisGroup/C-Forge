@@ -1,0 +1,11 @@
+// Funciones deterministas de calendario.
+importar "fecha"
+
+afirmar(es_bisiesto(2000), "2000 debe ser bisiesto")
+afirmar(no es_bisiesto(1900), "1900 no debe ser bisiesto")
+afirmar(es_bisiesto(2024), "2024 debe ser bisiesto")
+afirmar(fecha_nombre_mes(1) == "enero", "enero debe ser el primer mes")
+afirmar(fecha_nombre_dia(0) == "lunes", "lunes debe ser el primer día")
+afirmar(fecha_diff_s(1000, 6000) == 5, "la diferencia debe ser cinco segundos")
+
+mostrar("[OK] fechas")

@@ -1,4 +1,4 @@
-# Especificación activa de C-Forge 2.6 (Developer Preview)
+# Especificación activa de C-Forge 2.6 estable
 
 Este documento describe únicamente el subconjunto ejecutado por el motor
 actual. Los diseños futuros pertenecen a documentos de hoja de ruta y no forman

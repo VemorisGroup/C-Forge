@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-1.6.0}"
+VERSION="${1:-2.6.0}"
 ARCH="${2:-all}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STAGE="$ROOT/dist/deb-root"
@@ -22,7 +22,7 @@ Priority: optional
 Architecture: $ARCH
 Maintainer: Vemoris Group <hola@vemorisgroup.com>
 Homepage: https://github.com/VemorisGroup/C-Forge
-Description: Motor nativo Developer Preview del lenguaje C-Forge
+Description: Runtime estable del lenguaje C-Forge
  Ejecuta programas y pruebas .cfv sin Python, JVM, .NET ni Node.
 EOF
 dpkg-deb --root-owner-group --build "$STAGE" "$PACKAGE"

@@ -1,0 +1,24 @@
+// Condiciones anidadas, continuar, romper y ámbitos locales.
+sea suma = 0
+sea i = 0
+
+mientras (i < 20) {
+    i = i + 1
+    si (i % 2 == 0) { continuar }
+    si (i > 10) { romper }
+    suma = suma + i
+}
+
+afirmar(suma == 25, "la suma de impares hasta nueve debe ser 25")
+
+funcion clasificar(n) {
+    si (n < 0) { retornar "negativo" }
+    si (n == 0) { retornar "cero" }
+    retornar "positivo"
+}
+
+afirmar(clasificar(-1) == "negativo", "clasificación negativa incorrecta")
+afirmar(clasificar(0) == "cero", "clasificación cero incorrecta")
+afirmar(clasificar(1) == "positivo", "clasificación positiva incorrecta")
+
+mostrar("[OK] control avanzado")

@@ -1,8 +1,0 @@
-sea x: numero = 48
-sea y: numero = 18
-mientras (y != 0) {
-    sea temp: numero = y
-    y = x - piso(x / y) * y
-    x = temp
-}
-mostrar(a_texto(x))

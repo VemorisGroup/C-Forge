@@ -23,15 +23,13 @@ jobs:
         run: |
           make clean
           make build
-          make check
-          make test
-          make backend-check
-          make install-check
+          make release-check
       - name: Construir y probar en Windows
         if: runner.os == 'Windows'
-        shell: cmd
+        shell: pwsh
         run: |
           cl /std:c++20 /EHsc /O2 /Fe:cforge.exe cforgev.cpp ws2_32.lib
-          cforge.exe --version
-          cforge.exe test tests\cfv\01_nucleo.cfv
-          cforge.exe test tests\cfv\02_funciones.cfv
+          $env:CFORGE_STDLIB = "$PWD\stdlib"
+          .\cforge.exe --version
+          Get-ChildItem stdlib\*.cfv | ForEach-Object { & .\cforge.exe check $_.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
+          Get-ChildItem tests\cfv\*.cfv | ForEach-Object { & .\cforge.exe test $_.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }

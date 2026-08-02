@@ -1,0 +1,9 @@
+importar "regex"
+
+afirmar(regex_coincidir("^[a-z]+$", "cforge"), "la expresión debe coincidir")
+afirmar(no regex_coincidir("^[0-9]+$", "cforge"), "la expresión no debe coincidir")
+afirmar(es_email("equipo@vemorisgroup.com"), "correo válido rechazado")
+afirmar(no es_email("correo-invalido"), "correo inválido aceptado")
+afirmar(es_numero_txt("12345"), "texto numérico rechazado")
+
+mostrar("[OK] regex")

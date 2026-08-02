@@ -40,8 +40,6 @@ outputs/main.cfv
 outputs/*
 !outputs/C-FORGE-CHEATSHEET.md
 !outputs/GUIA-PUBLICACION.md
-!outputs/cforge-master
-!outputs/cforge_master.cpp
 
 # Local editor settings
 .vscode/

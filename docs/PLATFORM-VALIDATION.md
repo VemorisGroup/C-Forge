@@ -2,7 +2,7 @@
 
 | Sistema | Arquitectura | Gate declarado | Prueba física | Estado |
 |---|---:|---:|---:|---|
-| macOS | ARM64 | sí | motor, instalación y Mach-O literal comprobados localmente | preview verificada |
+| macOS | ARM64 | sí | motor, instalación y Mach-O literal comprobados localmente | estable verificada |
 | macOS | x64 | sí | pendiente | no validada |
 | Linux | x64 | sí | pendiente de confirmar CI verde del commit | parcial |
 | Linux | ARM64 | no | pendiente | no validada |

@@ -4,13 +4,13 @@
 # estándar, las pruebas y los programas distribuidos usan archivos .cfv.
 
 CXX      ?= g++
-CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -Wno-unused-parameter \
-            -Wno-unused-variable -Wno-unused-function
+CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -Wpedantic
 INCLUDES := -I. -I./include
 LIBS     := -lpthread -ldl
 TARGET   := cforge
 SRC      := cforgev.cpp
 PREFIX   ?= /usr/local
+VERSION  := 2.6.0
 
 # Detección de plataforma
 UNAME := $(shell uname -s)
@@ -34,7 +34,9 @@ endif
 
 # ── Targets ────────────────────────────────────────────────────────────────────
 
-.PHONY: all build debug release install uninstall test check backend-check install-check clean help
+.PHONY: all build debug release install uninstall test check stdlib-load-check \
+	cli-check malformed-check sanitize-check backend-check install-check \
+	release-check clean help
 
 ## Compilar (default)
 all: build
@@ -112,6 +114,61 @@ test: build
 	done; \
 	echo "  ✓ $$total archivos de prueba C-Forge aprobados"
 
+## Importar y ejecutar realmente cada módulo publicado de la biblioteca.
+## Esto detecta dependencias rotas que un análisis sintáctico aislado no ve.
+stdlib-load-check: build
+	@set -e; total=0; \
+	for file in stdlib/*.cfv; do \
+		module=$$(basename "$$file" .cfv); \
+		fixture="/tmp/cforge-load-$$module.cfv"; \
+		printf 'importar "%s"\n' "$$module" > "$$fixture"; \
+		CFORGE_STDLIB=./stdlib ./$(TARGET) "$$fixture" >/dev/null; \
+		total=$$((total + 1)); \
+	done; \
+	echo "  ✓ $$total módulos C-Forge cargados realmente"
+
+## Contrato público mínimo del CLI.
+cli-check: build
+	@set -e; \
+	test "$$(./$(TARGET) --version)" = "C-Forge $(VERSION)"; \
+	./$(TARGET) --help | grep -q "cforge check"; \
+	./$(TARGET) check tests/cfv/01_nucleo.cfv >/dev/null; \
+	if ./$(TARGET) check /tmp/no-existe-cforge.cfv >/tmp/cforge-cli-out 2>/tmp/cforge-cli-err; then \
+		echo "  ERROR el CLI aceptó un archivo inexistente"; exit 1; \
+	fi; \
+	grep -q "C-Forge" /tmp/cforge-cli-err; \
+	echo "  ✓ contrato CLI verificado"
+
+## Entradas dañadas deben fallar limpiamente, nunca abortar ni generar traceback.
+malformed-check: build
+	@set -e; total=0; \
+	for source in '}{' '@@@@' 'sea =' 'mostrar("sin cerrar)' 'si (verdadero) {'; do \
+		printf '%s\n' "$$source" > /tmp/cforge-malformed.cfv; \
+		if ./$(TARGET) /tmp/cforge-malformed.cfv >/tmp/cforge-malformed-out 2>/tmp/cforge-malformed-err; then \
+			echo "  ERROR entrada inválida aceptada: $$source"; exit 1; \
+		fi; \
+		grep -q "C-Forge" /tmp/cforge-malformed-err; \
+		if grep -Eqi 'traceback|segmentation fault|addresssanitizer|undefinedbehavior' \
+			/tmp/cforge-malformed-out /tmp/cforge-malformed-err; then \
+			echo "  ERROR fallo interno expuesto"; exit 1; \
+		fi; \
+		total=$$((total + 1)); \
+	done; \
+	echo "  ✓ $$total entradas dañadas rechazadas limpiamente"
+
+## Ejecutar el núcleo con AddressSanitizer y UndefinedBehaviorSanitizer.
+sanitize-check:
+	@echo "  SANITIZE cforgev.cpp"
+	@$(CXX) -std=c++20 -O1 -g -fno-omit-frame-pointer \
+		-fsanitize=address,undefined $(INCLUDES) -o /tmp/cforge-sanitize \
+		$(SRC) $(LIBS)
+	@set -e; total=0; \
+	for file in tests/cfv/*.cfv; do \
+		CFORGE_STDLIB=./stdlib /tmp/cforge-sanitize test "$$file" >/dev/null; \
+		total=$$((total + 1)); \
+	done; \
+	echo "  ✓ $$total pruebas aprobadas con sanitizadores"
+
 ## Verificar emisores binarios directos y ejecutar el formato anfitrión
 backend-check: build
 	@set -e; fixture="$$(pwd)/bootstrap/fixtures/machine_hello_b6.cfv"; \
@@ -133,10 +190,16 @@ install-check: build
 	@set -e; prefix=/tmp/cforge-install-check; \
 	rm -rf "$$prefix"; \
 	$(MAKE) install PREFIX="$$prefix" >/dev/null; \
-	test "$$($$prefix/bin/cforge --version)" = "C-Forge 2.6.0-dev"; \
+	test "$$($$prefix/bin/cforge --version)" = "C-Forge $(VERSION)"; \
 	CFORGE_STDLIB="$$prefix/lib/cforge/stdlib" \
 		"$$prefix/bin/cforge" tests/cfv/01_nucleo.cfv >/dev/null; \
 	echo "  ✓ instalación aislada verificada en $$prefix"
+
+## Gate único exigido antes de publicar una versión estable.
+release-check: clean build check test stdlib-load-check cli-check malformed-check \
+	backend-check install-check sanitize-check
+	@echo ""
+	@echo "  ✓ GATE DE ESTABILIDAD C-FORGE COMPLETO"
 
 ## Benchmark rápido
 bench: build
@@ -163,8 +226,13 @@ help:
 	@echo "  make uninstall    Desinstalar"
 	@echo "  make check        Verificar sintaxis de pruebas .cfv"
 	@echo "  make test         Ejecutar tests básicos"
+	@echo "  make stdlib-load-check Cargar realmente cada módulo"
+	@echo "  make cli-check    Verificar contrato del CLI"
+	@echo "  make malformed-check Rechazar entradas dañadas"
+	@echo "  make sanitize-check Ejecutar ASan y UBSan"
 	@echo "  make backend-check Verificar Mach-O, ELF y PE"
 	@echo "  make install-check Probar instalación aislada"
+	@echo "  make release-check Ejecutar todos los gates de estabilidad"
 	@echo "  make bench        Benchmark fib(30)"
 	@echo "  make clean        Limpiar artefactos"
 	@echo ""

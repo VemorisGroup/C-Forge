@@ -2,13 +2,15 @@
 
 ![C-Forge](assets/cforgev-logo.svg)
 
-C-Forge es un lenguaje de programación en desarrollo creado por Vemoris Group.
+C-Forge es un lenguaje de programación creado por Vemoris Group.
 Su objetivo es ofrecer una sintaxis clara, ejecución nativa y una biblioteca
 estándar escrita en el propio lenguaje.
 
-> Estado actual: **2.6.0 Developer Preview**. Es adecuado para evaluación,
-> aprendizaje y prototipos. Todavía no está certificado para sistemas bancarios,
-> médicos, aeroespaciales ni otras cargas críticas.
+> Estado actual: **C-Forge 2.6.0 estable**. El núcleo, CLI y biblioteca estable
+> superan el gate reproducible `make release-check`. Las capacidades marcadas
+> como experimentales no forman parte del contrato estable. C-Forge no posee
+> todavía certificación regulatoria para sistemas bancarios, médicos,
+> aeroespaciales ni otras cargas críticas.
 
 ## Principios
 
@@ -85,7 +87,7 @@ sudo make install
 ## Biblioteca estándar
 
 Los módulos oficiales están en [`stdlib/`](stdlib/) y conservan formato `.cfv`.
-Actualmente hay **34 módulos que pasan el análisis sintáctico y la carga del
+Actualmente hay **30 módulos que pasan el análisis sintáctico y la carga del
 motor**. Incluyen utilidades para:
 
 - texto, números y matemáticas;
@@ -107,12 +109,14 @@ La suite principal está escrita en C-Forge:
 ```sh
 make check
 make test
+make release-check
 ```
 
 Los archivos están en [`tests/cfv/`](tests/cfv/). El proceso falla de inmediato
-si una prueba devuelve un código distinto de cero. El gate actual verifica 31
-módulos y ejecuta 10 archivos de prueba nativos. Esta es una base reproducible,
-no una certificación profesional de todo el lenguaje.
+si una prueba devuelve un código distinto de cero. El gate estable verifica 30
+módulos, ejecuta 20 archivos de prueba nativos, rechaza entradas dañadas,
+comprueba el CLI y la instalación y ejecuta el núcleo con ASan/UBSan. Es una
+validación reproducible del alcance estable, no una certificación regulatoria.
 
 ## Arquitectura
 
