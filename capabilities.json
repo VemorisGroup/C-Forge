@@ -110,9 +110,15 @@
     {
       "id": "self-hosted-core",
       "name": "Núcleo escrito en C-Forge",
-      "status": "planned",
-      "scope": "El intento anterior de lexer, parser, semántica, runtime y emisor .cfv no era aceptado por el parser actual y fue retirado del árbol activo. Se reimplementará con tests incrementales antes de volver a anunciar autoalojamiento.",
+      "status": "partial",
+      "scope": "El frontend de C-Forge Core está escrito en .cfv. Stage 1 produce Stage 2, Stage 2 produce Stage 3 y ambos artefactos son idénticos byte por byte. La fase final todavía invoca clang++ para convertir el C++ emitido en código máquina; por eso la toolchain completa aún no es autónoma.",
       "evidence": [
+        "bootstrap/core_lexer.cfv",
+        "bootstrap/core_parser.cfv",
+        "bootstrap/core_semantics.cfv",
+        "bootstrap/core_emitter.cfv",
+        "bootstrap/stage1/cforge_stage1.cfv",
+        "Makefile",
         "docs/BOOTSTRAP.md"
       ]
     },

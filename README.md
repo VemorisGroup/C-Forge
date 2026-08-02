@@ -109,6 +109,7 @@ La suite principal está escrita en C-Forge:
 ```sh
 make check
 make test
+make bootstrap-check
 make release-check
 ```
 

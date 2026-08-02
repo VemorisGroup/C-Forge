@@ -22,7 +22,8 @@ compromisos distintos.
 ## No verificado o no terminado
 
 - Cobertura funcional exhaustiva de los módulos experimentales.
-- Toolchain autoalojada reproducible Stage 2/3.
+- Toolchain completamente autónoma: Stage 2/3 ya es reproducible para el
+  frontend Core, pero la generación final todavía depende de `clang++`.
 - Backends directos para el lenguaje completo.
 - Sandboxing fuerte de archivos, procesos y red.
 - Modelo formal y comprobado de ownership para toda la sintaxis.

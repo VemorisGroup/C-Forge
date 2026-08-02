@@ -2046,6 +2046,43 @@ Value cfv_parse_sentencia(Value cfv_p) {
     (void)(cfv_requerir(cfv_p, Value{std::string("}")}, Value{std::string("Se esperaba '}'")}));
     return cfv_nodo(Value{std::string("Interfaz")}, cfv_iface_nombre, cfv_iface_firmas);
   }
+  // estructura Nombre { campo: tipo ... }
+  // Una estructura comparte el modelo de ejecución de una clase de datos,
+  // pero declara sus campos sin las palabras `sea` o `campo`.
+  if (verdad(cfv_ver(cfv_p, Value{std::string("estructura")}))) {
+    (void)(cfv_avanzar(cfv_p));
+    Value cfv_struct_tok = cfv_requerir_tipo(
+        cfv_p, Value{std::string("IDENT")},
+        Value{std::string("Se esperaba nombre de estructura")});
+    Value cfv_struct_nombre = indice(cfv_struct_tok, Value{std::string("lexema")});
+    (void)(cfv_requerir(cfv_p, Value{std::string("{")},
+                        Value{std::string("Se esperaba '{' en estructura")}));
+    Value cfv_struct_miembros = crear_lista({});
+    while (verdad(Value{!verdad(cfv_ver(cfv_p, Value{std::string("}")})) &&
+                         !verdad(cfv_al_final(cfv_p))})) {
+      Value cfv_struct_campo = cfv_requerir_tipo(
+          cfv_p, Value{std::string("IDENT")},
+          Value{std::string("Se esperaba campo de estructura")});
+      Value cfv_struct_campo_nombre =
+          indice(cfv_struct_campo, Value{std::string("lexema")});
+      (void)(cfv_requerir(cfv_p, Value{std::string(":")},
+                          Value{std::string("Se esperaba ':' en campo de estructura")}));
+      (void)(cfv_requerir_tipo(cfv_p, Value{std::string("IDENT")},
+                               Value{std::string("Se esperaba tipo de campo")}));
+      (void)(cfv_tomar(cfv_p, Value{std::string(";")}));
+      (void)(cfv_tomar(cfv_p, Value{std::string(",")}));
+      (void)(cfv_agregar(
+          cfv_struct_miembros,
+          cfv_nodo(Value{std::string("CampoDef")}, cfv_struct_campo_nombre,
+                   crear_lista({cfv_nodo(Value{std::string("Nulo")}, Value{}, crear_lista({})),
+                                Value{std::string("publico")}, Value{false}}))));
+    }
+    (void)(cfv_requerir(cfv_p, Value{std::string("}")},
+                        Value{std::string("Se esperaba '}' al cerrar estructura")}));
+    (void)(cfv_tomar(cfv_p, Value{std::string(";")}));
+    return cfv_nodo(Value{std::string("Clase")}, cfv_struct_nombre,
+                    cfv_struct_miembros);
+  }
   // abstracto clase Nombre { ... }
   bool cfv_clase_abstracta_flag = false;
   if (verdad(cfv_ver(cfv_p, Value{std::string("abstracto")}))) {
@@ -2091,7 +2128,9 @@ Value cfv_parse_sentencia(Value cfv_p) {
           cfv_mod_estatico = Value{true};
         }
       }
-      if (verdad(Value{verdad(cfv_ver(cfv_p, Value{std::string("sea")})) || verdad(cfv_ver(cfv_p, Value{std::string("var")}))})) {
+      if (verdad(Value{verdad(cfv_ver(cfv_p, Value{std::string("sea")})) ||
+                         verdad(cfv_ver(cfv_p, Value{std::string("var")})) ||
+                         verdad(cfv_ver(cfv_p, Value{std::string("campo")}))})) {
         (void)(cfv_avanzar(cfv_p));
         Value cfv_campo_tok2 = cfv_requerir_tipo(cfv_p, Value{std::string("IDENT")}, Value{std::string("Se esperaba nombre de campo")});
         Value cfv_campo_nombre2 = indice(cfv_campo_tok2, Value{std::string("lexema")});
@@ -2104,7 +2143,8 @@ Value cfv_parse_sentencia(Value cfv_p) {
         }
         (void)(cfv_tomar(cfv_p, Value{std::string(";")}));
         (void)(cfv_agregar(cfv_miembros, cfv_nodo(Value{std::string("CampoDef")}, cfv_campo_nombre2, crear_lista({cfv_campo_def_expr, cfv_mod_acceso, cfv_mod_estatico}))));
-      } else if (verdad(cfv_ver(cfv_p, Value{std::string("funcion")}))) {
+      } else if (verdad(Value{verdad(cfv_ver(cfv_p, Value{std::string("funcion")})) ||
+                               verdad(cfv_ver(cfv_p, Value{std::string("metodo")}))})) {
         (void)(cfv_avanzar(cfv_p));
         Value cfv_mnom_tok = cfv_requerir_tipo(cfv_p, Value{std::string("IDENT")}, Value{std::string("Se esperaba nombre de metodo")});
         Value cfv_mnom = indice(cfv_mnom_tok, Value{std::string("lexema")});

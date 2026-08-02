@@ -36,7 +36,7 @@ endif
 
 .PHONY: all build debug release install uninstall test check stdlib-load-check \
 	cli-check malformed-check sanitize-check backend-check install-check \
-	release-check clean help
+	bootstrap-check release-check clean help
 
 ## Compilar (default)
 all: build
@@ -195,9 +195,24 @@ install-check: build
 		"$$prefix/bin/cforge" tests/cfv/01_nucleo.cfv >/dev/null; \
 	echo "  ✓ instalación aislada verificada en $$prefix"
 
+## Verificar el frontend autoalojado de C-Forge Core.
+## Stage 0 construye Stage 1; Stage 1 construye Stage 2; Stage 2 construye
+## Stage 3. Los dos últimos artefactos deben ser idénticos byte por byte.
+bootstrap-check:
+	@set -e; dir=$$(mktemp -d /tmp/cforge-bootstrap.XXXXXX); \
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -Wpedantic \
+		bootstrap/stage0/cforge_bootstrap.cpp -o "$$dir/stage0"; \
+	"$$dir/stage0" bootstrap/stage1/cforge_stage1.cfv -o "$$dir/stage1" >/dev/null; \
+	"$$dir/stage1" bootstrap/stage1/cforge_stage1.cfv -o "$$dir/stage2" >/dev/null; \
+	"$$dir/stage2" bootstrap/stage1/cforge_stage1.cfv -o "$$dir/stage3" >/dev/null; \
+	cmp "$$dir/stage2" "$$dir/stage3"; \
+	"$$dir/stage3" bootstrap/fixtures/minimal.cfv -o "$$dir/minimal" >/dev/null; \
+	test "$$($$dir/minimal)" = "$$(printf 'C-Forge Core Bootstrap\n42')"; \
+	echo "  ✓ Stage 2 y Stage 3 son idénticos; compilador Core autoalojado"
+
 ## Gate único exigido antes de publicar una versión estable.
 release-check: clean build check test stdlib-load-check cli-check malformed-check \
-	backend-check install-check sanitize-check
+	backend-check install-check bootstrap-check sanitize-check
 	@echo ""
 	@echo "  ✓ GATE DE ESTABILIDAD C-FORGE COMPLETO"
 
@@ -232,6 +247,7 @@ help:
 	@echo "  make sanitize-check Ejecutar ASan y UBSan"
 	@echo "  make backend-check Verificar Mach-O, ELF y PE"
 	@echo "  make install-check Probar instalación aislada"
+	@echo "  make bootstrap-check Verificar autoalojamiento Stage 1→2→3"
 	@echo "  make release-check Ejecutar todos los gates de estabilidad"
 	@echo "  make bench        Benchmark fib(30)"
 	@echo "  make clean        Limpiar artefactos"

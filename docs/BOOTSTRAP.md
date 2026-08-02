@@ -6,27 +6,28 @@ El objetivo del bootstrap es que el compilador de C-Forge llegue a compilar sus
 propias fuentes. C++20 se acepta únicamente como Stage 0: el punto de arranque
 para construir el primer motor.
 
-## Fuentes conservadas
+## Fuentes verificadas
 
-El árbol activo conserva Stage 0 y tres emisores directos mínimos. Las fuentes
-anteriores de lexer, parser, semántica, runtime, driver y Stage 1 en `.cfv` se
-retiraron porque no eran aceptadas por el parser actual. Mantener archivos que
-no compilan habría contradicho la política de completitud.
+El árbol activo conserva Stage 0 y el frontend de C-Forge Core escrito en
+`.cfv`: lexer, AST, parser, análisis semántico, verificación básica de
+movimientos, emisor, runtime y controlador Stage 1. El gate `bootstrap-check`
+construye y ejecuta esas fuentes; no basta con analizarlas como texto.
 
 ## Estado por etapa
 
 | Etapa | Estado verificable |
 |---|---|
 | Stage 0 | Bootstrap C++20 disponible en `bootstrap/stage0/` |
-| Stage 1 | Pendiente de reimplementación incremental en `.cfv` |
-| Stage 2/3 | No forman parte del gate reproducible 2.6 |
+| Stage 1 | Frontend Core escrito en `.cfv` y construido por Stage 0 |
+| Stage 2/3 | Reconstrucción reproducible y comparación byte por byte |
 | Runtime autónomo | El binario ejecuta `.cfv` sin Python/JVM/.NET/Node |
-| Toolchain autónoma | Pendiente |
+| Toolchain autónoma | Parcial: el frontend se autoaloja; el enlazado final todavía usa `clang++` |
 | Backends directos | Prototipos literales; consulta `RUNTIME-AUTONOMY.md` |
 
-No se usará la palabra **autoalojado** para una versión publicada hasta que el
-repositorio reconstruya Stage 2 y Stage 3 en CI, compare sus artefactos byte por
-byte y repita la prueba en las plataformas soportadas.
+El término **frontend Core autoalojado** solo describe el alcance probado por
+`make bootstrap-check`. No significa que toda la toolchain sea autónoma: el
+emisor produce C++17 y el runtime Stage 1 llama a `clang++` para crear el
+ejecutable final.
 
 ## Gate actual
 
@@ -40,6 +41,7 @@ make malformed-check
 make sanitize-check
 make backend-check
 make install-check
+make bootstrap-check
 ```
 
 Este gate no utiliza Python. Comprueba el motor activo, los módulos `.cfv`, las
@@ -49,14 +51,7 @@ los prototipos directos en backends generales.
 
 ## Siguiente criterio de avance
 
-Antes de reactivar Stage 2/3 se necesita una prueba escrita en C-Forge que:
-
-1. construya Stage 1 usando Stage 0;
-2. use Stage 1 para producir Stage 2;
-3. use Stage 2 para producir Stage 3;
-4. compare Stage 2 y Stage 3 de forma reproducible;
-5. falle de forma limpia si aparece una dependencia externa no autorizada.
-
-El runtime y el lenguaje 2.6 tienen un contrato estable independiente de este
-hito. El autoalojamiento permanece planeado y no se presenta como una capacidad
-disponible hasta superar este gate.
+La siguiente etapa debe sustituir la llamada a `clang++` por los emisores
+Mach-O, ELF y PE propios, y ampliar esos emisores hasta cubrir todo Core. Solo
+entonces podrá declararse autónoma la toolchain completa. El runtime y el
+lenguaje 2.6 mantienen un contrato estable independiente de este avance.

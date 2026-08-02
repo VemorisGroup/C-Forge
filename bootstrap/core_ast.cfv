@@ -1,0 +1,71 @@
+// AST canónico de C-Forge Core Bootstrap 0.5.
+// No contiene objetos del runtime anfitrión: solo textos, números y listas.
+
+estructura NodoASTCore {
+    tipo: texto
+    valor: texto
+    linea: numero
+    hijos: cualquiera
+}
+
+funcion nodo_ast_core(tipo: texto, valor: texto, linea: numero): cualquiera {
+    retornar NodoASTCore(tipo, valor, linea, [])
+}
+
+funcion nodo_ast_core_con_hijos(
+    tipo: texto,
+    valor: texto,
+    linea: numero,
+    hijos: cualquiera
+): cualquiera {
+    retornar NodoASTCore(tipo, valor, linea, hijos)
+}
+
+funcion escapar_ast_core(valor: texto): texto {
+    sea salida: texto = ""
+    sea posicion: numero = 0
+    mientras (posicion < longitud(valor)) {
+        sea caracter: texto = valor[posicion]
+        si (caracter == "\\") {
+            salida = salida + "\\\\"
+        } sino {
+            si (caracter == "\n") {
+                salida = salida + "\\n"
+            } sino {
+                si (caracter == "\r") {
+                    salida = salida + "\\r"
+                } sino {
+                    si (caracter == "\t") {
+                        salida = salida + "\\t"
+                    } sino {
+                        si (caracter == "[" o caracter == "]" o caracter == ":" o caracter == "@") {
+                            salida = salida + "\\" + caracter
+                        } sino {
+                            salida = salida + caracter
+                        }
+                    }
+                }
+            }
+        }
+        posicion = posicion + 1
+    }
+    retornar salida
+}
+
+// Formato estable Core AST 1:
+// tipo:largo:valor@linea[hijo,hijo]
+// El largo corresponde al valor original y evita interpretaciones ambiguas.
+funcion ast_core_canonico(nodo: cualquiera): texto {
+    sea salida: texto = nodo.tipo + ":" + a_texto(longitud(nodo.valor)) + ":" +
+        escapar_ast_core(nodo.valor) + "@" + a_texto(nodo.linea) + "["
+    sea hijos: lista = nodo.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(hijos)) {
+        si (indice > 0) {
+            salida = salida + ","
+        }
+        salida = salida + ast_core_canonico(hijos[indice])
+        indice = indice + 1
+    }
+    retornar salida + "]"
+}

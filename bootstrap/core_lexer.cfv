@@ -1,0 +1,118 @@
+// Primer componente del compilador de C-Forge escrito en C-Forge.
+// Alcance congelado: lexer de C-Forge Core Bootstrap 0.5.
+
+estructura TokenCore {
+    tipo: texto
+    lexema: texto
+    linea: numero
+}
+
+funcion es_espacio(caracter: texto): booleano {
+    retornar caracter == " " o caracter == "\t" o caracter == "\r"
+}
+
+funcion es_digito(caracter: texto): booleano {
+    retornar caracter >= "0" y caracter <= "9"
+}
+
+funcion es_letra(caracter: texto): booleano {
+    retornar (caracter >= "a" y caracter <= "z") o
+        (caracter >= "A" y caracter <= "Z") o caracter == "_"
+}
+
+funcion es_identificador(caracter: texto): booleano {
+    retornar es_letra(caracter) o es_digito(caracter)
+}
+
+funcion tokenizar_core(fuente: texto): cualquiera {
+    sea tokens: lista = []
+    sea posicion: numero = 0
+    sea linea: numero = 1
+
+    mientras (posicion < longitud(fuente)) {
+        sea actual: texto = fuente[posicion]
+
+        si (actual == "\n") {
+            linea = linea + 1
+            posicion = posicion + 1
+        } sino {
+            si (es_espacio(actual)) {
+                posicion = posicion + 1
+            } sino {
+                si (actual == "/" y posicion + 1 < longitud(fuente) y fuente[posicion + 1] == "/") {
+                    mientras (posicion < longitud(fuente) y fuente[posicion] != "\n") {
+                        posicion = posicion + 1
+                    }
+                } sino {
+                    si (es_letra(actual)) {
+                        sea inicio: numero = posicion
+                        mientras (posicion < longitud(fuente) y es_identificador(fuente[posicion])) {
+                            posicion = posicion + 1
+                        }
+                        sea lexema: texto = ""
+                        sea cursor: numero = inicio
+                        mientras (cursor < posicion) {
+                            lexema = lexema + fuente[cursor]
+                            cursor = cursor + 1
+                        }
+                        agregar(tokens, TokenCore("IDENT", lexema, linea))
+                    } sino {
+                        si (es_digito(actual)) {
+                            sea inicio_numero: numero = posicion
+                            mientras (posicion < longitud(fuente) y es_digito(fuente[posicion])) {
+                                posicion = posicion + 1
+                            }
+                            sea numero_texto: texto = ""
+                            sea cursor_numero: numero = inicio_numero
+                            mientras (cursor_numero < posicion) {
+                                numero_texto = numero_texto + fuente[cursor_numero]
+                                cursor_numero = cursor_numero + 1
+                            }
+                            agregar(tokens, TokenCore("NUMBER", numero_texto, linea))
+                        } sino {
+                            si (actual == "\"") {
+                                sea linea_texto: numero = linea
+                                sea literal: texto = "\""
+                                posicion = posicion + 1
+                                sea cerrado: booleano = falso
+                                mientras (posicion < longitud(fuente) y no cerrado) {
+                                    sea parte: texto = fuente[posicion]
+                                    literal = literal + parte
+                                    posicion = posicion + 1
+                                    si (parte == "\\" y posicion < longitud(fuente)) {
+                                        literal = literal + fuente[posicion]
+                                        posicion = posicion + 1
+                                    } sino {
+                                        si (parte == "\"") {
+                                            cerrado = verdadero
+                                        } sino {
+                                            si (parte == "\n") {
+                                                linea = linea + 1
+                                            }
+                                        }
+                                    }
+                                }
+                                afirmar(cerrado, "texto sin cerrar en línea " + a_texto(linea_texto))
+                                agregar(tokens, TokenCore("STRING", literal, linea_texto))
+                            } sino {
+                                sea simbolo: texto = actual
+                                posicion = posicion + 1
+                                si (posicion < longitud(fuente)) {
+                                    sea par: texto = simbolo + fuente[posicion]
+                                    si (par == "==" o par == "!=" o par == ">=" o par == "<=") {
+                                        simbolo = par
+                                        posicion = posicion + 1
+                                    }
+                                }
+                                agregar(tokens, TokenCore("SYMBOL", simbolo, linea))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    agregar(tokens, TokenCore("EOF", "", linea))
+    retornar tokens
+}
