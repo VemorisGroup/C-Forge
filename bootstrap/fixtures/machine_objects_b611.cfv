@@ -1,0 +1,12 @@
+estructura Punto {
+    x: numero
+    y: numero
+}
+
+sea punto: Punto = Punto(10, 20)
+punto.x = 30
+si (punto.x + punto.y == 50) {
+    mostrar("C-FORGE-B6.11-OBJECT-OK")
+} sino {
+    mostrar("C-FORGE-B6.11-OBJECT-FAIL")
+}

@@ -58,9 +58,10 @@ será consumido por Mach-O, ELF y PE, evitando que cada backend invente una ABI
 distinta. `make ir-core-check` compila y ejecuta esa implementación escrita en
 C-Forge. `bootstrap/core_object_lowering.cfv` ya reduce constructores de valor,
 lecturas y escrituras de campos a símbolos escalares estables, y
-`make object-lowering-check` verifica el contrato. La conexión final de esa
-representación con los tres emisores y el despacho de métodos permanece en
-progreso.
+`make object-lowering-check` verifica el contrato. Los tres emisores consumen
+ya esta representación para constructores de valor, lecturas y escrituras de
+campos; `make backend-core-check` genera los tres formatos y ejecuta el formato
+del anfitrión. El despacho de métodos e interfaces permanece en progreso.
 
 ## Criterio para declarar autonomía completa
 

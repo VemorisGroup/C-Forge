@@ -236,19 +236,30 @@ backend-core-check:
 		bootstrap/fixtures/machine_runtime_b6.cfv -o "$$dir/uno-elf" >/dev/null; \
 	env PATH=/nonexistent "$$dir/elf-core" \
 		bootstrap/fixtures/machine_runtime_b6.cfv -o "$$dir/dos-elf" >/dev/null; \
+	env PATH=/nonexistent "$$dir/macho-core" \
+		bootstrap/fixtures/machine_objects_b611.cfv -o "$$dir/objetos-macho" >/dev/null; \
+	env PATH=/nonexistent "$$dir/pe-core" \
+		bootstrap/fixtures/machine_objects_b611.cfv -o "$$dir/objetos.exe" >/dev/null; \
+	env PATH=/nonexistent "$$dir/elf-core" \
+		bootstrap/fixtures/machine_objects_b611.cfv -o "$$dir/objetos-elf" >/dev/null; \
 	cmp "$$dir/uno-macho" "$$dir/dos-macho"; \
 	cmp "$$dir/uno.exe" "$$dir/dos.exe"; \
 	cmp "$$dir/uno-elf" "$$dir/dos-elf"; \
 	file "$$dir/uno-macho" | grep -q "Mach-O 64-bit executable arm64"; \
 	file "$$dir/uno.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/uno-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
+	file "$$dir/objetos-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/objetos.exe" | grep -q "PE32+ executable.*x86-64"; \
+	file "$$dir/objetos-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
 	if [ "$(UNAME)" = "Darwin" ] && [ "$(ARCH)" = "arm64" ]; then \
 		test "$$($$dir/uno-macho)" = "C-FORGE-B6.7-OK"; \
+		test "$$($$dir/objetos-macho)" = "C-FORGE-B6.11-OBJECT-OK"; \
 	fi; \
 	if [ "$(UNAME)" = "Linux" ] && [ "$(ARCH)" = "x86_64" ]; then \
 		test "$$($$dir/uno-elf)" = "C-FORGE-B6.7-OK"; \
+		test "$$($$dir/objetos-elf)" = "C-FORGE-B6.11-OBJECT-OK"; \
 	fi; \
-	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.8 sin toolchain externa"
+	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.11 con objetos"
 
 ## Verificar el IR común de objetos que consumirán los tres backends.
 ir-core-check:

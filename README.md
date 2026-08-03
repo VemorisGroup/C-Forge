@@ -153,7 +153,9 @@ C-Forge que fija layouts reproducibles para estructuras, clases, campos y
 métodos antes de bajarlos a los tres formatos nativos.
 La etapa `bootstrap/core_object_lowering.cfv` inicia B6.10 y convierte
 instancias, lecturas y escrituras de campos a almacenamiento escalar común.
-La conexión definitiva de esta etapa con los tres emisores sigue en progreso.
+Esa representación ya alimenta los emisores Mach-O ARM64, ELF x64 y PE x64:
+el gate construye el mismo programa de objetos en los tres formatos y ejecuta
+el binario compatible con el anfitrión. Métodos e interfaces siguen en progreso.
 
 No se anunciará compatibilidad total con una plataforma hasta que instalación,
 ejecución, pruebas y desinstalación estén verificadas en ella.

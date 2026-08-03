@@ -23,7 +23,7 @@ construye y ejecuta esas fuentes; no basta con analizarlas como texto.
 | Runtime autónomo | El binario ejecuta `.cfv` sin Python/JVM/.NET/Node |
 | Toolchain autónoma | Parcial: el frontend se autoaloja; el enlazado final todavía usa `clang++` |
 | Backends directos | Mach-O ARM64, ELF x64 y PE x64 Core B6.8 parciales; consulta `RUNTIME-AUTONOMY.md` |
-| IR de objetos | Core IR 1 define layouts deterministas; Object Lowering 1 reduce instancias y campos a almacenamiento común; la emisión nativa B6.10 sigue en progreso |
+| Objetos nativos | Core IR 1 y Object Lowering 1 alimentan Mach-O, ELF y PE con constructores de valor, lectura y escritura de campos | verificado B6.11 |
 
 El término **frontend Core autoalojado** solo describe el alcance probado por
 `make bootstrap-check`. No significa que toda la toolchain sea autónoma: el

@@ -1,3 +1,4 @@
+
 // Primer componente del compilador de C-Forge escrito en C-Forge.
 // Alcance congelado: lexer de C-Forge Core Bootstrap 0.5.
 
@@ -117,8 +118,6 @@ funcion tokenizar_core(fuente: texto): cualquiera {
     retornar tokens
 }
 
-
-
 // AST canónico de C-Forge Core Bootstrap 0.5.
 // No contiene objetos del runtime anfitrión: solo textos, números y listas.
 
@@ -190,7 +189,6 @@ funcion ast_core_canonico(nodo: cualquiera): texto {
     }
     retornar salida + "]"
 }
-
 
 // Parser recursivo descendente de C-Forge Core Bootstrap 0.5.
 // Core 0.5 cubre las construcciones utilizadas por el compilador Stage 1.
@@ -764,7 +762,404 @@ funcion parsear_fuente_core(fuente: texto): cualquiera {
     retornar parsear_tokens_core(tokenizar_core(fuente))
 }
 
+// C-Forge Core IR 1 — contrato común para todos los backends nativos.
+// Esta fuente está escrita en C-Forge y no representa estructuras de C++,
+// C# ni Java. Los backends consumen offsets, tamaños y firmas deterministas.
 
+estructura CampoIRCore {
+    nombre: texto
+    tipo: texto
+    indice: numero
+    desplazamiento: numero
+    tamano: numero
+    alineacion: numero
+}
+
+estructura MetodoIRCore {
+    nombre: texto
+    retorno: texto
+    parametros: lista
+    propietario: texto
+}
+
+estructura TipoIRCore {
+    nombre: texto
+    clase: texto
+    tamano: numero
+    alineacion: numero
+    campos: lista
+    metodos: lista
+    interfaces: lista
+}
+
+estructura ProgramaIRCore {
+    tipos: lista
+    errores: lista
+}
+
+funcion posicion_dos_puntos_ir(valor: texto): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(valor)) {
+        si (valor[indice] == ":") {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion segmento_ir(valor: texto, inicio: numero, limite: numero): texto {
+    sea salida: texto = ""
+    sea indice: numero = inicio
+    mientras (indice < limite) {
+        salida = salida + valor[indice]
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion nombre_firma_ir(valor: texto): texto {
+    sea separador: numero = posicion_dos_puntos_ir(valor)
+    si (separador < 0) {
+        retornar valor
+    }
+    retornar segmento_ir(valor, 0, separador)
+}
+
+funcion tipo_firma_ir(valor: texto): texto {
+    sea separador: numero = posicion_dos_puntos_ir(valor)
+    si (separador < 0) {
+        retornar "cualquiera"
+    }
+    sea tipo: texto = segmento_ir(
+        valor, separador + 1, longitud(valor)
+    )
+    si (longitud(tipo) == 0) {
+        retornar "cualquiera"
+    }
+    retornar tipo
+}
+
+funcion alinear_ir(valor: numero, alineacion: numero): numero {
+    sea resto: numero = valor % alineacion
+    si (resto == 0) {
+        retornar valor
+    }
+    retornar valor + alineacion - resto
+}
+
+funcion tamano_tipo_ir(tipo: texto): numero {
+    // El ABI Core usa slots de 64 bits. Los agregados guardan un handle de
+    // 64 bits hacia memoria administrada por el runtime autónomo.
+    si (tipo == "booleano") { retornar 8 }
+    si (tipo == "numero") { retornar 8 }
+    si (tipo == "entero") { retornar 8 }
+    si (tipo == "decimal") { retornar 8 }
+    si (tipo == "texto") { retornar 8 }
+    si (tipo == "lista") { retornar 8 }
+    si (tipo == "mapa") { retornar 8 }
+    si (tipo == "cualquiera") { retornar 8 }
+    retornar 8
+}
+
+funcion indice_tipo_ir(tipos: lista, nombre: texto): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(tipos)) {
+        si (tipos[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion indice_campo_ir(campos: lista, nombre: texto): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(campos)) {
+        si (campos[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion indice_metodo_ir(metodos: lista, nombre: texto): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(metodos)) {
+        si (metodos[indice].nombre == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion parametros_metodo_ir(nodo: cualquiera): lista {
+    sea parametros: lista = []
+    sea hijos: lista = nodo.hijos
+    sea indice: numero = 0
+    mientras (indice + 1 < longitud(hijos)) {
+        sea parametro: cualquiera = hijos[indice]
+        agregar(parametros, tipo_firma_ir(parametro.valor))
+        indice = indice + 1
+    }
+    retornar parametros
+}
+
+funcion construir_tipo_ir(
+    nodo: cualquiera,
+    errores: lista
+): cualquiera {
+    sea campos: lista = []
+    sea metodos: lista = []
+    sea interfaces: lista = []
+    sea desplazamiento: numero = 0
+    sea miembros: lista = nodo.hijos
+    sea indice: numero = 0
+
+    mientras (indice < longitud(miembros)) {
+        sea miembro: cualquiera = miembros[indice]
+        si (miembro.tipo == "Campo") {
+            sea nombre: texto = nombre_firma_ir(miembro.valor)
+            sea tipo: texto = tipo_firma_ir(miembro.valor)
+            si (indice_campo_ir(campos, nombre) >= 0) {
+                agregar(
+                    errores,
+                    "CFIR1001: campo duplicado '" + nodo.valor +
+                    "." + nombre + "'"
+                )
+            } sino {
+                sea alineacion: numero = 8
+                sea tamano: numero = tamano_tipo_ir(tipo)
+                desplazamiento = alinear_ir(desplazamiento, alineacion)
+                agregar(
+                    campos,
+                    CampoIRCore(
+                        nombre, tipo, longitud(campos), desplazamiento,
+                        tamano, alineacion
+                    )
+                )
+                desplazamiento = desplazamiento + tamano
+            }
+        }
+        si (miembro.tipo == "Metodo") {
+            sea nombre_metodo: texto = nombre_firma_ir(miembro.valor)
+            si (indice_metodo_ir(metodos, nombre_metodo) >= 0) {
+                agregar(
+                    errores,
+                    "CFIR1002: método duplicado '" + nodo.valor +
+                    "." + nombre_metodo + "'"
+                )
+            } sino {
+                agregar(
+                    metodos,
+                    MetodoIRCore(
+                        nombre_metodo,
+                        tipo_firma_ir(miembro.valor),
+                        parametros_metodo_ir(miembro),
+                        nodo.valor
+                    )
+                )
+            }
+        }
+        indice = indice + 1
+    }
+
+    sea clase_tipo: texto = "estructura"
+    si (nodo.tipo == "Clase") {
+        clase_tipo = "clase"
+    }
+    retornar TipoIRCore(
+        nodo.valor,
+        clase_tipo,
+        alinear_ir(desplazamiento, 8),
+        8,
+        campos,
+        metodos,
+        interfaces
+    )
+}
+
+funcion construir_programa_ir(programa: cualquiera): cualquiera {
+    sea tipos: lista = []
+    sea errores: lista = []
+    sea declaraciones: lista = programa.hijos
+    sea indice: numero = 0
+    mientras (indice < longitud(declaraciones)) {
+        sea nodo: cualquiera = declaraciones[indice]
+        si (nodo.tipo == "Estructura" o nodo.tipo == "Clase") {
+            si (indice_tipo_ir(tipos, nodo.valor) >= 0) {
+                agregar(
+                    errores,
+                    "CFIR1000: tipo duplicado '" + nodo.valor + "'"
+                )
+            } sino {
+                agregar(tipos, construir_tipo_ir(nodo, errores))
+            }
+        }
+        indice = indice + 1
+    }
+    retornar ProgramaIRCore(tipos, errores)
+}
+
+funcion campo_tipo_ir(tipo: cualquiera, nombre: texto): cualquiera {
+    sea indice: numero = indice_campo_ir(tipo.campos, nombre)
+    afirmar(
+        indice >= 0,
+        "CFIR1003: campo desconocido '" + tipo.nombre + "." + nombre + "'"
+    )
+    retornar tipo.campos[indice]
+}
+
+funcion firma_tipo_ir(tipo: cualquiera): texto {
+    sea salida: texto = tipo.clase + " " + tipo.nombre +
+        " size=" + a_texto(tipo.tamano) +
+        " align=" + a_texto(tipo.alineacion) + " {"
+    sea indice: numero = 0
+    mientras (indice < longitud(tipo.campos)) {
+        sea campo: cualquiera = tipo.campos[indice]
+        si (indice > 0) { salida = salida + "," }
+        salida = salida + campo.nombre + ":" + campo.tipo +
+            "@" + a_texto(campo.desplazamiento)
+        indice = indice + 1
+    }
+    retornar salida + "}"
+}
+
+funcion ir_canonico(programa_ir: cualquiera): texto {
+    sea salida: texto = "CFIR1["
+    sea indice: numero = 0
+    mientras (indice < longitud(programa_ir.tipos)) {
+        si (indice > 0) { salida = salida + ";" }
+        salida = salida + firma_tipo_ir(programa_ir.tipos[indice])
+        indice = indice + 1
+    }
+    retornar salida + "]"
+}
+
+// C-Forge Core Object Lowering 1: representación común previa a Mach-O/ELF/PE.
+estructura InstanciaObjetoCore {
+    nombre: texto
+    tipo: texto
+}
+
+estructura ContextoObjetosCore {
+    programa_ir: cualquiera
+    instancias: lista
+    errores: lista
+}
+
+funcion indice_instancia_objeto_core(instancias: lista, nombre: texto): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(instancias)) {
+        si (instancias[indice].nombre == nombre) { retornar indice }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion nombre_campo_bajado_core(objeto: texto, campo: texto): texto {
+    retornar objeto + "__campo__" + campo
+}
+
+funcion tipo_instancia_objeto_core(contexto: cualquiera, nombre: texto): cualquiera {
+    sea indice: numero = indice_instancia_objeto_core(contexto.instancias, nombre)
+    afirmar(indice >= 0, "CFLOW1001: objeto desconocido '" + nombre + "'")
+    sea indice_tipo: numero = indice_tipo_ir(
+        contexto.programa_ir.tipos, contexto.instancias[indice].tipo
+    )
+    afirmar(indice_tipo >= 0, "CFLOW1003: tipo de objeto desconocido")
+    retornar contexto.programa_ir.tipos[indice_tipo]
+}
+
+funcion bajar_expresion_objetos_core(nodo: cualquiera, contexto: cualquiera): cualquiera {
+    si (nodo.tipo == "Miembro") {
+        sea base: cualquiera = nodo.hijos[0]
+        si (base.tipo == "Identificador") {
+            sea indice: numero = indice_instancia_objeto_core(contexto.instancias, base.valor)
+            si (indice >= 0) {
+                sea tipo: cualquiera = tipo_instancia_objeto_core(contexto, base.valor)
+                campo_tipo_ir(tipo, nodo.valor)
+                retornar nodo_ast_core(
+                    "Identificador",
+                    nombre_campo_bajado_core(base.valor, nodo.valor),
+                    nodo.linea
+                )
+            }
+        }
+    }
+    sea hijos: lista = []
+    sea indice_hijo: numero = 0
+    mientras (indice_hijo < longitud(nodo.hijos)) {
+        agregar(hijos, bajar_expresion_objetos_core(nodo.hijos[indice_hijo], contexto))
+        indice_hijo = indice_hijo + 1
+    }
+    retornar nodo_ast_core_con_hijos(nodo.tipo, nodo.valor, nodo.linea, hijos)
+}
+
+funcion bajar_declaracion_objeto_core(nodo: cualquiera, contexto: cualquiera): lista {
+    sea resultado: lista = []
+    sea inicializador: cualquiera = nodo.hijos[0]
+    si (inicializador.tipo != "Llamada") { retornar resultado }
+    sea indice_tipo: numero = indice_tipo_ir(contexto.programa_ir.tipos, inicializador.valor)
+    si (indice_tipo < 0) { retornar resultado }
+    sea nombre: texto = nombre_firma_ir(nodo.valor)
+    sea tipo: cualquiera = contexto.programa_ir.tipos[indice_tipo]
+    afirmar(
+        longitud(inicializador.hijos) == longitud(tipo.campos),
+        "CFLOW1002: '" + tipo.nombre + "' requiere " +
+            a_texto(longitud(tipo.campos)) + " campos"
+    )
+    agregar(contexto.instancias, InstanciaObjetoCore(nombre, tipo.nombre))
+    sea indice: numero = 0
+    mientras (indice < longitud(tipo.campos)) {
+        sea campo: cualquiera = tipo.campos[indice]
+        agregar(resultado, nodo_ast_core_con_hijos(
+            "Declaracion",
+            nombre_campo_bajado_core(nombre, campo.nombre) + ":" + campo.tipo,
+            nodo.linea,
+            [bajar_expresion_objetos_core(inicializador.hijos[indice], contexto)]
+        ))
+        indice = indice + 1
+    }
+    retornar resultado
+}
+
+funcion bajar_sentencia_objetos_core(nodo: cualquiera, contexto: cualquiera): lista {
+    si (nodo.tipo == "Declaracion") {
+        sea objeto: lista = bajar_declaracion_objeto_core(nodo, contexto)
+        si (longitud(objeto) > 0) { retornar objeto }
+    }
+    sea hijos: lista = []
+    sea indice: numero = 0
+    mientras (indice < longitud(nodo.hijos)) {
+        agregar(hijos, bajar_expresion_objetos_core(nodo.hijos[indice], contexto))
+        indice = indice + 1
+    }
+    retornar [nodo_ast_core_con_hijos(nodo.tipo, nodo.valor, nodo.linea, hijos)]
+}
+
+funcion bajar_objetos_core(programa: cualquiera): cualquiera {
+    sea programa_ir: cualquiera = construir_programa_ir(programa)
+    afirmar(longitud(programa_ir.errores) == 0, "CFLOW1000: IR de objetos inválido")
+    sea contexto: cualquiera = ContextoObjetosCore(programa_ir, [], [])
+    sea salida: lista = []
+    sea indice: numero = 0
+    mientras (indice < longitud(programa.hijos)) {
+        sea nodo: cualquiera = programa.hijos[indice]
+        si (nodo.tipo != "Estructura" y nodo.tipo != "Clase") {
+            sea bajadas: lista = bajar_sentencia_objetos_core(nodo, contexto)
+            sea posicion: numero = 0
+            mientras (posicion < longitud(bajadas)) {
+                agregar(salida, bajadas[posicion])
+                posicion = posicion + 1
+            }
+        }
+        indice = indice + 1
+    }
+    retornar nodo_ast_core_con_hijos("Programa", "", 1, salida)
+}
 // C-Forge B6.3 — emisor directo Mach-O/ARM64 con firma ad hoc.
 // Produce un ejecutable nativo para macOS sin compilador, ensamblador,
 // enlazador ni la herramienta externa codesign durante la emisión.
@@ -1019,7 +1414,6 @@ funcion emitir_macho_arm64(mensaje_sin_salto: texto): lista {
     agregar_lista_macho(imagen, firma)
     retornar imagen
 }
-
 
 
 // Backend Core B6.7. Se concatena con lexer, AST, parser y biblioteca Mach-O.
@@ -1890,7 +2284,8 @@ funcion empaquetar_core_macho(
 
 funcion compilar_core_macho(fuente: texto): lista {
     sea tokens: lista = tokenizar_core(fuente)
-    sea programa: cualquiera = parsear_tokens_core(tokens)
+    sea programa_original: cualquiera = parsear_tokens_core(tokens)
+    sea programa: cualquiera = bajar_objetos_core(programa_original)
     sea contexto: cualquiera =
         ContextoARMCore([], [], [], 0, [], "", [], [], 0)
     sea declaraciones: lista = programa.hijos
@@ -1916,11 +2311,6 @@ funcion compilar_core_macho(fuente: texto): lista {
     indice = 0
     mientras (indice < longitud(declaraciones)) {
         sea nodo: cualquiera = declaraciones[indice]
-        afirmar(
-            nodo.tipo != "Clase" y
-            nodo.tipo != "Estructura",
-            "B6.7 todavía no compila clases ni estructuras"
-        )
         si (nodo.tipo != "Funcion") {
             emitir_sentencia_arm(nodo, contexto)
         }

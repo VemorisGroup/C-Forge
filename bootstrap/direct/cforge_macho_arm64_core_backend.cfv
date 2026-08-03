@@ -866,7 +866,8 @@ funcion empaquetar_core_macho(
 
 funcion compilar_core_macho(fuente: texto): lista {
     sea tokens: lista = tokenizar_core(fuente)
-    sea programa: cualquiera = parsear_tokens_core(tokens)
+    sea programa_original: cualquiera = parsear_tokens_core(tokens)
+    sea programa: cualquiera = bajar_objetos_core(programa_original)
     sea contexto: cualquiera =
         ContextoARMCore([], [], [], 0, [], "", [], [], 0)
     sea declaraciones: lista = programa.hijos
@@ -892,11 +893,6 @@ funcion compilar_core_macho(fuente: texto): lista {
     indice = 0
     mientras (indice < longitud(declaraciones)) {
         sea nodo: cualquiera = declaraciones[indice]
-        afirmar(
-            nodo.tipo != "Clase" y
-            nodo.tipo != "Estructura",
-            "B6.7 todavía no compila clases ni estructuras"
-        )
         si (nodo.tipo != "Funcion") {
             emitir_sentencia_arm(nodo, contexto)
         }
