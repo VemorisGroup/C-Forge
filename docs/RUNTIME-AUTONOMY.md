@@ -61,7 +61,9 @@ lecturas y escrituras de campos a símbolos escalares estables, y
 `make object-lowering-check` verifica el contrato. Los tres emisores consumen
 ya esta representación para constructores de valor, lecturas y escrituras de
 campos; `make backend-core-check` genera los tres formatos y ejecuta el formato
-del anfitrión. El despacho de métodos e interfaces permanece en progreso.
+del anfitrión. B6.12 resuelve métodos de instancia de solo lectura y `este`
+como funciones nativas con campos explícitos. La mutación dentro de métodos,
+los destructores y las interfaces permanecen en progreso.
 
 ## Criterio para declarar autonomía completa
 

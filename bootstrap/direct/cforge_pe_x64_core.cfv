@@ -1073,7 +1073,118 @@ funcion tipo_instancia_objeto_core(contexto: cualquiera, nombre: texto): cualqui
     retornar contexto.programa_ir.tipos[indice_tipo]
 }
 
+funcion nombre_metodo_bajado_core(tipo: texto, metodo: texto): texto {
+    retornar tipo + "__metodo__" + metodo
+}
+
+funcion bajar_expresion_metodo_core(nodo: cualquiera, tipo: cualquiera): cualquiera {
+    si (nodo.tipo == "Miembro") {
+        sea base: cualquiera = nodo.hijos[0]
+        si (base.tipo == "Identificador" y base.valor == "este") {
+            campo_tipo_ir(tipo, nodo.valor)
+            retornar nodo_ast_core(
+                "Identificador", "__este__" + nodo.valor, nodo.linea
+            )
+        }
+    }
+    sea hijos: lista = []
+    sea indice: numero = 0
+    mientras (indice < longitud(nodo.hijos)) {
+        agregar(hijos, bajar_expresion_metodo_core(nodo.hijos[indice], tipo))
+        indice = indice + 1
+    }
+    retornar nodo_ast_core_con_hijos(nodo.tipo, nodo.valor, nodo.linea, hijos)
+}
+
+funcion bajar_metodo_core(nodo: cualquiera, tipo: cualquiera): cualquiera {
+    sea hijos: lista = []
+    sea indice: numero = 0
+    mientras (indice < longitud(tipo.campos)) {
+        sea campo: cualquiera = tipo.campos[indice]
+        agregar(hijos, nodo_ast_core(
+            "Parametro", "__este__" + campo.nombre + ":" + campo.tipo,
+            nodo.linea
+        ))
+        indice = indice + 1
+    }
+    indice = 0
+    mientras (indice + 1 < longitud(nodo.hijos)) {
+        agregar(hijos, nodo.hijos[indice])
+        indice = indice + 1
+    }
+    agregar(
+        hijos,
+        bajar_expresion_metodo_core(
+            nodo.hijos[longitud(nodo.hijos) - 1], tipo
+        )
+    )
+    retornar nodo_ast_core_con_hijos(
+        "Funcion",
+        nombre_metodo_bajado_core(tipo.nombre, nombre_firma_ir(nodo.valor)) +
+            ":" + tipo_firma_ir(nodo.valor),
+        nodo.linea,
+        hijos
+    )
+}
+
+funcion bajar_metodos_tipo_core(nodo: cualquiera, programa_ir: cualquiera): lista {
+    sea resultado: lista = []
+    si (nodo.tipo != "Clase") { retornar resultado }
+    sea indice_tipo: numero = indice_tipo_ir(programa_ir.tipos, nodo.valor)
+    afirmar(indice_tipo >= 0, "CFLOW1004: clase no registrada")
+    sea tipo: cualquiera = programa_ir.tipos[indice_tipo]
+    sea indice: numero = 0
+    mientras (indice < longitud(nodo.hijos)) {
+        si (nodo.hijos[indice].tipo == "Metodo") {
+            agregar(resultado, bajar_metodo_core(nodo.hijos[indice], tipo))
+        }
+        indice = indice + 1
+    }
+    retornar resultado
+}
+
 funcion bajar_expresion_objetos_core(nodo: cualquiera, contexto: cualquiera): cualquiera {
+    si (nodo.tipo == "LlamadaMetodo") {
+        sea base_llamada: cualquiera = nodo.hijos[0]
+        afirmar(
+            base_llamada.tipo == "Identificador",
+            "CFLOW1005: llamada de método requiere una instancia identificada"
+        )
+        sea tipo_llamada: cualquiera = tipo_instancia_objeto_core(
+            contexto, base_llamada.valor
+        )
+        sea indice_metodo: numero = indice_metodo_ir(
+            tipo_llamada.metodos, nodo.valor
+        )
+        afirmar(indice_metodo >= 0, "CFLOW1006: método desconocido '" +
+            tipo_llamada.nombre + "." + nodo.valor + "'")
+        sea argumentos: lista = []
+        sea indice_campo: numero = 0
+        mientras (indice_campo < longitud(tipo_llamada.campos)) {
+            agregar(argumentos, nodo_ast_core(
+                "Identificador",
+                nombre_campo_bajado_core(
+                    base_llamada.valor,
+                    tipo_llamada.campos[indice_campo].nombre
+                ),
+                nodo.linea
+            ))
+            indice_campo = indice_campo + 1
+        }
+        sea indice_argumento: numero = 1
+        mientras (indice_argumento < longitud(nodo.hijos)) {
+            agregar(argumentos, bajar_expresion_objetos_core(
+                nodo.hijos[indice_argumento], contexto
+            ))
+            indice_argumento = indice_argumento + 1
+        }
+        retornar nodo_ast_core_con_hijos(
+            "Llamada",
+            nombre_metodo_bajado_core(tipo_llamada.nombre, nodo.valor),
+            nodo.linea,
+            argumentos
+        )
+    }
     si (nodo.tipo == "Miembro") {
         sea base: cualquiera = nodo.hijos[0]
         si (base.tipo == "Identificador") {
@@ -1146,6 +1257,18 @@ funcion bajar_objetos_core(programa: cualquiera): cualquiera {
     sea contexto: cualquiera = ContextoObjetosCore(programa_ir, [], [])
     sea salida: lista = []
     sea indice: numero = 0
+    mientras (indice < longitud(programa.hijos)) {
+        sea metodos: lista = bajar_metodos_tipo_core(
+            programa.hijos[indice], programa_ir
+        )
+        sea indice_metodo: numero = 0
+        mientras (indice_metodo < longitud(metodos)) {
+            agregar(salida, metodos[indice_metodo])
+            indice_metodo = indice_metodo + 1
+        }
+        indice = indice + 1
+    }
+    indice = 0
     mientras (indice < longitud(programa.hijos)) {
         sea nodo: cualquiera = programa.hijos[indice]
         si (nodo.tipo != "Estructura" y nodo.tipo != "Clase") {

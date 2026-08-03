@@ -128,7 +128,7 @@
       "id": "direct-native-backends",
       "name": "Backends nativos directos",
       "status": "partial",
-      "scope": "Mach-O ARM64, ELF x64 y PE x64 poseen backends Core B6.11 para variables numéricas, aritmética, condiciones, ciclos, funciones, listas, texto dinámico y estructuras de valor con lectura y escritura de campos. La emisión determinista se prueba con PATH aislado y no llama compilador ni enlazador. El binario anfitrión se ejecuta en CI; mapas, métodos, interfaces, excepciones, módulos, ownership y concurrencia todavía están pendientes.",
+      "scope": "Mach-O ARM64, ELF x64 y PE x64 poseen backends Core B6.12 para variables numéricas, aritmética, condiciones, ciclos, funciones, listas, texto dinámico, estructuras de valor y métodos de instancia de solo lectura con este. La emisión se prueba con PATH aislado y no llama compilador ni enlazador. El binario anfitrión se ejecuta en CI; mapas, métodos mutables, interfaces, excepciones, módulos, ownership y concurrencia todavía están pendientes.",
       "evidence": [
         "bootstrap/direct/cforge_macho_arm64.cfv",
         "bootstrap/direct/cforge_macho_arm64_core.cfv",
@@ -138,6 +138,7 @@
         "bootstrap/direct/cforge_pe_x64_core.cfv",
         "bootstrap/fixtures/machine_runtime_b6.cfv",
         "bootstrap/fixtures/machine_objects_b611.cfv",
+        "bootstrap/fixtures/machine_methods_b612.cfv",
         "Makefile",
         "docs/RUNTIME-AUTONOMY.md"
       ]

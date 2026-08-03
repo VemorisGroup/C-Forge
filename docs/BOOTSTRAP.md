@@ -24,6 +24,7 @@ construye y ejecuta esas fuentes; no basta con analizarlas como texto.
 | Toolchain autónoma | Parcial: el frontend se autoaloja; el enlazado final todavía usa `clang++` |
 | Backends directos | Mach-O ARM64, ELF x64 y PE x64 Core B6.8 parciales; consulta `RUNTIME-AUTONOMY.md` |
 | Objetos nativos | Core IR 1 y Object Lowering 1 alimentan Mach-O, ELF y PE con constructores de valor, lectura y escritura de campos | verificado B6.11 |
+| Métodos nativos | Métodos de instancia de solo lectura y `este` se reducen a funciones nativas explícitas en los tres formatos | verificado B6.12 |
 
 El término **frontend Core autoalojado** solo describe el alcance probado por
 `make bootstrap-check`. No significa que toda la toolchain sea autónoma: el

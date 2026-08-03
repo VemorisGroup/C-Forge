@@ -1,0 +1,16 @@
+clase Punto {
+    campo x: numero
+    campo y: numero
+
+    metodo suma(): numero {
+        retornar este.x + este.y
+    }
+}
+
+sea punto: Punto = Punto(21, 21)
+sea resultado: numero = punto.suma()
+si (resultado == 42) {
+    mostrar("C-FORGE-B6.12-METHOD-OK")
+} sino {
+    mostrar("C-FORGE-B6.12-METHOD-FAIL")
+}
