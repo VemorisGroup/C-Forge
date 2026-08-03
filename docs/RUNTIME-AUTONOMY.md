@@ -66,6 +66,9 @@ como funciones nativas con campos explícitos. La mutación dentro de métodos,
 los destructores y las interfaces permanecen en progreso. B6.13 añade métodos
 mutables: sus efectos se bajan a escrituras directas sobre los símbolos de la
 instancia y se prueban en los tres formatos sin toolchain externa.
+B6.14 reconoce `crear` como constructor personalizado, exige inicialización de
+todos los campos y programa `destruir` automáticamente en orden LIFO al final
+del ámbito superior. Los ámbitos anidados todavía permanecen en progreso.
 
 ## Criterio para declarar autonomía completa
 

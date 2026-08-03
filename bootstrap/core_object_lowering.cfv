@@ -135,6 +135,17 @@ funcion nodo_metodo_ast_core(
     retornar tipo_ast
 }
 
+funcion indice_metodo_ast_tipo_core(tipo_ast: cualquiera, nombre: texto): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(tipo_ast.hijos)) {
+        sea miembro: cualquiera = tipo_ast.hijos[indice]
+        si (miembro.tipo == "Metodo" y
+            nombre_firma_ir(miembro.valor) == nombre) { retornar indice }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
 funcion indice_parametro_invocado_core(
     metodo: cualquiera,
     nombre: texto
@@ -296,20 +307,61 @@ funcion bajar_declaracion_objeto_core(nodo: cualquiera, contexto: cualquiera): l
     si (indice_tipo < 0) { retornar resultado }
     sea nombre: texto = nombre_firma_ir(nodo.valor)
     sea tipo: cualquiera = contexto.programa_ir.tipos[indice_tipo]
-    afirmar(
-        longitud(inicializador.hijos) == longitud(tipo.campos),
-        "CFLOW1002: '" + tipo.nombre + "' requiere " +
-            a_texto(longitud(tipo.campos)) + " campos"
-    )
     agregar(contexto.instancias, InstanciaObjetoCore(nombre, tipo.nombre))
+    sea tipo_ast: cualquiera = nodo_tipo_ast_core(contexto, tipo.nombre)
+    sea indice_constructor: numero = indice_metodo_ast_tipo_core(tipo_ast, "crear")
+    sea constructor: cualquiera = tipo_ast
+    si (indice_constructor >= 0) {
+        constructor = tipo_ast.hijos[indice_constructor]
+        afirmar(
+            longitud(inicializador.hijos) + 1 == longitud(constructor.hijos),
+            "CFLOW1011: constructor de '" + tipo.nombre +
+                "' recibió una cantidad de argumentos inválida"
+        )
+    } sino {
+        afirmar(
+            longitud(inicializador.hijos) == longitud(tipo.campos),
+            "CFLOW1002: '" + tipo.nombre + "' requiere " +
+                a_texto(longitud(tipo.campos)) + " campos"
+        )
+    }
     sea indice: numero = 0
     mientras (indice < longitud(tipo.campos)) {
         sea campo: cualquiera = tipo.campos[indice]
+        sea valor_campo: cualquiera = nodo_ast_core("Numero", "0", nodo.linea)
+        si (indice_constructor >= 0) {
+            sea bloque_constructor: cualquiera =
+                constructor.hijos[longitud(constructor.hijos) - 1]
+            sea encontrado: booleano = falso
+            sea sentencia: numero = 0
+            mientras (sentencia < longitud(bloque_constructor.hijos)) {
+                sea candidato: cualquiera = bloque_constructor.hijos[sentencia]
+                si (candidato.tipo == "Asignacion" y
+                    candidato.hijos[0].tipo == "Miembro" y
+                    candidato.hijos[0].valor == campo.nombre y
+                    candidato.hijos[0].hijos[0].tipo == "Identificador" y
+                    candidato.hijos[0].hijos[0].valor == "este") {
+                    valor_campo = sustituir_invocacion_metodo_core(
+                        candidato.hijos[1], contexto, tipo, nombre,
+                        constructor, inicializador.hijos
+                    )
+                    encontrado = verdadero
+                }
+                sentencia = sentencia + 1
+            }
+            afirmar(
+                encontrado,
+                "CFLOW1012: constructor no inicializa '" +
+                    tipo.nombre + "." + campo.nombre + "'"
+            )
+        } sino {
+            valor_campo = inicializador.hijos[indice]
+        }
         agregar(resultado, nodo_ast_core_con_hijos(
             "Declaracion",
             nombre_campo_bajado_core(nombre, campo.nombre) + ":" + campo.tipo,
             nodo.linea,
-            [bajar_expresion_objetos_core(inicializador.hijos[indice], contexto)]
+            [bajar_expresion_objetos_core(valor_campo, contexto)]
         ))
         indice = indice + 1
     }
@@ -363,6 +415,26 @@ funcion bajar_objetos_core(programa: cualquiera): cualquiera {
             }
         }
         indice = indice + 1
+    }
+    sea instancia: numero = longitud(contexto.instancias) - 1
+    mientras (instancia >= 0) {
+        sea registro: cualquiera = contexto.instancias[instancia]
+        sea tipo_ast: cualquiera = nodo_tipo_ast_core(contexto, registro.tipo)
+        si (indice_metodo_ast_tipo_core(tipo_ast, "destruir") >= 0) {
+            sea llamada_destructor: cualquiera = nodo_ast_core_con_hijos(
+                "LlamadaMetodo", "destruir", 0,
+                [nodo_ast_core("Identificador", registro.nombre, 0)]
+            )
+            sea destruccion: lista = expandir_invocacion_mutable_core(
+                llamada_destructor, contexto
+            )
+            sea paso: numero = 0
+            mientras (paso < longitud(destruccion)) {
+                agregar(salida, destruccion[paso])
+                paso = paso + 1
+            }
+        }
+        instancia = instancia - 1
     }
     retornar nodo_ast_core_con_hijos("Programa", "", 1, salida)
 }

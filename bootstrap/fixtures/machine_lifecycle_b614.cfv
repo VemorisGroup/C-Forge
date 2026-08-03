@@ -1,0 +1,18 @@
+clase Recurso {
+    campo valor: numero
+
+    metodo crear(base: numero) {
+        este.valor = base * 2
+    }
+
+    metodo destruir() {
+        mostrar("C-FORGE-B6.14-DESTRUCTOR-OK")
+    }
+}
+
+sea recurso: Recurso = Recurso(21)
+si (recurso.valor == 42) {
+    mostrar("C-FORGE-B6.14-CONSTRUCTOR-OK")
+} sino {
+    mostrar("C-FORGE-B6.14-CONSTRUCTOR-FAIL")
+}

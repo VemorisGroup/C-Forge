@@ -254,6 +254,12 @@ backend-core-check:
 		bootstrap/fixtures/machine_mutable_methods_b613.cfv -o "$$dir/mutables.exe" >/dev/null; \
 	env PATH=/nonexistent "$$dir/elf-core" \
 		bootstrap/fixtures/machine_mutable_methods_b613.cfv -o "$$dir/mutables-elf" >/dev/null; \
+	env PATH=/nonexistent "$$dir/macho-core" \
+		bootstrap/fixtures/machine_lifecycle_b614.cfv -o "$$dir/ciclo-macho" >/dev/null; \
+	env PATH=/nonexistent "$$dir/pe-core" \
+		bootstrap/fixtures/machine_lifecycle_b614.cfv -o "$$dir/ciclo.exe" >/dev/null; \
+	env PATH=/nonexistent "$$dir/elf-core" \
+		bootstrap/fixtures/machine_lifecycle_b614.cfv -o "$$dir/ciclo-elf" >/dev/null; \
 	cmp "$$dir/uno-macho" "$$dir/dos-macho"; \
 	cmp "$$dir/uno.exe" "$$dir/dos.exe"; \
 	cmp "$$dir/uno-elf" "$$dir/dos-elf"; \
@@ -269,19 +275,24 @@ backend-core-check:
 	file "$$dir/mutables-macho" | grep -q "Mach-O 64-bit executable arm64"; \
 	file "$$dir/mutables.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/mutables-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
+	file "$$dir/ciclo-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/ciclo.exe" | grep -q "PE32+ executable.*x86-64"; \
+	file "$$dir/ciclo-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
 	if [ "$(UNAME)" = "Darwin" ] && [ "$(ARCH)" = "arm64" ]; then \
 		test "$$($$dir/uno-macho)" = "C-FORGE-B6.7-OK"; \
 		test "$$($$dir/objetos-macho)" = "C-FORGE-B6.11-OBJECT-OK"; \
 		test "$$($$dir/metodos-macho)" = "C-FORGE-B6.12-METHOD-OK"; \
 		test "$$($$dir/mutables-macho)" = "C-FORGE-B6.13-MUTABLE-OK"; \
+		test "$$($$dir/ciclo-macho)" = "$$(printf 'C-FORGE-B6.14-CONSTRUCTOR-OK\nC-FORGE-B6.14-DESTRUCTOR-OK')"; \
 	fi; \
 	if [ "$(UNAME)" = "Linux" ] && [ "$(ARCH)" = "x86_64" ]; then \
 		test "$$($$dir/uno-elf)" = "C-FORGE-B6.7-OK"; \
 		test "$$($$dir/objetos-elf)" = "C-FORGE-B6.11-OBJECT-OK"; \
 		test "$$($$dir/metodos-elf)" = "C-FORGE-B6.12-METHOD-OK"; \
 		test "$$($$dir/mutables-elf)" = "C-FORGE-B6.13-MUTABLE-OK"; \
+		test "$$($$dir/ciclo-elf)" = "$$(printf 'C-FORGE-B6.14-CONSTRUCTOR-OK\nC-FORGE-B6.14-DESTRUCTOR-OK')"; \
 	fi; \
-	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.13 con métodos mutables"
+	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.14 con ciclo de vida"
 
 ## Verificar el IR común de objetos que consumirán los tres backends.
 ir-core-check:

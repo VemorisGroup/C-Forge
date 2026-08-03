@@ -157,8 +157,10 @@ Esa representación ya alimenta los emisores Mach-O ARM64, ELF x64 y PE x64:
 el gate construye el mismo programa de objetos en los tres formatos y ejecuta
 el binario compatible con el anfitrión. B6.12 añade métodos de instancia y la
 referencia `este`; B6.13 incorpora métodos mutables mediante expansión segura
-de escrituras sobre la instancia. Constructores personalizados, destructores
-e interfaces siguen en progreso.
+de escrituras sobre la instancia. B6.14 incorpora el método reservado `crear`
+como constructor y `destruir` como finalizador determinista; las instancias se
+destruyen en orden inverso al terminar el ámbito superior. Interfaces y
+destrucción de ámbitos anidados siguen en progreso.
 
 No se anunciará compatibilidad total con una plataforma hasta que instalación,
 ejecución, pruebas y desinstalación estén verificadas en ella.
