@@ -785,6 +785,14 @@ funcion clase_parser_core(estado: cualquiera): cualquiera {
 }
 
 funcion declaracion_superior_parser_core(estado: cualquiera): cualquiera {
+    si (tomar_lexema_core(estado, "importar")) {
+        sea palabra: cualquiera = token_anterior_core(estado)
+        sea ruta: cualquiera = requerir_tipo_core(
+            estado, "STRING", "se esperaba la ruta del módulo"
+        )
+        tomar_lexema_core(estado, ";")
+        retornar nodo_ast_core("Importar", ruta.lexema, palabra.linea)
+    }
     si (comprobar_lexema_core(estado, "interfaz")) {
         retornar interfaz_parser_core(estado)
     }
@@ -1585,6 +1593,112 @@ funcion bajar_objetos_core(programa: cualquiera): cualquiera {
         instancia = instancia - 1
     }
     retornar nodo_ast_core_con_hijos("Programa", "", 1, salida)
+}
+
+// C-Forge Core Modules 1: resolución recursiva de módulos .cfv.
+estructura ContextoModulosCore {
+    cargando: lista
+    cargados: lista
+}
+
+funcion indice_texto_modulo_core(valores: lista, buscado: texto): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(valores)) {
+        si (valores[indice] == buscado) { retornar indice }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion ruta_sin_comillas_core(valor: texto): texto {
+    afirmar(longitud(valor) >= 2, "CFMOD1001: ruta de módulo inválida")
+    sea salida: texto = ""
+    sea indice: numero = 1
+    mientras (indice + 1 < longitud(valor)) {
+        salida = salida + valor[indice]
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion directorio_modulo_core(ruta: texto): texto {
+    sea ultima: numero = -1
+    sea indice: numero = 0
+    mientras (indice < longitud(ruta)) {
+        si (ruta[indice] == "/") { ultima = indice }
+        indice = indice + 1
+    }
+    si (ultima < 0) { retornar "." }
+    sea salida: texto = ""
+    indice = 0
+    mientras (indice < ultima) {
+        salida = salida + ruta[indice]
+        indice = indice + 1
+    }
+    si (salida == "") { retornar "/" }
+    retornar salida
+}
+
+funcion unir_ruta_modulo_core(base: texto, relativa: texto): texto {
+    si (longitud(relativa) > 0 y relativa[0] == "/") { retornar relativa }
+    si (base == "/") { retornar "/" + relativa }
+    retornar base + "/" + relativa
+}
+
+funcion retirar_ultimo_modulo_core(valores: lista): lista {
+    sea salida: lista = []
+    sea indice: numero = 0
+    mientras (indice + 1 < longitud(valores)) {
+        agregar(salida, valores[indice])
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion resolver_archivo_modulo_core(
+    ruta: texto,
+    contexto: cualquiera,
+    salida: lista
+) {
+    si (indice_texto_modulo_core(contexto.cargados, ruta) >= 0) { retornar 0 }
+    afirmar(
+        indice_texto_modulo_core(contexto.cargando, ruta) < 0,
+        "CFMOD1002: ciclo de importación detectado en '" + ruta + "'"
+    )
+    agregar(contexto.cargando, ruta)
+    sea fuente: texto = leer_archivo(ruta)
+    sea programa: cualquiera = parsear_tokens_core(tokenizar_core(fuente))
+    sea directorio: texto = directorio_modulo_core(ruta)
+    sea indice: numero = 0
+    mientras (indice < longitud(programa.hijos)) {
+        sea nodo: cualquiera = programa.hijos[indice]
+        si (nodo.tipo == "Importar") {
+            sea relativa: texto = ruta_sin_comillas_core(nodo.valor)
+            afirmar(
+                longitud(relativa) >= 4 y
+                relativa[longitud(relativa) - 4] == "." y
+                relativa[longitud(relativa) - 3] == "c" y
+                relativa[longitud(relativa) - 2] == "f" y
+                relativa[longitud(relativa) - 1] == "v",
+                "CFMOD1003: los módulos deben usar extensión .cfv"
+            )
+            resolver_archivo_modulo_core(
+                unir_ruta_modulo_core(directorio, relativa), contexto, salida
+            )
+        } sino {
+            agregar(salida, nodo)
+        }
+        indice = indice + 1
+    }
+    contexto.cargando = retirar_ultimo_modulo_core(contexto.cargando)
+    agregar(contexto.cargados, ruta)
+}
+
+funcion resolver_programa_modular_core(ruta: texto): cualquiera {
+    sea salida: lista = []
+    sea contexto: cualquiera = ContextoModulosCore([], [])
+    resolver_archivo_modulo_core(ruta, contexto, salida)
+    retornar nodo_ast_core_con_hijos("Programa", "Core-Modulos-1", 1, salida)
 }
 // C-Forge B6.5 — emisor directo PE32+/x86-64 para Windows.
 // Genera cabeceras, secciones, importaciones y código máquina sin invocar
@@ -2893,9 +3007,7 @@ funcion empaquetar_core_pe(codigo: lista, datos: lista): lista {
     retornar imagen
 }
 
-funcion compilar_core_pe(fuente: texto): lista {
-    sea tokens: lista = tokenizar_core(fuente)
-    sea programa_original: cualquiera = parsear_tokens_core(tokens)
+funcion compilar_programa_core_pe(programa_original: cualquiera): lista {
     sea programa: cualquiera = bajar_objetos_core(programa_original)
     sea contexto: cualquiera =
         ContextoPECore([], [], [], 0, [], "", [], [], 0)
@@ -2999,14 +3111,22 @@ funcion compilar_core_pe(fuente: texto): lista {
     retornar empaquetar_core_pe(codigo, datos_core_pe(contexto))
 }
 
+funcion compilar_core_pe(fuente: texto): lista {
+    retornar compilar_programa_core_pe(
+        parsear_tokens_core(tokenizar_core(fuente))
+    )
+}
+
 sea argumentos_core_pe: lista = argumentos_programa()
 afirmar(
     longitud(argumentos_core_pe) == 4,
     "uso: cforge-pe-core archivo.cfv -o programa.exe"
 )
 afirmar(argumentos_core_pe[2] == "-o", "se esperaba -o")
-sea fuente_core_pe: texto = leer_archivo(argumentos_core_pe[1])
-sea ejecutable_core_pe: lista = compilar_core_pe(fuente_core_pe)
+sea programa_core_pe: cualquiera =
+    resolver_programa_modular_core(argumentos_core_pe[1])
+sea ejecutable_core_pe: lista =
+    compilar_programa_core_pe(programa_core_pe)
 afirmar(
     escribir_bytes(argumentos_core_pe[3], ejecutable_core_pe),
     "no se pudo escribir PE Core x64"

@@ -143,7 +143,7 @@ para conocer el estado verificable.
 - Windows: backend experimental; falta validación física completa.
 
 Los emisores mínimos Mach-O ARM64, ELF x64 y PE x64 aceptan el programa
-`mostrar("texto")`. Los tres incluyen también variantes Core B6.8 para
+`mostrar("texto")`. Los tres incluyen también variantes Core B6.16 para
 variables, aritmética, control, funciones, listas y texto dinámico. El gate comprueba sus cabeceras y ejecuta
 únicamente el formato compatible con el sistema anfitrión. Todavía no son
 backends completos del lenguaje.
@@ -165,6 +165,11 @@ B6.15 añade `interfaz` y `implementa`: el IR verifica la existencia del
 contrato, sus métodos, retornos y parámetros antes de cualquier emisión.
 El mismo programa válido se genera para Mach-O, ELF y PE; un contrato
 incompleto es rechazado por el gate.
+B6.16 permite separar un programa Core en archivos `.cfv` mediante
+`importar "ruta.cfv"`. Las rutas son relativas al módulo que importa, cada
+archivo se carga una sola vez y los ciclos se rechazan antes de emitir código.
+El ejemplo modular divide una simulación de videojuego entre entidades, reglas
+y programa principal y genera los tres formatos nativos.
 
 No se anunciará compatibilidad total con una plataforma hasta que instalación,
 ejecución, pruebas y desinstalación estén verificadas en ella.

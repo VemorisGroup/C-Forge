@@ -1,0 +1,17 @@
+importar "entidades.cfv"
+importar "reglas.cfv"
+
+sea jugador: Jugador = Jugador(5, 0)
+sea recompensa: numero = calcular_recompensa(7, 6)
+jugador.actualizar(recompensa)
+sea resultado: numero = jugador.puntaje
+
+si (resultado == 42) {
+    si (jugador.energia == 4) {
+        mostrar("C-FORGE-B6.16-MODULES-OK")
+    } sino {
+        mostrar("C-FORGE-B6.16-MODULES-FAIL")
+    }
+} sino {
+    mostrar("C-FORGE-B6.16-MODULES-FAIL")
+}

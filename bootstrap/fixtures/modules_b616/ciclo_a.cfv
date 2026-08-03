@@ -1,0 +1,2 @@
+importar "ciclo_b.cfv"
+mostrar("NO-DEBE-COMPILAR")

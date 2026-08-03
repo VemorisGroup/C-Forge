@@ -1047,9 +1047,7 @@ funcion empaquetar_core_pe(codigo: lista, datos: lista): lista {
     retornar imagen
 }
 
-funcion compilar_core_pe(fuente: texto): lista {
-    sea tokens: lista = tokenizar_core(fuente)
-    sea programa_original: cualquiera = parsear_tokens_core(tokens)
+funcion compilar_programa_core_pe(programa_original: cualquiera): lista {
     sea programa: cualquiera = bajar_objetos_core(programa_original)
     sea contexto: cualquiera =
         ContextoPECore([], [], [], 0, [], "", [], [], 0)
@@ -1153,14 +1151,22 @@ funcion compilar_core_pe(fuente: texto): lista {
     retornar empaquetar_core_pe(codigo, datos_core_pe(contexto))
 }
 
+funcion compilar_core_pe(fuente: texto): lista {
+    retornar compilar_programa_core_pe(
+        parsear_tokens_core(tokenizar_core(fuente))
+    )
+}
+
 sea argumentos_core_pe: lista = argumentos_programa()
 afirmar(
     longitud(argumentos_core_pe) == 4,
     "uso: cforge-pe-core archivo.cfv -o programa.exe"
 )
 afirmar(argumentos_core_pe[2] == "-o", "se esperaba -o")
-sea fuente_core_pe: texto = leer_archivo(argumentos_core_pe[1])
-sea ejecutable_core_pe: lista = compilar_core_pe(fuente_core_pe)
+sea programa_core_pe: cualquiera =
+    resolver_programa_modular_core(argumentos_core_pe[1])
+sea ejecutable_core_pe: lista =
+    compilar_programa_core_pe(programa_core_pe)
 afirmar(
     escribir_bytes(argumentos_core_pe[3], ejecutable_core_pe),
     "no se pudo escribir PE Core x64"

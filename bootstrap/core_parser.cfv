@@ -593,6 +593,14 @@ funcion clase_parser_core(estado: cualquiera): cualquiera {
 }
 
 funcion declaracion_superior_parser_core(estado: cualquiera): cualquiera {
+    si (tomar_lexema_core(estado, "importar")) {
+        sea palabra: cualquiera = token_anterior_core(estado)
+        sea ruta: cualquiera = requerir_tipo_core(
+            estado, "STRING", "se esperaba la ruta del módulo"
+        )
+        tomar_lexema_core(estado, ";")
+        retornar nodo_ast_core("Importar", ruta.lexema, palabra.linea)
+    }
     si (comprobar_lexema_core(estado, "interfaz")) {
         retornar interfaz_parser_core(estado)
     }

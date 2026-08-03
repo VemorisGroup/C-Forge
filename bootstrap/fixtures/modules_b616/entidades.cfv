@@ -1,0 +1,14 @@
+clase Jugador {
+    campo energia: numero
+    campo puntaje: numero
+
+    metodo crear(energia_inicial: numero, puntaje_inicial: numero) {
+        este.energia = energia_inicial
+        este.puntaje = puntaje_inicial
+    }
+
+    metodo actualizar(puntos: numero) {
+        este.puntaje = este.puntaje + puntos
+        este.energia = este.energia - 1
+    }
+}

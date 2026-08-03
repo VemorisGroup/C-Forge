@@ -1,0 +1,3 @@
+funcion calcular_recompensa(base: numero, multiplicador: numero): numero {
+    retornar base * multiplicador
+}

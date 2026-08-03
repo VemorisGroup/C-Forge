@@ -1,0 +1,105 @@
+// C-Forge Core Modules 1: resolución recursiva de módulos .cfv.
+estructura ContextoModulosCore {
+    cargando: lista
+    cargados: lista
+}
+
+funcion indice_texto_modulo_core(valores: lista, buscado: texto): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(valores)) {
+        si (valores[indice] == buscado) { retornar indice }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion ruta_sin_comillas_core(valor: texto): texto {
+    afirmar(longitud(valor) >= 2, "CFMOD1001: ruta de módulo inválida")
+    sea salida: texto = ""
+    sea indice: numero = 1
+    mientras (indice + 1 < longitud(valor)) {
+        salida = salida + valor[indice]
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion directorio_modulo_core(ruta: texto): texto {
+    sea ultima: numero = -1
+    sea indice: numero = 0
+    mientras (indice < longitud(ruta)) {
+        si (ruta[indice] == "/") { ultima = indice }
+        indice = indice + 1
+    }
+    si (ultima < 0) { retornar "." }
+    sea salida: texto = ""
+    indice = 0
+    mientras (indice < ultima) {
+        salida = salida + ruta[indice]
+        indice = indice + 1
+    }
+    si (salida == "") { retornar "/" }
+    retornar salida
+}
+
+funcion unir_ruta_modulo_core(base: texto, relativa: texto): texto {
+    si (longitud(relativa) > 0 y relativa[0] == "/") { retornar relativa }
+    si (base == "/") { retornar "/" + relativa }
+    retornar base + "/" + relativa
+}
+
+funcion retirar_ultimo_modulo_core(valores: lista): lista {
+    sea salida: lista = []
+    sea indice: numero = 0
+    mientras (indice + 1 < longitud(valores)) {
+        agregar(salida, valores[indice])
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion resolver_archivo_modulo_core(
+    ruta: texto,
+    contexto: cualquiera,
+    salida: lista
+) {
+    si (indice_texto_modulo_core(contexto.cargados, ruta) >= 0) { retornar 0 }
+    afirmar(
+        indice_texto_modulo_core(contexto.cargando, ruta) < 0,
+        "CFMOD1002: ciclo de importación detectado en '" + ruta + "'"
+    )
+    agregar(contexto.cargando, ruta)
+    sea fuente: texto = leer_archivo(ruta)
+    sea programa: cualquiera = parsear_tokens_core(tokenizar_core(fuente))
+    sea directorio: texto = directorio_modulo_core(ruta)
+    sea indice: numero = 0
+    mientras (indice < longitud(programa.hijos)) {
+        sea nodo: cualquiera = programa.hijos[indice]
+        si (nodo.tipo == "Importar") {
+            sea relativa: texto = ruta_sin_comillas_core(nodo.valor)
+            afirmar(
+                longitud(relativa) >= 4 y
+                relativa[longitud(relativa) - 4] == "." y
+                relativa[longitud(relativa) - 3] == "c" y
+                relativa[longitud(relativa) - 2] == "f" y
+                relativa[longitud(relativa) - 1] == "v",
+                "CFMOD1003: los módulos deben usar extensión .cfv"
+            )
+            resolver_archivo_modulo_core(
+                unir_ruta_modulo_core(directorio, relativa), contexto, salida
+            )
+        } sino {
+            agregar(salida, nodo)
+        }
+        indice = indice + 1
+    }
+    contexto.cargando = retirar_ultimo_modulo_core(contexto.cargando)
+    agregar(contexto.cargados, ruta)
+}
+
+funcion resolver_programa_modular_core(ruta: texto): cualquiera {
+    sea salida: lista = []
+    sea contexto: cualquiera = ContextoModulosCore([], [])
+    resolver_archivo_modulo_core(ruta, contexto, salida)
+    retornar nodo_ast_core_con_hijos("Programa", "Core-Modulos-1", 1, salida)
+}
