@@ -148,6 +148,10 @@ variables, aritmética, control, funciones, listas y texto dinámico. El gate co
 únicamente el formato compatible con el sistema anfitrión. Todavía no son
 backends completos del lenguaje.
 
+El avance B6.9 comienza con `bootstrap/core_ir.cfv`: un IR común escrito en
+C-Forge que fija layouts reproducibles para estructuras, clases, campos y
+métodos antes de bajarlos a los tres formatos nativos.
+
 No se anunciará compatibilidad total con una plataforma hasta que instalación,
 ejecución, pruebas y desinstalación estén verificadas en ella.
 

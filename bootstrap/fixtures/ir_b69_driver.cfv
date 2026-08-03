@@ -1,0 +1,32 @@
+sea campo_x = nodo_ast_core("Campo", "x:numero", 1)
+sea campo_y = nodo_ast_core("Campo", "y:numero", 2)
+sea punto = nodo_ast_core_con_hijos(
+    "Estructura", "Punto", 1, [campo_x, campo_y]
+)
+
+sea parametro = nodo_ast_core("Parametro", "cantidad:numero", 4)
+sea cuerpo = nodo_ast_core_con_hijos("Bloque", "bloque", 4, [])
+sea metodo = nodo_ast_core_con_hijos(
+    "Metodo", "incrementar:numero", 4, [parametro, cuerpo]
+)
+sea campo_valor = nodo_ast_core("Campo", "valor:numero", 3)
+sea contador = nodo_ast_core_con_hijos(
+    "Clase", "Contador", 3, [campo_valor, metodo]
+)
+sea programa = nodo_ast_core_con_hijos(
+    "Programa", "Core-IR", 1, [punto, contador]
+)
+
+sea ir = construir_programa_ir(programa)
+afirmar(longitud(ir.errores) == 0, "IR no debe contener errores")
+afirmar(longitud(ir.tipos) == 2, "IR debe contener dos tipos")
+afirmar(ir.tipos[0].tamano == 16, "Punto debe ocupar 16 bytes")
+afirmar(
+    campo_tipo_ir(ir.tipos[0], "y").desplazamiento == 8,
+    "Punto.y debe comenzar en el byte 8"
+)
+afirmar(
+    ir.tipos[1].metodos[0].propietario == "Contador",
+    "el método debe conservar su propietario"
+)
+mostrar(ir_canonico(ir))

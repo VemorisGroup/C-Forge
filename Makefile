@@ -36,7 +36,7 @@ endif
 
 .PHONY: all build debug release install uninstall test check stdlib-load-check \
 	cli-check malformed-check sanitize-check backend-check install-check \
-	bootstrap-check backend-core-check release-check clean help
+	bootstrap-check backend-core-check ir-core-check release-check clean help
 
 ## Compilar (default)
 all: build
@@ -250,9 +250,24 @@ backend-core-check:
 	fi; \
 	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.8 sin toolchain externa"
 
+## Verificar el IR común de objetos que consumirán los tres backends.
+ir-core-check:
+	@set -e; dir=$$(mktemp -d /tmp/cforge-ir-core.XXXXXX); \
+	awk 'FNR==1 { print "" } { print }' \
+		bootstrap/core_ast.cfv \
+		bootstrap/core_ir.cfv \
+		bootstrap/fixtures/ir_b69_driver.cfv > "$$dir/ir.cfv"; \
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -Wpedantic \
+		bootstrap/stage0/cforge_bootstrap.cpp -o "$$dir/stage0"; \
+	"$$dir/stage0" "$$dir/ir.cfv" -o "$$dir/ir-test" >/dev/null; \
+	test "$$($$dir/ir-test)" = \
+		'CFIR1[estructura Punto size=16 align=8 {x:numero@0,y:numero@8};clase Contador size=8 align=8 {valor:numero@0}]'; \
+	echo "  ✓ C-Forge Core IR 1 determinista verificado"
+
 ## Gate único exigido antes de publicar una versión estable.
 release-check: clean build check test stdlib-load-check cli-check malformed-check \
-	backend-check install-check bootstrap-check backend-core-check sanitize-check
+	backend-check install-check bootstrap-check backend-core-check ir-core-check \
+	sanitize-check
 	@echo ""
 	@echo "  ✓ GATE DE ESTABILIDAD C-FORGE COMPLETO"
 
@@ -289,6 +304,7 @@ help:
 	@echo "  make install-check Probar instalación aislada"
 	@echo "  make bootstrap-check Verificar autoalojamiento Stage 1→2→3"
 	@echo "  make backend-core-check Verificar backends Core B6.8 sin toolchain"
+	@echo "  make ir-core-check Verificar el IR común de objetos B6.9"
 	@echo "  make release-check Ejecutar todos los gates de estabilidad"
 	@echo "  make bench        Benchmark fib(30)"
 	@echo "  make clean        Limpiar artefactos"

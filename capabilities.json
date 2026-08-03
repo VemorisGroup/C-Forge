@@ -117,6 +117,7 @@
         "bootstrap/core_parser.cfv",
         "bootstrap/core_semantics.cfv",
         "bootstrap/core_emitter.cfv",
+        "bootstrap/core_ir.cfv",
         "bootstrap/stage1/cforge_stage1.cfv",
         "Makefile",
         "docs/BOOTSTRAP.md"
