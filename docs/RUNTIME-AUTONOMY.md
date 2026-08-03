@@ -69,6 +69,9 @@ instancia y se prueban en los tres formatos sin toolchain externa.
 B6.14 reconoce `crear` como constructor personalizado, exige inicialización de
 todos los campos y programa `destruir` automáticamente en orden LIFO al final
 del ámbito superior. Los ámbitos anidados todavía permanecen en progreso.
+B6.15 incorpora contratos nominales: las clases que usan `implementa` deben
+proveer todos los métodos con retorno y parámetros compatibles. El gate cubre
+tanto aceptación válida como rechazo de una implementación incompleta.
 
 ## Criterio para declarar autonomía completa
 

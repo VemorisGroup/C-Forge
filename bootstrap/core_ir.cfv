@@ -179,7 +179,7 @@ funcion construir_tipo_ir(
                 desplazamiento = desplazamiento + tamano
             }
         }
-        si (miembro.tipo == "Metodo") {
+        si (miembro.tipo == "Metodo" o miembro.tipo == "MetodoContrato") {
             sea nombre_metodo: texto = nombre_firma_ir(miembro.valor)
             si (indice_metodo_ir(metodos, nombre_metodo) >= 0) {
                 agregar(
@@ -199,6 +199,9 @@ funcion construir_tipo_ir(
                 )
             }
         }
+        si (miembro.tipo == "Implementa") {
+            agregar(interfaces, miembro.valor)
+        }
         indice = indice + 1
     }
 
@@ -206,6 +209,7 @@ funcion construir_tipo_ir(
     si (nodo.tipo == "Clase") {
         clase_tipo = "clase"
     }
+    si (nodo.tipo == "Interfaz") { clase_tipo = "interfaz" }
     retornar TipoIRCore(
         nodo.valor,
         clase_tipo,
@@ -224,7 +228,8 @@ funcion construir_programa_ir(programa: cualquiera): cualquiera {
     sea indice: numero = 0
     mientras (indice < longitud(declaraciones)) {
         sea nodo: cualquiera = declaraciones[indice]
-        si (nodo.tipo == "Estructura" o nodo.tipo == "Clase") {
+        si (nodo.tipo == "Estructura" o nodo.tipo == "Clase" o
+            nodo.tipo == "Interfaz") {
             si (indice_tipo_ir(tipos, nodo.valor) >= 0) {
                 agregar(
                     errores,
@@ -235,6 +240,53 @@ funcion construir_programa_ir(programa: cualquiera): cualquiera {
             }
         }
         indice = indice + 1
+    }
+    sea indice_clase: numero = 0
+    mientras (indice_clase < longitud(tipos)) {
+        sea clase: cualquiera = tipos[indice_clase]
+        sea indice_interfaz: numero = 0
+        mientras (indice_interfaz < longitud(clase.interfaces)) {
+            sea nombre_interfaz: texto = clase.interfaces[indice_interfaz]
+            sea posicion_interfaz: numero = indice_tipo_ir(tipos, nombre_interfaz)
+            si (posicion_interfaz < 0 o tipos[posicion_interfaz].clase != "interfaz") {
+                agregar(errores, "CFIR1005: interfaz desconocida '" + nombre_interfaz + "'")
+            } sino {
+                sea contrato: cualquiera = tipos[posicion_interfaz]
+                sea indice_requisito: numero = 0
+                mientras (indice_requisito < longitud(contrato.metodos)) {
+                    sea requisito: cualquiera = contrato.metodos[indice_requisito]
+                    sea posicion_metodo: numero = indice_metodo_ir(
+                        clase.metodos, requisito.nombre
+                    )
+                    si (posicion_metodo < 0) {
+                        agregar(errores, "CFIR1006: '" + clase.nombre +
+                            "' no implementa '" + nombre_interfaz + "." +
+                            requisito.nombre + "'")
+                    } sino {
+                        sea implementado: cualquiera = clase.metodos[posicion_metodo]
+                        si (implementado.retorno != requisito.retorno o
+                            longitud(implementado.parametros) !=
+                                longitud(requisito.parametros)) {
+                            agregar(errores, "CFIR1007: firma incompatible en '" +
+                                clase.nombre + "." + requisito.nombre + "'")
+                        } sino {
+                            sea parametro: numero = 0
+                            mientras (parametro < longitud(requisito.parametros)) {
+                                si (implementado.parametros[parametro] !=
+                                    requisito.parametros[parametro]) {
+                                    agregar(errores, "CFIR1007: firma incompatible en '" +
+                                        clase.nombre + "." + requisito.nombre + "'")
+                                }
+                                parametro = parametro + 1
+                            }
+                        }
+                    }
+                    indice_requisito = indice_requisito + 1
+                }
+            }
+            indice_interfaz = indice_interfaz + 1
+        }
+        indice_clase = indice_clase + 1
     }
     retornar ProgramaIRCore(tipos, errores)
 }

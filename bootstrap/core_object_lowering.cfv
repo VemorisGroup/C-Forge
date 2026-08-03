@@ -108,7 +108,8 @@ funcion nodo_tipo_ast_core(contexto: cualquiera, nombre: texto): cualquiera {
     sea indice: numero = 0
     mientras (indice < longitud(contexto.programa_ast.hijos)) {
         sea nodo: cualquiera = contexto.programa_ast.hijos[indice]
-        si ((nodo.tipo == "Clase" o nodo.tipo == "Estructura") y
+        si ((nodo.tipo == "Clase" o nodo.tipo == "Estructura" o
+            nodo.tipo == "Interfaz") y
             nodo.valor == nombre) { retornar nodo }
         indice = indice + 1
     }
@@ -406,7 +407,8 @@ funcion bajar_objetos_core(programa: cualquiera): cualquiera {
     indice = 0
     mientras (indice < longitud(programa.hijos)) {
         sea nodo: cualquiera = programa.hijos[indice]
-        si (nodo.tipo != "Estructura" y nodo.tipo != "Clase") {
+        si (nodo.tipo != "Estructura" y nodo.tipo != "Clase" y
+            nodo.tipo != "Interfaz") {
             sea bajadas: lista = bajar_sentencia_objetos_core(nodo, contexto)
             sea posicion: numero = 0
             mientras (posicion < longitud(bajadas)) {

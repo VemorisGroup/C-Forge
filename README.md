@@ -161,6 +161,10 @@ de escrituras sobre la instancia. B6.14 incorpora el método reservado `crear`
 como constructor y `destruir` como finalizador determinista; las instancias se
 destruyen en orden inverso al terminar el ámbito superior. Interfaces y
 destrucción de ámbitos anidados siguen en progreso.
+B6.15 añade `interfaz` y `implementa`: el IR verifica la existencia del
+contrato, sus métodos, retornos y parámetros antes de cualquier emisión.
+El mismo programa válido se genera para Mach-O, ELF y PE; un contrato
+incompleto es rechazado por el gate.
 
 No se anunciará compatibilidad total con una plataforma hasta que instalación,
 ejecución, pruebas y desinstalación estén verificadas en ella.

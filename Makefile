@@ -260,6 +260,17 @@ backend-core-check:
 		bootstrap/fixtures/machine_lifecycle_b614.cfv -o "$$dir/ciclo.exe" >/dev/null; \
 	env PATH=/nonexistent "$$dir/elf-core" \
 		bootstrap/fixtures/machine_lifecycle_b614.cfv -o "$$dir/ciclo-elf" >/dev/null; \
+	env PATH=/nonexistent "$$dir/macho-core" \
+		bootstrap/fixtures/machine_interfaces_b615.cfv -o "$$dir/interfaz-macho" >/dev/null; \
+	env PATH=/nonexistent "$$dir/pe-core" \
+		bootstrap/fixtures/machine_interfaces_b615.cfv -o "$$dir/interfaz.exe" >/dev/null; \
+	env PATH=/nonexistent "$$dir/elf-core" \
+		bootstrap/fixtures/machine_interfaces_b615.cfv -o "$$dir/interfaz-elf" >/dev/null; \
+	if env PATH=/nonexistent "$$dir/macho-core" \
+		bootstrap/fixtures/machine_interfaces_invalid_b615.cfv \
+		-o "$$dir/interfaz-invalida" >/dev/null 2>&1; then \
+		echo "la interfaz incompleta fue aceptada" >&2; exit 1; \
+	fi; \
 	cmp "$$dir/uno-macho" "$$dir/dos-macho"; \
 	cmp "$$dir/uno.exe" "$$dir/dos.exe"; \
 	cmp "$$dir/uno-elf" "$$dir/dos-elf"; \
@@ -278,12 +289,16 @@ backend-core-check:
 	file "$$dir/ciclo-macho" | grep -q "Mach-O 64-bit executable arm64"; \
 	file "$$dir/ciclo.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/ciclo-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
+	file "$$dir/interfaz-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/interfaz.exe" | grep -q "PE32+ executable.*x86-64"; \
+	file "$$dir/interfaz-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
 	if [ "$(UNAME)" = "Darwin" ] && [ "$(ARCH)" = "arm64" ]; then \
 		test "$$($$dir/uno-macho)" = "C-FORGE-B6.7-OK"; \
 		test "$$($$dir/objetos-macho)" = "C-FORGE-B6.11-OBJECT-OK"; \
 		test "$$($$dir/metodos-macho)" = "C-FORGE-B6.12-METHOD-OK"; \
 		test "$$($$dir/mutables-macho)" = "C-FORGE-B6.13-MUTABLE-OK"; \
 		test "$$($$dir/ciclo-macho)" = "$$(printf 'C-FORGE-B6.14-CONSTRUCTOR-OK\nC-FORGE-B6.14-DESTRUCTOR-OK')"; \
+		test "$$($$dir/interfaz-macho)" = "C-FORGE-B6.15-INTERFACE-OK"; \
 	fi; \
 	if [ "$(UNAME)" = "Linux" ] && [ "$(ARCH)" = "x86_64" ]; then \
 		test "$$($$dir/uno-elf)" = "C-FORGE-B6.7-OK"; \
@@ -291,8 +306,9 @@ backend-core-check:
 		test "$$($$dir/metodos-elf)" = "C-FORGE-B6.12-METHOD-OK"; \
 		test "$$($$dir/mutables-elf)" = "C-FORGE-B6.13-MUTABLE-OK"; \
 		test "$$($$dir/ciclo-elf)" = "$$(printf 'C-FORGE-B6.14-CONSTRUCTOR-OK\nC-FORGE-B6.14-DESTRUCTOR-OK')"; \
+		test "$$($$dir/interfaz-elf)" = "C-FORGE-B6.15-INTERFACE-OK"; \
 	fi; \
-	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.14 con ciclo de vida"
+	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.15 con contratos"
 
 ## Verificar el IR común de objetos que consumirán los tres backends.
 ir-core-check:

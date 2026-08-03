@@ -506,6 +506,41 @@ funcion estructura_parser_core(estado: cualquiera): cualquiera {
     )
 }
 
+funcion metodo_contrato_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "metodo", "se esperaba 'metodo'"
+    )
+    sea nombre: cualquiera = requerir_tipo_core(
+        estado, "IDENT", "se esperaba el nombre del método"
+    )
+    sea hijos: lista = parametros_parser_core(estado)
+    sea retorno: texto = "cualquiera"
+    si (tomar_lexema_core(estado, ":")) { retorno = tipo_parser_core(estado) }
+    tomar_lexema_core(estado, ";")
+    retornar nodo_ast_core_con_hijos(
+        "MetodoContrato", nombre.lexema + ":" + retorno,
+        palabra.linea, hijos
+    )
+}
+
+funcion interfaz_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "interfaz", "se esperaba 'interfaz'"
+    )
+    sea nombre: cualquiera = requerir_tipo_core(
+        estado, "IDENT", "se esperaba el nombre de la interfaz"
+    )
+    requerir_lexema_core(estado, "{", "se esperaba '{'")
+    sea metodos: lista = []
+    mientras (no comprobar_lexema_core(estado, "}")) {
+        agregar(metodos, metodo_contrato_parser_core(estado))
+    }
+    requerir_lexema_core(estado, "}", "se esperaba '}'")
+    retornar nodo_ast_core_con_hijos(
+        "Interfaz", nombre.lexema, palabra.linea, metodos
+    )
+}
+
 funcion clase_parser_core(estado: cualquiera): cualquiera {
     sea palabra: cualquiera = requerir_lexema_core(
         estado, "clase", "se esperaba 'clase'"
@@ -513,8 +548,24 @@ funcion clase_parser_core(estado: cualquiera): cualquiera {
     sea nombre: cualquiera = requerir_tipo_core(
         estado, "IDENT", "se esperaba el nombre de la clase"
     )
-    requerir_lexema_core(estado, "{", "se esperaba '{'")
     sea miembros: lista = []
+    si (tomar_lexema_core(estado, "implementa")) {
+        sea contrato: cualquiera = requerir_tipo_core(
+            estado, "IDENT", "se esperaba una interfaz"
+        )
+        agregar(miembros, nodo_ast_core(
+            "Implementa", contrato.lexema, contrato.linea
+        ))
+        mientras (tomar_lexema_core(estado, ",")) {
+            contrato = requerir_tipo_core(
+                estado, "IDENT", "se esperaba una interfaz"
+            )
+            agregar(miembros, nodo_ast_core(
+                "Implementa", contrato.lexema, contrato.linea
+            ))
+        }
+    }
+    requerir_lexema_core(estado, "{", "se esperaba '{'")
     mientras (no comprobar_lexema_core(estado, "}")) {
         si (tomar_lexema_core(estado, "campo")) {
             sea campo: cualquiera = requerir_tipo_core(
@@ -542,6 +593,9 @@ funcion clase_parser_core(estado: cualquiera): cualquiera {
 }
 
 funcion declaracion_superior_parser_core(estado: cualquiera): cualquiera {
+    si (comprobar_lexema_core(estado, "interfaz")) {
+        retornar interfaz_parser_core(estado)
+    }
     si (comprobar_lexema_core(estado, "estructura")) {
         retornar estructura_parser_core(estado)
     }

@@ -698,6 +698,41 @@ funcion estructura_parser_core(estado: cualquiera): cualquiera {
     )
 }
 
+funcion metodo_contrato_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "metodo", "se esperaba 'metodo'"
+    )
+    sea nombre: cualquiera = requerir_tipo_core(
+        estado, "IDENT", "se esperaba el nombre del método"
+    )
+    sea hijos: lista = parametros_parser_core(estado)
+    sea retorno: texto = "cualquiera"
+    si (tomar_lexema_core(estado, ":")) { retorno = tipo_parser_core(estado) }
+    tomar_lexema_core(estado, ";")
+    retornar nodo_ast_core_con_hijos(
+        "MetodoContrato", nombre.lexema + ":" + retorno,
+        palabra.linea, hijos
+    )
+}
+
+funcion interfaz_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "interfaz", "se esperaba 'interfaz'"
+    )
+    sea nombre: cualquiera = requerir_tipo_core(
+        estado, "IDENT", "se esperaba el nombre de la interfaz"
+    )
+    requerir_lexema_core(estado, "{", "se esperaba '{'")
+    sea metodos: lista = []
+    mientras (no comprobar_lexema_core(estado, "}")) {
+        agregar(metodos, metodo_contrato_parser_core(estado))
+    }
+    requerir_lexema_core(estado, "}", "se esperaba '}'")
+    retornar nodo_ast_core_con_hijos(
+        "Interfaz", nombre.lexema, palabra.linea, metodos
+    )
+}
+
 funcion clase_parser_core(estado: cualquiera): cualquiera {
     sea palabra: cualquiera = requerir_lexema_core(
         estado, "clase", "se esperaba 'clase'"
@@ -705,8 +740,24 @@ funcion clase_parser_core(estado: cualquiera): cualquiera {
     sea nombre: cualquiera = requerir_tipo_core(
         estado, "IDENT", "se esperaba el nombre de la clase"
     )
-    requerir_lexema_core(estado, "{", "se esperaba '{'")
     sea miembros: lista = []
+    si (tomar_lexema_core(estado, "implementa")) {
+        sea contrato: cualquiera = requerir_tipo_core(
+            estado, "IDENT", "se esperaba una interfaz"
+        )
+        agregar(miembros, nodo_ast_core(
+            "Implementa", contrato.lexema, contrato.linea
+        ))
+        mientras (tomar_lexema_core(estado, ",")) {
+            contrato = requerir_tipo_core(
+                estado, "IDENT", "se esperaba una interfaz"
+            )
+            agregar(miembros, nodo_ast_core(
+                "Implementa", contrato.lexema, contrato.linea
+            ))
+        }
+    }
+    requerir_lexema_core(estado, "{", "se esperaba '{'")
     mientras (no comprobar_lexema_core(estado, "}")) {
         si (tomar_lexema_core(estado, "campo")) {
             sea campo: cualquiera = requerir_tipo_core(
@@ -734,6 +785,9 @@ funcion clase_parser_core(estado: cualquiera): cualquiera {
 }
 
 funcion declaracion_superior_parser_core(estado: cualquiera): cualquiera {
+    si (comprobar_lexema_core(estado, "interfaz")) {
+        retornar interfaz_parser_core(estado)
+    }
     si (comprobar_lexema_core(estado, "estructura")) {
         retornar estructura_parser_core(estado)
     }
@@ -943,7 +997,7 @@ funcion construir_tipo_ir(
                 desplazamiento = desplazamiento + tamano
             }
         }
-        si (miembro.tipo == "Metodo") {
+        si (miembro.tipo == "Metodo" o miembro.tipo == "MetodoContrato") {
             sea nombre_metodo: texto = nombre_firma_ir(miembro.valor)
             si (indice_metodo_ir(metodos, nombre_metodo) >= 0) {
                 agregar(
@@ -963,6 +1017,9 @@ funcion construir_tipo_ir(
                 )
             }
         }
+        si (miembro.tipo == "Implementa") {
+            agregar(interfaces, miembro.valor)
+        }
         indice = indice + 1
     }
 
@@ -970,6 +1027,7 @@ funcion construir_tipo_ir(
     si (nodo.tipo == "Clase") {
         clase_tipo = "clase"
     }
+    si (nodo.tipo == "Interfaz") { clase_tipo = "interfaz" }
     retornar TipoIRCore(
         nodo.valor,
         clase_tipo,
@@ -988,7 +1046,8 @@ funcion construir_programa_ir(programa: cualquiera): cualquiera {
     sea indice: numero = 0
     mientras (indice < longitud(declaraciones)) {
         sea nodo: cualquiera = declaraciones[indice]
-        si (nodo.tipo == "Estructura" o nodo.tipo == "Clase") {
+        si (nodo.tipo == "Estructura" o nodo.tipo == "Clase" o
+            nodo.tipo == "Interfaz") {
             si (indice_tipo_ir(tipos, nodo.valor) >= 0) {
                 agregar(
                     errores,
@@ -999,6 +1058,53 @@ funcion construir_programa_ir(programa: cualquiera): cualquiera {
             }
         }
         indice = indice + 1
+    }
+    sea indice_clase: numero = 0
+    mientras (indice_clase < longitud(tipos)) {
+        sea clase: cualquiera = tipos[indice_clase]
+        sea indice_interfaz: numero = 0
+        mientras (indice_interfaz < longitud(clase.interfaces)) {
+            sea nombre_interfaz: texto = clase.interfaces[indice_interfaz]
+            sea posicion_interfaz: numero = indice_tipo_ir(tipos, nombre_interfaz)
+            si (posicion_interfaz < 0 o tipos[posicion_interfaz].clase != "interfaz") {
+                agregar(errores, "CFIR1005: interfaz desconocida '" + nombre_interfaz + "'")
+            } sino {
+                sea contrato: cualquiera = tipos[posicion_interfaz]
+                sea indice_requisito: numero = 0
+                mientras (indice_requisito < longitud(contrato.metodos)) {
+                    sea requisito: cualquiera = contrato.metodos[indice_requisito]
+                    sea posicion_metodo: numero = indice_metodo_ir(
+                        clase.metodos, requisito.nombre
+                    )
+                    si (posicion_metodo < 0) {
+                        agregar(errores, "CFIR1006: '" + clase.nombre +
+                            "' no implementa '" + nombre_interfaz + "." +
+                            requisito.nombre + "'")
+                    } sino {
+                        sea implementado: cualquiera = clase.metodos[posicion_metodo]
+                        si (implementado.retorno != requisito.retorno o
+                            longitud(implementado.parametros) !=
+                                longitud(requisito.parametros)) {
+                            agregar(errores, "CFIR1007: firma incompatible en '" +
+                                clase.nombre + "." + requisito.nombre + "'")
+                        } sino {
+                            sea parametro: numero = 0
+                            mientras (parametro < longitud(requisito.parametros)) {
+                                si (implementado.parametros[parametro] !=
+                                    requisito.parametros[parametro]) {
+                                    agregar(errores, "CFIR1007: firma incompatible en '" +
+                                        clase.nombre + "." + requisito.nombre + "'")
+                                }
+                                parametro = parametro + 1
+                            }
+                        }
+                    }
+                    indice_requisito = indice_requisito + 1
+                }
+            }
+            indice_interfaz = indice_interfaz + 1
+        }
+        indice_clase = indice_clase + 1
     }
     retornar ProgramaIRCore(tipos, errores)
 }
@@ -1148,7 +1254,8 @@ funcion nodo_tipo_ast_core(contexto: cualquiera, nombre: texto): cualquiera {
     sea indice: numero = 0
     mientras (indice < longitud(contexto.programa_ast.hijos)) {
         sea nodo: cualquiera = contexto.programa_ast.hijos[indice]
-        si ((nodo.tipo == "Clase" o nodo.tipo == "Estructura") y
+        si ((nodo.tipo == "Clase" o nodo.tipo == "Estructura" o
+            nodo.tipo == "Interfaz") y
             nodo.valor == nombre) { retornar nodo }
         indice = indice + 1
     }
@@ -1446,7 +1553,8 @@ funcion bajar_objetos_core(programa: cualquiera): cualquiera {
     indice = 0
     mientras (indice < longitud(programa.hijos)) {
         sea nodo: cualquiera = programa.hijos[indice]
-        si (nodo.tipo != "Estructura" y nodo.tipo != "Clase") {
+        si (nodo.tipo != "Estructura" y nodo.tipo != "Clase" y
+            nodo.tipo != "Interfaz") {
             sea bajadas: lista = bajar_sentencia_objetos_core(nodo, contexto)
             sea posicion: numero = 0
             mientras (posicion < longitud(bajadas)) {

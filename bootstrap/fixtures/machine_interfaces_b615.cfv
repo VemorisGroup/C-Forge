@@ -1,0 +1,19 @@
+interfaz Medible {
+    metodo medida(): numero
+}
+
+clase Caja implementa Medible {
+    campo ancho: numero
+    campo alto: numero
+
+    metodo medida(): numero {
+        retornar este.ancho * este.alto
+    }
+}
+
+sea caja: Caja = Caja(6, 7)
+si (caja.medida() == 42) {
+    mostrar("C-FORGE-B6.15-INTERFACE-OK")
+} sino {
+    mostrar("C-FORGE-B6.15-INTERFACE-FAIL")
+}
