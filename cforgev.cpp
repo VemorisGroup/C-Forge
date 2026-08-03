@@ -209,6 +209,8 @@ static std::unordered_set<std::string> cfv_imported_set;
         cfv_base_archivos / name,              // relative to script
         cfv_base_archivos / "stdlib" / std::filesystem::path(name).filename(),
         cfv_base_archivos / "cforge_modules" / std::filesystem::path(name).filename(),
+        std::filesystem::current_path() / "stdlib" / std::filesystem::path(name).filename(),
+        std::filesystem::current_path() / "cforge_modules" / std::filesystem::path(name).filename(),
         std::filesystem::path("/usr/local/lib/cforge/stdlib") / std::filesystem::path(name).filename(),
     };
     // ~/.cforge/stdlib
@@ -4185,6 +4187,65 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
  [[maybe_unused]] size_t cfv_args_tipo = cfv_args.index();
  [[maybe_unused]] size_t cfv_env_tipo = cfv_env.index();
  [[maybe_unused]] size_t cfv_fns_tipo = cfv_fns.index();
+  if (verdad(compara(cfv_nombre, Value{std::string("tarea")}, "=="))) {
+    (void)(cfv_afirmar(
+      compara(cfv_longitud(cfv_args), Value{1.0}, "=="),
+      Value{std::string("tarea requiere una función sin parámetros")}
+    ));
+    Value cfv_trabajo = indice(cfv_args, Value{0.0});
+    auto cfv_lambda = std::get_if<Mapa>(&cfv_trabajo.data);
+    if (!cfv_lambda || !(*cfv_lambda)->count("__lambda") ||
+        !verdad((**cfv_lambda)["__lambda"])) {
+      throw std::runtime_error("tarea requiere una función anónima");
+    }
+    Value cfv_parametros_tarea = (**cfv_lambda)["params"];
+    if (cfv_longitud(cfv_parametros_tarea).index() != 1 ||
+        numero(cfv_longitud(cfv_parametros_tarea)) != 0) {
+      throw std::runtime_error("la función de tarea no debe recibir parámetros");
+    }
+    Value cfv_cuerpo_tarea = (**cfv_lambda)["cuerpo"];
+    Value cfv_entorno_tarea = (**cfv_lambda)["env"];
+    Value cfv_funciones_tarea = cfv_fns;
+    return cfv_tarea([
+      cfv_cuerpo_tarea,
+      cfv_entorno_tarea,
+      cfv_funciones_tarea
+    ]() mutable -> Value {
+      Value cfv_ambito_tarea = cfv_env_nuevo_scope(cfv_entorno_tarea);
+      Value cfv_senal_tarea = cfv_exec_bloque(
+        cfv_cuerpo_tarea, cfv_ambito_tarea, cfv_funciones_tarea
+      );
+      if (verdad(compara(
+        indice(cfv_senal_tarea, Value{0.0}),
+        Value{std::string("retornar")}, "=="
+      ))) {
+        return indice(cfv_senal_tarea, Value{1.0});
+      }
+      return Value{};
+    });
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("esperar")}, "=="))) {
+    (void)(cfv_afirmar(
+      Value{
+        verdad(compara(cfv_longitud(cfv_args), Value{1.0}, ">=")) &&
+        verdad(compara(cfv_longitud(cfv_args), Value{2.0}, "<="))
+      },
+      Value{std::string("esperar requiere tarea y timeout opcional")}
+    ));
+    if (verdad(compara(cfv_longitud(cfv_args), Value{2.0}, "=="))) {
+      return cfv_esperar(
+        indice(cfv_args, Value{0.0}), indice(cfv_args, Value{1.0})
+      );
+    }
+    return cfv_esperar(indice(cfv_args, Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("cancelar")}, "=="))) {
+    (void)(cfv_afirmar(
+      compara(cfv_longitud(cfv_args), Value{1.0}, "=="),
+      Value{std::string("cancelar requiere una tarea")}
+    ));
+    return cfv_cancelar(indice(cfv_args, Value{0.0}));
+  }
   if (verdad(compara(cfv_nombre, Value{std::string("mostrar", 7)}, "=="))) {
     (void)(cfv_afirmar(compara(cfv_longitud(cfv_args), Value{1.0}, "=="), Value{std::string("mostrar requiere un argumento", 29)}));
     mostrar(indice(cfv_args, Value{0.0}));

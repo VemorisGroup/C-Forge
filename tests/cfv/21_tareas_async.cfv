@@ -1,0 +1,7 @@
+// Las tareas ejecutan funciones C-Forge en hilos nativos y propagan su valor.
+sea primera = tarea(funcion() { retornar 20 + 22 })
+sea segunda = tarea(funcion() { retornar "C-Forge" })
+
+afirmar(esperar(primera, 5000) == 42, "resultado async numérico incorrecto")
+afirmar(esperar(segunda) == "C-Forge", "resultado async textual incorrecto")
+mostrar("[OK] tareas async")

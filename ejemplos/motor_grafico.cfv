@@ -1,0 +1,65 @@
+// motor_grafico.cfv — núcleo lógico determinista para una escena de juego.
+// Este módulo no abre una ventana: modela entidades, actualización y render.
+
+interfaz Renderizable {
+    dibujar()
+}
+
+clase Entidad implementa Renderizable {
+    sea id = 0
+    sea nombre = ""
+    sea x = 0
+    sea y = 0
+    sea velocidad_x = 0
+    sea velocidad_y = 0
+    sea activa = verdadero
+    sea cuadros_vivos = 0
+
+    funcion constructor(
+        id_inicial,
+        nombre_inicial,
+        x_inicial,
+        y_inicial
+    ) {
+        esto.id = id_inicial
+        esto.nombre = nombre_inicial
+        esto.x = x_inicial
+        esto.y = y_inicial
+    }
+
+    funcion establecer_velocidad(nueva_x, nueva_y) {
+        esto.velocidad_x = nueva_x
+        esto.velocidad_y = nueva_y
+    }
+
+    funcion actualizar(delta) {
+        si (esto.activa) {
+            esto.x = esto.x + esto.velocidad_x * delta
+            esto.y = esto.y + esto.velocidad_y * delta
+            esto.cuadros_vivos = esto.cuadros_vivos + 1
+        }
+    }
+
+    funcion dibujar() {
+        retornar {
+            "id": esto.id,
+            "nombre": esto.nombre,
+            "x": esto.x,
+            "y": esto.y,
+            "activa": esto.activa
+        }
+    }
+
+    funcion destruir() {
+        esto.activa = falso
+        esto.velocidad_x = 0
+        esto.velocidad_y = 0
+        retornar verdadero
+    }
+}
+
+funcion crear_escena_demostracion() {
+    sea jugador = Entidad(1, "Jugador", 10, 20)
+    jugador.establecer_velocidad(4, 2)
+    retornar jugador
+}

@@ -1,0 +1,40 @@
+// app_principal.cfv — integra juego modular y transacciones concurrentes.
+
+importar "motor_grafico.cfv"
+importar "servidor_banco.cfv"
+
+funcion principal() {
+    mostrar("=== C-Forge: aplicación modular ===")
+
+    sea jugador = crear_escena_demostracion()
+    sea cuadro = 0
+    mientras (cuadro < 5) {
+        jugador.actualizar(0.5)
+        cuadro = cuadro + 1
+    }
+
+    sea peticion = json_serializar({
+        "origen": "CTA-ORIGEN",
+        "destino": "CTA-DESTINO",
+        "monto": 250
+    })
+    sea operacion = procesar_transferencia_async(peticion)
+
+    sea fotograma = jugador.dibujar()
+    mostrar("Jugador: " + json_serializar(fotograma))
+
+    sea respuesta = esperar(operacion, 5000)
+    mostrar("Banco: " + json_serializar(respuesta))
+
+    afirmar(fotograma["x"] == 20, "posición X incorrecta")
+    afirmar(fotograma["y"] == 25, "posición Y incorrecta")
+    afirmar(respuesta["ok"], "la transferencia fue rechazada")
+    afirmar(respuesta["codigo"] == "CFBANK-200", "código bancario incorrecto")
+    afirmar(respuesta["saldo_origen"] == 1250, "saldo final incorrecto")
+
+    // Liberación explícita del último recurso creado antes de salir.
+    afirmar(jugador.destruir(), "no se pudo destruir la entidad")
+    mostrar("C-FORGE-APP-OK")
+}
+
+principal()

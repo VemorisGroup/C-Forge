@@ -1,0 +1,87 @@
+// servidor_banco.cfv — procesamiento concurrente y transaccional en memoria.
+
+importar "json"
+importar "mapa"
+importar "concurrencia"
+
+interfaz ContratoTransferencia {
+    validar()
+    ejecutar()
+}
+
+sea saldos_banco = {
+    "CTA-ORIGEN": 1500,
+    "CTA-DESTINO": 300
+}
+sea mutex_saldos = mutex_crear()
+
+clase Transferencia implementa ContratoTransferencia {
+    sea solicitud = {}
+
+    funcion constructor(solicitud_inicial) {
+        esto.solicitud = solicitud_inicial
+    }
+
+    funcion validar() {
+        si (no mapa_tiene(esto.solicitud, "origen")) {
+            retornar {"ok": falso, "codigo": "CFBANK-400-ORIGEN"}
+        }
+        si (no mapa_tiene(esto.solicitud, "destino")) {
+            retornar {"ok": falso, "codigo": "CFBANK-400-DESTINO"}
+        }
+        si (no mapa_tiene(esto.solicitud, "monto")) {
+            retornar {"ok": falso, "codigo": "CFBANK-400-MONTO"}
+        }
+        si (esto.solicitud["monto"] <= 0) {
+            retornar {"ok": falso, "codigo": "CFBANK-422-MONTO"}
+        }
+        si (no mapa_tiene(saldos_banco, esto.solicitud["origen"])) {
+            retornar {"ok": falso, "codigo": "CFBANK-404-ORIGEN"}
+        }
+        si (no mapa_tiene(saldos_banco, esto.solicitud["destino"])) {
+            retornar {"ok": falso, "codigo": "CFBANK-404-DESTINO"}
+        }
+        retornar {"ok": verdadero, "codigo": "CFBANK-VALIDA"}
+    }
+
+    funcion ejecutar() {
+        sea validacion = esto.validar()
+        si (no validacion["ok"]) {
+            retornar validacion
+        }
+
+        sea origen = esto.solicitud["origen"]
+        sea destino = esto.solicitud["destino"]
+        sea monto = esto.solicitud["monto"]
+        si (saldos_banco[origen] < monto) {
+            retornar {"ok": falso, "codigo": "CFBANK-409-SALDO"}
+        }
+
+        saldos_banco[origen] = saldos_banco[origen] - monto
+        saldos_banco[destino] = saldos_banco[destino] + monto
+        retornar {
+            "ok": verdadero,
+            "codigo": "CFBANK-200",
+            "origen": origen,
+            "destino": destino,
+            "monto": monto,
+            "saldo_origen": saldos_banco[origen]
+        }
+    }
+}
+
+funcion procesar_transferencia(texto_json) {
+    si (no json_valido(texto_json)) {
+        retornar {"ok": falso, "codigo": "CFBANK-400-JSON"}
+    }
+    sea transferencia = Transferencia(json_parsear(texto_json))
+    retornar con_mutex(mutex_saldos, funcion() {
+        retornar transferencia.ejecutar()
+    })
+}
+
+funcion procesar_transferencia_async(texto_json) {
+    retornar tarea(funcion() {
+        retornar procesar_transferencia(texto_json)
+    })
+}
