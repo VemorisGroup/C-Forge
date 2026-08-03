@@ -1,0 +1,23 @@
+sea estructura_punto: cualquiera = nodo_ast_core_con_hijos(
+    "Estructura", "Punto", 1,
+    [nodo_ast_core("Campo", "x:numero", 1), nodo_ast_core("Campo", "y:numero", 1)]
+)
+sea crear_punto: cualquiera = nodo_ast_core_con_hijos(
+    "Declaracion", "p:Punto", 2,
+    [nodo_ast_core_con_hijos("Llamada", "Punto", 2,
+        [nodo_ast_core("Numero", "10", 2), nodo_ast_core("Numero", "20", 2)])]
+)
+sea modificar_x: cualquiera = nodo_ast_core_con_hijos(
+    "Asignacion", "=", 3,
+    [nodo_ast_core_con_hijos("Miembro", "x", 3,
+        [nodo_ast_core("Identificador", "p", 3)]), nodo_ast_core("Numero", "30", 3)]
+)
+sea leer_y: cualquiera = nodo_ast_core_con_hijos(
+    "Mostrar", "mostrar", 4,
+    [nodo_ast_core_con_hijos("Miembro", "y", 4,
+        [nodo_ast_core("Identificador", "p", 4)])]
+)
+sea programa_objetos: cualquiera = nodo_ast_core_con_hijos(
+    "Programa", "", 1, [estructura_punto, crear_punto, modificar_x, leer_y]
+)
+mostrar(ast_core_canonico(bajar_objetos_core(programa_objetos)))

@@ -151,6 +151,9 @@ backends completos del lenguaje.
 El avance B6.9 comienza con `bootstrap/core_ir.cfv`: un IR común escrito en
 C-Forge que fija layouts reproducibles para estructuras, clases, campos y
 métodos antes de bajarlos a los tres formatos nativos.
+La etapa `bootstrap/core_object_lowering.cfv` inicia B6.10 y convierte
+instancias, lecturas y escrituras de campos a almacenamiento escalar común.
+La conexión definitiva de esta etapa con los tres emisores sigue en progreso.
 
 No se anunciará compatibilidad total con una plataforma hasta que instalación,
 ejecución, pruebas y desinstalación estén verificadas en ella.

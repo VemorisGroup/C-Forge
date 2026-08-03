@@ -36,7 +36,7 @@ endif
 
 .PHONY: all build debug release install uninstall test check stdlib-load-check \
 	cli-check malformed-check sanitize-check backend-check install-check \
-	bootstrap-check backend-core-check ir-core-check release-check clean help
+	bootstrap-check backend-core-check ir-core-check object-lowering-check release-check clean help
 
 ## Compilar (default)
 all: build
@@ -264,10 +264,27 @@ ir-core-check:
 		'CFIR1[estructura Punto size=16 align=8 {x:numero@0,y:numero@8};clase Contador size=8 align=8 {valor:numero@0}]'; \
 	echo "  ✓ C-Forge Core IR 1 determinista verificado"
 
+## Verificar la reducción común de objetos antes de emitir Mach-O, ELF o PE.
+object-lowering-check:
+	@set -e; dir=$$(mktemp -d /tmp/cforge-object-lowering.XXXXXX); \
+	awk 'FNR==1 { print "" } { print }' \
+		bootstrap/core_ast.cfv \
+		bootstrap/core_ir.cfv \
+		bootstrap/core_object_lowering.cfv \
+		bootstrap/fixtures/object_lowering_b610.cfv > "$$dir/lowering.cfv"; \
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -Wpedantic \
+		bootstrap/stage0/cforge_bootstrap.cpp -o "$$dir/stage0"; \
+	"$$dir/stage0" "$$dir/lowering.cfv" -o "$$dir/lowering-test" >/dev/null; \
+	"$$dir/lowering-test" > "$$dir/ast.txt"; \
+	grep -q 'p__campo__x' "$$dir/ast.txt"; \
+	grep -q 'p__campo__y' "$$dir/ast.txt"; \
+	! grep -q 'Estructura' "$$dir/ast.txt"; \
+	echo "  ✓ objetos Core reducidos a almacenamiento común verificable"
+
 ## Gate único exigido antes de publicar una versión estable.
 release-check: clean build check test stdlib-load-check cli-check malformed-check \
 	backend-check install-check bootstrap-check backend-core-check ir-core-check \
-	sanitize-check
+	object-lowering-check sanitize-check
 	@echo ""
 	@echo "  ✓ GATE DE ESTABILIDAD C-FORGE COMPLETO"
 
@@ -293,6 +310,7 @@ help:
 	@echo "  make release      Compilar con O3 + march=native"
 	@echo "  make sdl          Compilar con soporte SDL2"
 	@echo "  make install      Instalar en $(PREFIX)"
+	@echo "  make object-lowering-check Verificar reducción común de objetos B6.10"
 	@echo "  make uninstall    Desinstalar"
 	@echo "  make check        Verificar sintaxis de pruebas .cfv"
 	@echo "  make test         Ejecutar tests básicos"

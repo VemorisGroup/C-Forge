@@ -56,8 +56,11 @@ de estructuras y clases. Cada campo recibe índice, tipo, tamaño, alineación y
 offset; los métodos conservan propietario, retorno y parámetros. El mismo IR
 será consumido por Mach-O, ELF y PE, evitando que cada backend invente una ABI
 distinta. `make ir-core-check` compila y ejecuta esa implementación escrita en
-C-Forge. La presencia del IR no significa todavía que los tres emisores puedan
-materializar objetos o despachar métodos; ese lowering permanece en progreso.
+C-Forge. `bootstrap/core_object_lowering.cfv` ya reduce constructores de valor,
+lecturas y escrituras de campos a símbolos escalares estables, y
+`make object-lowering-check` verifica el contrato. La conexión final de esa
+representación con los tres emisores y el despacho de métodos permanece en
+progreso.
 
 ## Criterio para declarar autonomía completa
 

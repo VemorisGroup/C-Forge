@@ -118,6 +118,7 @@
         "bootstrap/core_semantics.cfv",
         "bootstrap/core_emitter.cfv",
         "bootstrap/core_ir.cfv",
+        "bootstrap/core_object_lowering.cfv",
         "bootstrap/stage1/cforge_stage1.cfv",
         "Makefile",
         "docs/BOOTSTRAP.md"
