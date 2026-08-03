@@ -143,7 +143,7 @@ para conocer el estado verificable.
 - Windows: backend experimental; falta validación física completa.
 
 Los emisores mínimos Mach-O ARM64, ELF x64 y PE x64 aceptan el programa
-`mostrar("texto")`. Mach-O y PE incluyen también variantes Core B6.7 para
+`mostrar("texto")`. Los tres incluyen también variantes Core B6.8 para
 variables, aritmética, control, funciones, listas y texto dinámico. El gate comprueba sus cabeceras y ejecuta
 únicamente el formato compatible con el sistema anfitrión. Todavía no son
 backends completos del lenguaje.

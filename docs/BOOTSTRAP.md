@@ -22,7 +22,7 @@ construye y ejecuta esas fuentes; no basta con analizarlas como texto.
 | Stage 2/3 | Reconstrucción reproducible y comparación byte por byte |
 | Runtime autónomo | El binario ejecuta `.cfv` sin Python/JVM/.NET/Node |
 | Toolchain autónoma | Parcial: el frontend se autoaloja; el enlazado final todavía usa `clang++` |
-| Backends directos | Mach-O/PE Core B6.7 parciales y ELF literal; consulta `RUNTIME-AUTONOMY.md` |
+| Backends directos | Mach-O ARM64, ELF x64 y PE x64 Core B6.8 parciales; consulta `RUNTIME-AUTONOMY.md` |
 
 El término **frontend Core autoalojado** solo describe el alcance probado por
 `make bootstrap-check`. No significa que toda la toolchain sea autónoma: el
@@ -45,7 +45,7 @@ make bootstrap-check
 ```
 
 Este gate no utiliza Python. Comprueba el motor activo, los módulos `.cfv`, las
-pruebas nativas, los backends mínimos, Mach-O/PE Core B6.7 y una instalación
+pruebas nativas, los backends mínimos, los tres backends Core B6.8 y una instalación
 aislada. Sus límites forman parte de la evidencia: pasar el gate no convierte
 los backends parciales en backends generales.
 

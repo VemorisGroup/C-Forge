@@ -213,7 +213,7 @@ bootstrap-check:
 	test "$$($$dir/minimal)" = "$$(printf 'C-Forge Core Bootstrap\n42')"; \
 	echo "  ✓ Stage 2 y Stage 3 son idénticos; compilador Core autoalojado"
 
-## Verificar los backends Core B6.7 sin toolchain durante la emisión.
+## Verificar los backends Core B6.8 sin toolchain durante la emisión.
 backend-core-check:
 	@set -e; dir=$$(mktemp -d /tmp/cforge-backend-core.XXXXXX); \
 	$(CXX) -std=c++20 -O2 -Wall -Wextra -Wpedantic \
@@ -222,6 +222,8 @@ backend-core-check:
 		-o "$$dir/macho-core" >/dev/null; \
 	"$$dir/stage0" bootstrap/direct/cforge_pe_x64_core.cfv \
 		-o "$$dir/pe-core" >/dev/null; \
+	"$$dir/stage0" bootstrap/direct/cforge_elf_x64_core.cfv \
+		-o "$$dir/elf-core" >/dev/null; \
 	env PATH=/nonexistent "$$dir/macho-core" \
 		bootstrap/fixtures/machine_runtime_b6.cfv -o "$$dir/uno-macho" >/dev/null; \
 	env PATH=/nonexistent "$$dir/macho-core" \
@@ -230,14 +232,23 @@ backend-core-check:
 		bootstrap/fixtures/machine_runtime_b6.cfv -o "$$dir/uno.exe" >/dev/null; \
 	env PATH=/nonexistent "$$dir/pe-core" \
 		bootstrap/fixtures/machine_runtime_b6.cfv -o "$$dir/dos.exe" >/dev/null; \
+	env PATH=/nonexistent "$$dir/elf-core" \
+		bootstrap/fixtures/machine_runtime_b6.cfv -o "$$dir/uno-elf" >/dev/null; \
+	env PATH=/nonexistent "$$dir/elf-core" \
+		bootstrap/fixtures/machine_runtime_b6.cfv -o "$$dir/dos-elf" >/dev/null; \
 	cmp "$$dir/uno-macho" "$$dir/dos-macho"; \
 	cmp "$$dir/uno.exe" "$$dir/dos.exe"; \
+	cmp "$$dir/uno-elf" "$$dir/dos-elf"; \
 	file "$$dir/uno-macho" | grep -q "Mach-O 64-bit executable arm64"; \
 	file "$$dir/uno.exe" | grep -q "PE32+ executable.*x86-64"; \
+	file "$$dir/uno-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
 	if [ "$(UNAME)" = "Darwin" ] && [ "$(ARCH)" = "arm64" ]; then \
 		test "$$($$dir/uno-macho)" = "C-FORGE-B6.7-OK"; \
 	fi; \
-	echo "  ✓ Mach-O ARM64 y PE x64 Core B6.7 emitidos sin toolchain externa"
+	if [ "$(UNAME)" = "Linux" ] && [ "$(ARCH)" = "x86_64" ]; then \
+		test "$$($$dir/uno-elf)" = "C-FORGE-B6.7-OK"; \
+	fi; \
+	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.8 sin toolchain externa"
 
 ## Gate único exigido antes de publicar una versión estable.
 release-check: clean build check test stdlib-load-check cli-check malformed-check \
@@ -277,7 +288,7 @@ help:
 	@echo "  make backend-check Verificar Mach-O, ELF y PE"
 	@echo "  make install-check Probar instalación aislada"
 	@echo "  make bootstrap-check Verificar autoalojamiento Stage 1→2→3"
-	@echo "  make backend-core-check Verificar backends Core B6.7 sin toolchain"
+	@echo "  make backend-core-check Verificar backends Core B6.8 sin toolchain"
 	@echo "  make release-check Ejecutar todos los gates de estabilidad"
 	@echo "  make bench        Benchmark fib(30)"
 	@echo "  make clean        Limpiar artefactos"

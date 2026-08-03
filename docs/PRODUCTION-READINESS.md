@@ -16,7 +16,7 @@ compromisos distintos.
 - La instalación aislada instala motor y biblioteca estándar y ejecuta una
   prueba real.
 - Los emisores directos mínimos generan Mach-O ARM64, ELF x64 y PE x64. Las
-  variantes Mach-O/PE Core B6.7 cubren además variables, aritmética, control,
+  tres variantes Core B6.8 cubren además variables, aritmética, control,
   funciones, listas y texto dinámico sin toolchain durante la emisión.
 - La CI contiene trabajos de compilación para macOS, Linux y Windows.
 
