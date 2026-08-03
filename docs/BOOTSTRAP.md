@@ -25,6 +25,7 @@ construye y ejecuta esas fuentes; no basta con analizarlas como texto.
 | Backends directos | Mach-O ARM64, ELF x64 y PE x64 Core B6.8 parciales; consulta `RUNTIME-AUTONOMY.md` |
 | Objetos nativos | Core IR 1 y Object Lowering 1 alimentan Mach-O, ELF y PE con constructores de valor, lectura y escritura de campos | verificado B6.11 |
 | Métodos nativos | Métodos de instancia de solo lectura y `este` se reducen a funciones nativas explícitas en los tres formatos | verificado B6.12 |
+| Métodos mutables | Las llamadas de efecto expanden parámetros y escrituras de `este.campo` sobre la instancia receptora | verificado B6.13 |
 
 El término **frontend Core autoalojado** solo describe el alcance probado por
 `make bootstrap-check`. No significa que toda la toolchain sea autónoma: el

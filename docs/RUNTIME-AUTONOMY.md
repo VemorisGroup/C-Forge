@@ -63,7 +63,9 @@ ya esta representación para constructores de valor, lecturas y escrituras de
 campos; `make backend-core-check` genera los tres formatos y ejecuta el formato
 del anfitrión. B6.12 resuelve métodos de instancia de solo lectura y `este`
 como funciones nativas con campos explícitos. La mutación dentro de métodos,
-los destructores y las interfaces permanecen en progreso.
+los destructores y las interfaces permanecen en progreso. B6.13 añade métodos
+mutables: sus efectos se bajan a escrituras directas sobre los símbolos de la
+instancia y se prueban en los tres formatos sin toolchain externa.
 
 ## Criterio para declarar autonomía completa
 

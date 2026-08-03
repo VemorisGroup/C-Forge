@@ -1,0 +1,15 @@
+clase Contador {
+    campo valor: numero
+
+    metodo incrementar(cantidad: numero) {
+        este.valor = este.valor + cantidad
+    }
+}
+
+sea contador: Contador = Contador(40)
+contador.incrementar(2)
+si (contador.valor == 42) {
+    mostrar("C-FORGE-B6.13-MUTABLE-OK")
+} sino {
+    mostrar("C-FORGE-B6.13-MUTABLE-FAIL")
+}

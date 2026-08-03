@@ -155,9 +155,10 @@ La etapa `bootstrap/core_object_lowering.cfv` inicia B6.10 y convierte
 instancias, lecturas y escrituras de campos a almacenamiento escalar común.
 Esa representación ya alimenta los emisores Mach-O ARM64, ELF x64 y PE x64:
 el gate construye el mismo programa de objetos en los tres formatos y ejecuta
-el binario compatible con el anfitrión. B6.12 añade métodos de instancia de
-solo lectura y la referencia `este`, bajados a llamadas nativas explícitas.
-Métodos mutables, destructores e interfaces siguen en progreso.
+el binario compatible con el anfitrión. B6.12 añade métodos de instancia y la
+referencia `este`; B6.13 incorpora métodos mutables mediante expansión segura
+de escrituras sobre la instancia. Constructores personalizados, destructores
+e interfaces siguen en progreso.
 
 No se anunciará compatibilidad total con una plataforma hasta que instalación,
 ejecución, pruebas y desinstalación estén verificadas en ella.

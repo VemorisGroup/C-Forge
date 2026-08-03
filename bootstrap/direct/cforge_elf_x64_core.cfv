@@ -1046,6 +1046,7 @@ estructura InstanciaObjetoCore {
 
 estructura ContextoObjetosCore {
     programa_ir: cualquiera
+    programa_ast: cualquiera
     instancias: lista
     errores: lista
 }
@@ -1138,6 +1139,124 @@ funcion bajar_metodos_tipo_core(nodo: cualquiera, programa_ir: cualquiera): list
         si (nodo.hijos[indice].tipo == "Metodo") {
             agregar(resultado, bajar_metodo_core(nodo.hijos[indice], tipo))
         }
+        indice = indice + 1
+    }
+    retornar resultado
+}
+
+funcion nodo_tipo_ast_core(contexto: cualquiera, nombre: texto): cualquiera {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.programa_ast.hijos)) {
+        sea nodo: cualquiera = contexto.programa_ast.hijos[indice]
+        si ((nodo.tipo == "Clase" o nodo.tipo == "Estructura") y
+            nodo.valor == nombre) { retornar nodo }
+        indice = indice + 1
+    }
+    afirmar(falso, "CFLOW1007: declaración de tipo desconocida '" + nombre + "'")
+    retornar contexto.programa_ast
+}
+
+funcion nodo_metodo_ast_core(
+    contexto: cualquiera,
+    tipo_nombre: texto,
+    metodo_nombre: texto
+): cualquiera {
+    sea tipo_ast: cualquiera = nodo_tipo_ast_core(contexto, tipo_nombre)
+    sea indice: numero = 0
+    mientras (indice < longitud(tipo_ast.hijos)) {
+        sea miembro: cualquiera = tipo_ast.hijos[indice]
+        si (miembro.tipo == "Metodo" y
+            nombre_firma_ir(miembro.valor) == metodo_nombre) {
+            retornar miembro
+        }
+        indice = indice + 1
+    }
+    afirmar(falso, "CFLOW1008: método no encontrado")
+    retornar tipo_ast
+}
+
+funcion indice_parametro_invocado_core(
+    metodo: cualquiera,
+    nombre: texto
+): numero {
+    sea indice: numero = 0
+    mientras (indice + 1 < longitud(metodo.hijos)) {
+        si (nombre_firma_ir(metodo.hijos[indice].valor) == nombre) {
+            retornar indice
+        }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion sustituir_invocacion_metodo_core(
+    nodo: cualquiera,
+    contexto: cualquiera,
+    tipo: cualquiera,
+    objeto: texto,
+    metodo: cualquiera,
+    argumentos: lista
+): cualquiera {
+    si (nodo.tipo == "Miembro") {
+        sea base: cualquiera = nodo.hijos[0]
+        si (base.tipo == "Identificador" y base.valor == "este") {
+            campo_tipo_ir(tipo, nodo.valor)
+            retornar nodo_ast_core(
+                "Identificador",
+                nombre_campo_bajado_core(objeto, nodo.valor),
+                nodo.linea
+            )
+        }
+    }
+    si (nodo.tipo == "Identificador") {
+        sea parametro: numero = indice_parametro_invocado_core(
+            metodo, nodo.valor
+        )
+        si (parametro >= 0) {
+            retornar bajar_expresion_objetos_core(
+                argumentos[parametro], contexto
+            )
+        }
+    }
+    sea hijos: lista = []
+    sea indice: numero = 0
+    mientras (indice < longitud(nodo.hijos)) {
+        agregar(hijos, sustituir_invocacion_metodo_core(
+            nodo.hijos[indice], contexto, tipo, objeto, metodo, argumentos
+        ))
+        indice = indice + 1
+    }
+    retornar nodo_ast_core_con_hijos(nodo.tipo, nodo.valor, nodo.linea, hijos)
+}
+
+funcion expandir_invocacion_mutable_core(
+    llamada: cualquiera,
+    contexto: cualquiera
+): lista {
+    sea base: cualquiera = llamada.hijos[0]
+    afirmar(base.tipo == "Identificador", "CFLOW1009: receptor mutable inválido")
+    sea tipo: cualquiera = tipo_instancia_objeto_core(contexto, base.valor)
+    sea metodo: cualquiera = nodo_metodo_ast_core(
+        contexto, tipo.nombre, llamada.valor
+    )
+    sea argumentos: lista = []
+    sea indice: numero = 1
+    mientras (indice < longitud(llamada.hijos)) {
+        agregar(argumentos, llamada.hijos[indice])
+        indice = indice + 1
+    }
+    afirmar(
+        longitud(argumentos) + 1 == longitud(metodo.hijos),
+        "CFLOW1010: cantidad de argumentos inválida"
+    )
+    sea bloque: cualquiera = metodo.hijos[longitud(metodo.hijos) - 1]
+    sea resultado: lista = []
+    indice = 0
+    mientras (indice < longitud(bloque.hijos)) {
+        sea sentencia: cualquiera = sustituir_invocacion_metodo_core(
+            bloque.hijos[indice], contexto, tipo, base.valor, metodo, argumentos
+        )
+        si (sentencia.tipo != "Retornar") { agregar(resultado, sentencia) }
         indice = indice + 1
     }
     retornar resultado
@@ -1242,6 +1361,10 @@ funcion bajar_sentencia_objetos_core(nodo: cualquiera, contexto: cualquiera): li
         sea objeto: lista = bajar_declaracion_objeto_core(nodo, contexto)
         si (longitud(objeto) > 0) { retornar objeto }
     }
+    si (nodo.tipo == "Expresion" y longitud(nodo.hijos) == 1 y
+        nodo.hijos[0].tipo == "LlamadaMetodo") {
+        retornar expandir_invocacion_mutable_core(nodo.hijos[0], contexto)
+    }
     sea hijos: lista = []
     sea indice: numero = 0
     mientras (indice < longitud(nodo.hijos)) {
@@ -1254,7 +1377,7 @@ funcion bajar_sentencia_objetos_core(nodo: cualquiera, contexto: cualquiera): li
 funcion bajar_objetos_core(programa: cualquiera): cualquiera {
     sea programa_ir: cualquiera = construir_programa_ir(programa)
     afirmar(longitud(programa_ir.errores) == 0, "CFLOW1000: IR de objetos inválido")
-    sea contexto: cualquiera = ContextoObjetosCore(programa_ir, [], [])
+    sea contexto: cualquiera = ContextoObjetosCore(programa_ir, programa, [], [])
     sea salida: lista = []
     sea indice: numero = 0
     mientras (indice < longitud(programa.hijos)) {
