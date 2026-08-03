@@ -1,0 +1,60 @@
+// Genéricos restringidos de C-Forge: especialización por tipo.
+
+interfaz Comparable {
+    comparar(otro)
+}
+
+clase NumeroComparable implementa Comparable {
+    sea valor = 0
+
+    funcion constructor(valor_inicial) {
+        esto.valor = valor_inicial
+    }
+
+    funcion comparar(otro) {
+        si (esto.valor < otro.valor) { retornar -1 }
+        si (esto.valor > otro.valor) { retornar 1 }
+        retornar 0
+    }
+}
+
+clase ListaEnlazada<T> donde T implementa Comparable {
+    sea elementos = []
+
+    funcion agregar(valor) {
+        esto.elementos.agregar(valor)
+    }
+
+    funcion ordenar() {
+        sea i = 1
+        mientras (i < esto.elementos.longitud) {
+            sea actual = esto.elementos[i]
+            sea j = i - 1
+            mientras (j >= 0 y esto.elementos[j].comparar(actual) > 0) {
+                esto.elementos[j + 1] = esto.elementos[j]
+                j = j - 1
+            }
+            esto.elementos[j + 1] = actual
+            i = i + 1
+        }
+    }
+
+    funcion valores() {
+        sea salida = []
+        sea i = 0
+        mientras (i < esto.elementos.longitud) {
+            salida.agregar(esto.elementos[i].valor)
+            i = i + 1
+        }
+        retornar salida
+    }
+}
+
+funcion demo_genericos() {
+    sea lista = ListaEnlazada<NumeroComparable>()
+    lista.agregar(NumeroComparable(9))
+    lista.agregar(NumeroComparable(2))
+    lista.agregar(NumeroComparable(5))
+    lista.ordenar()
+    retornar lista.valores()
+}

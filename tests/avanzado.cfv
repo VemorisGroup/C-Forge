@@ -1,0 +1,20 @@
+importar "../ejemplos/genericos_restringidos.cfv"
+importar "../ejemplos/memoria_controlada.cfv"
+importar "../ejemplos/rutas_compiladas.cfv"
+
+sea ordenados = demo_genericos()
+afirmar(ordenados[0] == 2, "falló monomorfización genérica")
+afirmar(ordenados[1] == 5, "falló orden genérico")
+afirmar(ordenados[2] == 9, "falló orden genérico")
+
+sea suma_gpu = actualizar_matriz_grafica([16, 32, 64, 128])
+afirmar(suma_gpu == 240, "falló memoria controlada")
+
+sea rutas = tabla_http_generada()
+afirmar(rutas.longitud == 1, "no se generó la ruta HTTP")
+afirmar(rutas[0]["ruta"] == "/api/v1/transaccion", "ruta incorrecta")
+afirmar(rutas[0]["metodo"] == "POST", "método HTTP incorrecto")
+sea pago = procesar_pago({"monto": 750})
+afirmar(pago["codigo"] == "PAGO-ACEPTADO", "endpoint incorrecto")
+
+mostrar("[OK] genéricos + memoria controlada + macros web")

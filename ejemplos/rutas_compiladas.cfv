@@ -1,0 +1,22 @@
+// El atributo Ruta se transforma en una entrada de la tabla HTTP del binario.
+
+importar "mapa"
+
+#[Ruta("/api/v1/transaccion", "POST")]
+funcion procesar_pago(peticion: Request) {
+    si (no mapa_tiene(peticion, "monto")) {
+        retornar {"estado": 400, "codigo": "PAGO-SIN-MONTO"}
+    }
+    si (peticion["monto"] <= 0) {
+        retornar {"estado": 422, "codigo": "PAGO-MONTO-INVALIDO"}
+    }
+    retornar {
+        "estado": 200,
+        "codigo": "PAGO-ACEPTADO",
+        "monto": peticion["monto"]
+    }
+}
+
+funcion tabla_http_generada() {
+    retornar rutas_compiladas()
+}

@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <variant>
 #include <vector>
 #include <cstring>
@@ -117,6 +118,33 @@ struct CfvCallFrame {
   ~CfvCallFrame() { if (!cfv_call_stack.empty()) cfv_call_stack.pop_back(); }
 };
 static std::mutex cfv_symbol_mutex;static std::map<std::string,ForgeValue*>cfv_symbols;
+// Memoria controlada de C-Forge. Los punteros expuestos al lenguaje son
+// identificadores validados, nunca direcciones arbitrarias del proceso.
+struct CfvMemoryBlock { std::vector<std::uint8_t> bytes; };
+static std::mutex cfv_memory_mutex;
+static std::map<std::uint64_t,std::shared_ptr<CfvMemoryBlock>> cfv_memory_blocks;
+static std::atomic<std::uint64_t> cfv_memory_next_id{1};
+static thread_local unsigned cfv_unsafe_depth=0;
+static bool cfv_is_pointer(const Value& value) {
+  auto map=std::get_if<Mapa>(&value.data);
+  return map&&*map&&(**map).count("__puntero")&&(**map).count("offset");
+}
+static Value cfv_pointer(std::uint64_t id,std::uint64_t offset,std::uint64_t size) {
+  auto map=std::make_shared<std::map<std::string,Value>>();
+  (*map)["__puntero"]=(double)id;(*map)["offset"]=(double)offset;(*map)["tamano"]=(double)size;
+  return Value{map};
+}
+static std::tuple<std::uint64_t,std::uint64_t,std::shared_ptr<CfvMemoryBlock>> cfv_pointer_parts(const Value& value) {
+  if(!cfv_is_pointer(value))throw std::runtime_error("se esperaba un puntero controlado de C-Forge");
+  auto map=std::get<Mapa>(value.data);
+  auto id=(std::uint64_t)std::get<double>(map->at("__puntero").data);
+  auto offset=(std::uint64_t)std::get<double>(map->at("offset").data);
+  std::lock_guard<std::mutex> lock(cfv_memory_mutex);
+  auto found=cfv_memory_blocks.find(id);
+  if(found==cfv_memory_blocks.end())throw std::runtime_error("puntero liberado o inválido");
+  if(offset>=found->second->bytes.size())throw std::runtime_error("acceso fuera del bloque de memoria");
+  return {id,offset,found->second};
+}
 [[maybe_unused]] static void cfv_share_symbol(const std::string&name,ForgeValue*value){std::lock_guard<std::mutex>lock(cfv_symbol_mutex);cfv_symbols[name]=value;}
 [[maybe_unused]] static ForgeValue cfv_symbol(const std::string&name){std::lock_guard<std::mutex>lock(cfv_symbol_mutex);auto found=cfv_symbols.find(name);if(found==cfv_symbols.end()||!found->second)throw std::runtime_error("símbolo global desconocido: "+name);return *found->second;}
 [[maybe_unused]] static ForgeValue cfv_symbol_snapshot(){std::lock_guard<std::mutex>lock(cfv_symbol_mutex);auto map=std::make_shared<std::map<std::string,ForgeValue>>();for(const auto&[name,value]:cfv_symbols)if(value)(*map)[name]=*value;return map;}
@@ -129,7 +157,18 @@ extern "C" __attribute__((visibility("default"))) int cfv_register_function_v2(c
 #endif
 static double numero(const Value& v) { if (auto p=std::get_if<double>(&v.data)) return *p; throw std::runtime_error("se esperaba un número"); }
 [[maybe_unused]] static bool verdad(const Value& v) { if (auto p=std::get_if<bool>(&v.data)) return *p; throw std::runtime_error("se esperaba verdadero o falso"); }
-[[maybe_unused]] static Value suma(const Value&a,const Value&b){ if(a.index()==1&&b.index()==1)return numero(a)+numero(b); if(a.index()==2&&b.index()==2)return std::get<std::string>(a.data)+std::get<std::string>(b.data); throw std::runtime_error("'+' requiere dos números o dos textos"); }
+[[maybe_unused]] static Value suma(const Value&a,const Value&b){
+  if(a.index()==1&&b.index()==1)return numero(a)+numero(b);
+  if(a.index()==2&&b.index()==2)return std::get<std::string>(a.data)+std::get<std::string>(b.data);
+  if(cfv_is_pointer(a)&&b.index()==1){
+    auto map=std::get<Mapa>(a.data);auto id=(std::uint64_t)numero(map->at("__puntero"));
+    auto current=(std::int64_t)numero(map->at("offset"));auto delta=(std::int64_t)numero(b);
+    auto size=(std::uint64_t)numero(map->at("tamano"));auto next=current+delta;
+    if(next<0||(std::uint64_t)next>=size)throw std::runtime_error("aritmética de puntero fuera del bloque");
+    return cfv_pointer(id,(std::uint64_t)next,size);
+  }
+  throw std::runtime_error("'+' requiere valores compatibles");
+}
 [[maybe_unused]] static Value resta(const Value&a,const Value&b){return numero(a)-numero(b);} [[maybe_unused]] static Value multiplica(const Value&a,const Value&b){return numero(a)*numero(b);}
 [[maybe_unused]] static Value divide(const Value&a,const Value&b){double d=numero(b);if(d==0)throw std::runtime_error("no se puede dividir por cero");return numero(a)/d;}
 [[maybe_unused]] static Value modulo(const Value&a,const Value&b){long long d=(long long)numero(b);if(d==0)throw std::runtime_error("no se puede dividir por cero en módulo");return (double)((long long)numero(a)%d);}
@@ -1657,6 +1696,27 @@ Value cfv_parse_bloque(Value cfv_p) {
 Value cfv_parse_sentencia(Value cfv_p) {
   cfv_jit_hit("parse_sentencia");
  [[maybe_unused]] size_t cfv_p_tipo = cfv_p.index();
+  // Decorador de compilación: #[Nombre(argumentos...)] declaracion
+  if (verdad(cfv_ver(cfv_p, Value{std::string("#")}))) {
+    (void)(cfv_avanzar(cfv_p));
+    (void)(cfv_requerir(cfv_p,Value{std::string("[")},Value{std::string("Se esperaba '[' tras '#'") }));
+    Value cfv_attr_tok=cfv_requerir_tipo(cfv_p,Value{std::string("IDENT")},Value{std::string("Se esperaba nombre de atributo")});
+    Value cfv_attr_nombre=indice(cfv_attr_tok,Value{std::string("lexema")});
+    Value cfv_attr_args=crear_lista({});
+    if(verdad(cfv_tomar(cfv_p,Value{std::string("(")}))){
+      cfv_attr_args=cfv_parse_argumentos(cfv_p);
+      (void)(cfv_requerir(cfv_p,Value{std::string(")")},Value{std::string("Se esperaba ')' en atributo") }));
+    }
+    (void)(cfv_requerir(cfv_p,Value{std::string("]")},Value{std::string("Se esperaba ']' en atributo") }));
+    Value cfv_attr_decl=cfv_parse_sentencia(cfv_p);
+    return cfv_nodo(Value{std::string("Atributo")},cfv_attr_nombre,crear_lista({cfv_attr_decl,cfv_attr_args}));
+  }
+  // Bloque de memoria controlada. Los operadores @ y * solo son válidos aquí.
+  if (verdad(cfv_ver(cfv_p, Value{std::string("inseguro")}))) {
+    (void)(cfv_avanzar(cfv_p));
+    Value cfv_unsafe_body=cfv_parse_bloque(cfv_p);
+    return cfv_nodo(Value{std::string("Inseguro")},Value{},cfv_unsafe_body);
+  }
   if (verdad(Value{verdad(Value{verdad(cfv_ver(cfv_p, Value{std::string("sea", 3)})) || verdad(cfv_ver(cfv_p, Value{std::string("var", 3)}))}) || verdad(cfv_ver(cfv_p, Value{std::string("const", 5)}))})) {
     (void)(cfv_avanzar(cfv_p));
     // Destructuring: sea [a, b] = lista
@@ -2097,6 +2157,16 @@ Value cfv_parse_sentencia(Value cfv_p) {
     Value cfv_clase_tok = cfv_requerir_tipo(cfv_p, Value{std::string("IDENT")}, Value{std::string("Se esperaba nombre de clase")});
     Value cfv_clase_nombre = indice(cfv_clase_tok, Value{std::string("lexema")});
     Value cfv_es_abstracta = Value{cfv_clase_abstracta_flag};
+    Value cfv_clase_genericos=crear_lista({});
+    Value cfv_clase_restricciones=crear_mapa({});
+    if(verdad(cfv_tomar(cfv_p,Value{std::string("<")}))){
+      while(!verdad(cfv_ver(cfv_p,Value{std::string(">")}))){
+        Value cfv_gt=cfv_requerir_tipo(cfv_p,Value{std::string("IDENT")},Value{std::string("Se esperaba parámetro genérico")});
+        (void)(cfv_agregar(cfv_clase_genericos,indice(cfv_gt,Value{std::string("lexema")})));
+        if(!verdad(cfv_tomar(cfv_p,Value{std::string(",")})))break;
+      }
+      (void)(cfv_requerir(cfv_p,Value{std::string(">")},Value{std::string("Se esperaba '>' en genéricos") }));
+    }
     // Check for extiende (inheritance)
     Value cfv_clase_padre = Value{}; // nulo = no parent
     if (verdad(cfv_ver(cfv_p, Value{std::string("extiende")}))) {
@@ -2111,6 +2181,13 @@ Value cfv_parse_sentencia(Value cfv_p) {
       Value cfv_iface_tok2 = cfv_requerir_tipo(cfv_p, Value{std::string("IDENT")}, Value{std::string("Se esperaba nombre de interfaz")});
       (void)(cfv_agregar(cfv_clase_ifaces, indice(cfv_iface_tok2, Value{std::string("lexema")})));
       (void)(cfv_tomar(cfv_p, Value{std::string(",")}));
+    }
+    if(verdad(cfv_ver(cfv_p,Value{std::string("donde")}))){
+      (void)(cfv_avanzar(cfv_p));
+      Value cfv_rparam=cfv_requerir_tipo(cfv_p,Value{std::string("IDENT")},Value{std::string("Se esperaba parámetro tras donde")});
+      (void)(cfv_requerir(cfv_p,Value{std::string("implementa")},Value{std::string("Se esperaba implementa en restricción") }));
+      Value cfv_riface=cfv_requerir_tipo(cfv_p,Value{std::string("IDENT")},Value{std::string("Se esperaba interfaz de restricción")});
+      asignar_indice(cfv_clase_restricciones,indice(cfv_rparam,Value{std::string("lexema")}),indice(cfv_riface,Value{std::string("lexema")}));
     }
     (void)(cfv_requerir(cfv_p, Value{std::string("{")}, Value{std::string("Se esperaba '{' en clase")}));
     Value cfv_miembros = crear_lista({});
@@ -2188,6 +2265,9 @@ Value cfv_parse_sentencia(Value cfv_p) {
         if (verdad(compara(cfv_longitud(cfv_clase_ifaces), Value{0.0}, ">"))) {
           (*cfv_mptr2)->insert((*cfv_mptr2)->begin(),
             cfv_nodo(Value{std::string("Implementa")}, Value{std::string("")}, cfv_clase_ifaces));
+        }
+        if(verdad(compara(cfv_longitud(cfv_clase_genericos),Value{0.0},">"))){
+          (*cfv_mptr2)->insert((*cfv_mptr2)->begin(),cfv_nodo(Value{std::string("Genericos")},cfv_clase_restricciones,cfv_clase_genericos));
         }
       }
     }
@@ -2453,6 +2533,10 @@ Value cfv_parse_unario(Value cfv_p) {
     (void)(cfv_avanzar(cfv_p));
     return cfv_nodo(Value{std::string("Unario", 6)}, Value{std::string("~", 1)}, crear_lista({cfv_parse_unario(cfv_p)}));
   }
+  if (verdad(cfv_ver(cfv_p,Value{std::string("@")})) || verdad(cfv_ver(cfv_p,Value{std::string("*")}))) {
+    Value cfv_pointer_op=indice(cfv_avanzar(cfv_p),Value{std::string("lexema")});
+    return cfv_nodo(Value{std::string("Unario")},cfv_pointer_op,crear_lista({cfv_parse_unario(cfv_p)}));
+  }
   return cfv_parse_postfijo(cfv_p);
   return Value{};
 }
@@ -2465,7 +2549,25 @@ Value cfv_parse_postfijo(Value cfv_p) {
   if (cfv_continuar_pf.index() != 3) throw std::runtime_error("tipo incompatible para continuar_pf");
  [[maybe_unused]] size_t cfv_continuar_pf_tipo = 3;
   while (verdad(cfv_continuar_pf)) {
-    if (verdad(cfv_ver(cfv_p, Value{std::string("[", 1)}))) {
+    if (verdad(cfv_ver(cfv_p,Value{std::string("<")})) &&
+        verdad(compara(indice(cfv_base,Value{std::string("tipo")}),Value{std::string("Identificador")},"=="))) {
+      Value cfv_saved_pos=indice(cfv_p,Value{std::string("pos")});
+      (void)(cfv_avanzar(cfv_p));
+      if(verdad(cfv_ver_tipo(cfv_p,Value{std::string("IDENT")}))){
+        Value cfv_type_tok=cfv_avanzar(cfv_p);
+        if(verdad(cfv_tomar(cfv_p,Value{std::string(">")})) && verdad(cfv_ver(cfv_p,Value{std::string("(")}))){
+          std::string cfv_specialized=texto(indice(cfv_base,Value{std::string("valor")}))+"<";
+          cfv_specialized+=texto(indice(cfv_type_tok,Value{std::string("lexema")}))+">";
+          asignar_indice(cfv_base,Value{std::string("valor")},Value{cfv_specialized});
+        }else{
+          asignar_indice(cfv_p,Value{std::string("pos")},cfv_saved_pos);
+          asignar(cfv_continuar_pf,cfv_continuar_pf_tipo,Value{false},"continuar_pf");
+        }
+      }else{
+        asignar_indice(cfv_p,Value{std::string("pos")},cfv_saved_pos);
+        asignar(cfv_continuar_pf,cfv_continuar_pf_tipo,Value{false},"continuar_pf");
+      }
+    } else if (verdad(cfv_ver(cfv_p, Value{std::string("[", 1)}))) {
       (void)(cfv_avanzar(cfv_p));
       Value cfv_idx = cfv_parse_expresion(cfv_p);
  [[maybe_unused]] size_t cfv_idx_tipo = 99;
@@ -4187,6 +4289,25 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
  [[maybe_unused]] size_t cfv_args_tipo = cfv_args.index();
  [[maybe_unused]] size_t cfv_env_tipo = cfv_env.index();
  [[maybe_unused]] size_t cfv_fns_tipo = cfv_fns.index();
+  if (verdad(compara(cfv_nombre, Value{std::string("memoria_asignar")}, "=="))) {
+    if(cfv_unsafe_depth==0)throw std::runtime_error("memoria_asignar solo puede usarse dentro de inseguro");
+    if(numero(cfv_longitud(cfv_args))!=1)throw std::runtime_error("memoria_asignar requiere tamaño");
+    double requested=numero(indice(cfv_args,Value{0.0}));
+    if(requested<=0||requested>67108864||std::floor(requested)!=requested)throw std::runtime_error("tamaño de memoria inválido");
+    auto block=std::make_shared<CfvMemoryBlock>();block->bytes.resize((size_t)requested);
+    auto id=cfv_memory_next_id.fetch_add(1);
+    {std::lock_guard<std::mutex> lock(cfv_memory_mutex);cfv_memory_blocks[id]=block;}
+    return cfv_pointer(id,0,(std::uint64_t)requested);
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("memoria_liberar")}, "=="))) {
+    if(cfv_unsafe_depth==0)throw std::runtime_error("memoria_liberar solo puede usarse dentro de inseguro");
+    auto [id,offset,block]=cfv_pointer_parts(indice(cfv_args,Value{0.0}));(void)offset;(void)block;
+    std::lock_guard<std::mutex> lock(cfv_memory_mutex);cfv_memory_blocks.erase(id);return Value{};
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("rutas_compiladas")}, "=="))) {
+    if(verdad(cfv_tiene_clave(cfv_fns,Value{std::string("__rutas__")})))return indice(cfv_fns,Value{std::string("__rutas__")});
+    return crear_lista({});
+  }
   if (verdad(compara(cfv_nombre, Value{std::string("tarea")}, "=="))) {
     (void)(cfv_afirmar(
       compara(cfv_longitud(cfv_args), Value{1.0}, "=="),
@@ -5241,6 +5362,16 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
     if (verdad(compara(indice(cfv_nodo_e, Value{std::string("valor", 5)}), Value{std::string("~", 1)}, "=="))) {
       return Value{(double)(~(long long)numero(cfv_operando))};
     }
+    if (verdad(compara(indice(cfv_nodo_e,Value{std::string("valor")}),Value{std::string("@")},"=="))) {
+      if(cfv_unsafe_depth==0)throw std::runtime_error("operador @ fuera de bloque inseguro");
+      if(!cfv_is_pointer(cfv_operando))throw std::runtime_error("@ requiere memoria asignada por C-Forge");
+      return cfv_operando;
+    }
+    if (verdad(compara(indice(cfv_nodo_e,Value{std::string("valor")}),Value{std::string("*")},"=="))) {
+      if(cfv_unsafe_depth==0)throw std::runtime_error("desreferenciación fuera de bloque inseguro");
+      auto [id,offset,block]=cfv_pointer_parts(cfv_operando);(void)id;
+      return Value{(double)block->bytes[(size_t)offset]};
+    }
   }
   if (verdad(compara(cfv_t, Value{std::string("Binario", 7)}, "=="))) {
     if (verdad(compara(indice(cfv_nodo_e, Value{std::string("valor", 5)}), Value{std::string("y", 1)}, "=="))) {
@@ -5359,6 +5490,14 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
       Value cfv_b = cfv_base;
  [[maybe_unused]] size_t cfv_b_tipo = 99;
       asignar_indice(cfv_b, indice(cfv_objetivo, Value{std::string("valor", 5)}), cfv_nuevo_val);
+    } else if (verdad(compara(indice(cfv_objetivo,Value{std::string("tipo")}),Value{std::string("Unario")},"==")) &&
+               verdad(compara(indice(cfv_objetivo,Value{std::string("valor")}),Value{std::string("*")},"=="))) {
+      if(cfv_unsafe_depth==0)throw std::runtime_error("escritura por puntero fuera de bloque inseguro");
+      Value cfv_ptr_target=cfv_eval_expr(indice(indice(cfv_objetivo,Value{std::string("hijos")}),Value{0.0}),cfv_env,cfv_fns);
+      auto [id,offset,block]=cfv_pointer_parts(cfv_ptr_target);(void)id;
+      double byte=numero(cfv_nuevo_val);
+      if(byte<0||byte>255||std::floor(byte)!=byte)throw std::runtime_error("el byte debe estar entre 0 y 255");
+      block->bytes[(size_t)offset]=(std::uint8_t)byte;
     }
     return cfv_nuevo_val;
   }
@@ -5408,7 +5547,15 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
       }
     } catch (...) {}
     // Check class constructor
-    std::string cfv_clase_key_c = "__clase_" + texto(cfv_nombre_fn);
+    std::string cfv_requested_class=texto(cfv_nombre_fn);
+    std::string cfv_class_lookup_name=cfv_requested_class;
+    std::string cfv_generic_argument;
+    auto cfv_lt=cfv_requested_class.find('<');
+    if(cfv_lt!=std::string::npos&&cfv_requested_class.back()=='>'){
+      cfv_class_lookup_name=cfv_requested_class.substr(0,cfv_lt);
+      cfv_generic_argument=cfv_requested_class.substr(cfv_lt+1,cfv_requested_class.size()-cfv_lt-2);
+    }
+    std::string cfv_clase_key_c = "__clase_" + cfv_class_lookup_name;
     if (verdad(cfv_tiene_clave(cfv_fns, Value{cfv_clase_key_c}))) {
       // Enforce: cannot instantiate abstract class
       Value cfv_cdef_abs = indice(cfv_fns, Value{cfv_clase_key_c});
@@ -5419,7 +5566,23 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
         }
       }
       auto cfv_inst_map = std::make_shared<std::map<std::string,Value>>();
-      (*cfv_inst_map)["__clase"] = cfv_nombre_fn;
+      (*cfv_inst_map)["__clase"] = Value{cfv_class_lookup_name};
+      if(!cfv_generic_argument.empty())(*cfv_inst_map)["__tipo_generico"]=Value{cfv_generic_argument};
+      if(!cfv_generic_argument.empty()&&verdad(cfv_tiene_clave(cfv_cdef_abs,Value{std::string("restricciones")}))){
+        Value restrictions=indice(cfv_cdef_abs,Value{std::string("restricciones")});
+        if(restrictions.index()==5&&!std::get<Mapa>(restrictions.data)->empty()){
+          std::string required=texto(std::get<Mapa>(restrictions.data)->begin()->second);
+          std::string argument_key="__clase_"+cfv_generic_argument;
+          if(!verdad(cfv_tiene_clave(cfv_fns,Value{argument_key})))throw std::runtime_error("tipo genérico desconocido '"+cfv_generic_argument+"'");
+          Value argument_def=indice(cfv_fns,Value{argument_key});
+          bool implements=false;
+          if(verdad(cfv_tiene_clave(argument_def,Value{std::string("implementa")}))){
+            Value interfaces=indice(argument_def,Value{std::string("implementa")});
+            for(double i=0;i<numero(cfv_longitud(interfaces));++i)if(texto(indice(interfaces,Value{i}))==required)implements=true;
+          }
+          if(!implements)throw std::runtime_error("tipo '"+cfv_generic_argument+"' no implementa restricción '"+required+"'");
+        }
+      }
       // Helper lambda to fill fields from a class def (including parent chain)
       std::function<void(const std::string&)> cfv_fill_campos = [&](const std::string& cls_name) {
         std::string ck = "__clase_" + cls_name;
@@ -5440,7 +5603,7 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
           cfv_ci = suma(cfv_ci, Value{1.0});
         }
       };
-      cfv_fill_campos(texto(cfv_nombre_fn));
+      cfv_fill_campos(cfv_class_lookup_name);
       Value cfv_inst_val = Value{cfv_inst_map};
       // Call constructor method if defined
       std::function<void(const std::string&)> cfv_call_constructor = [&](const std::string& cls_name) {
@@ -5474,7 +5637,7 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
           }
         }
       };
-      cfv_call_constructor(texto(cfv_nombre_fn));
+      cfv_call_constructor(cfv_class_lookup_name);
       return cfv_inst_val;
     }
     (void)(cfv_afirmar(cfv_tiene_clave(cfv_fns, cfv_nombre_fn), suma(suma(Value{std::string("función desconocida '", 22)}, cfv_nombre_fn), Value{std::string("'", 1)})));
@@ -5567,7 +5730,7 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
       (void)(cfv_agregar(cfv_args_m, cfv_eval_expr(indice(indice(cfv_nodo_e, Value{std::string("hijos", 5)}), cfv_mi), cfv_env, cfv_fns)));
       asignar(cfv_mi, cfv_mi_tipo, suma(cfv_mi, Value{1.0}), "mi");
     }
-    if (verdad(Value{verdad(Value{verdad(compara(cfv_metodo, Value{std::string("agregar", 7)}, "==")) || verdad(compara(cfv_metodo, Value{std::string("push", 4)}, "=="))}) || verdad(compara(cfv_metodo, Value{std::string("append", 6)}, "=="))})) {
+    if (cfv_base.index()==4 && verdad(Value{verdad(Value{verdad(compara(cfv_metodo, Value{std::string("agregar", 7)}, "==")) || verdad(compara(cfv_metodo, Value{std::string("push", 4)}, "=="))}) || verdad(compara(cfv_metodo, Value{std::string("append", 6)}, "=="))})) {
       (void)(cfv_agregar(cfv_base, indice(cfv_args_m, Value{0.0})));
       return Value{};
     }
@@ -5758,6 +5921,34 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
   Value cfv_t = indice(cfv_stmt, Value{std::string("tipo", 4)});
   if (cfv_t.index() != 2) throw std::runtime_error("tipo incompatible para t");
  [[maybe_unused]] size_t cfv_t_tipo = 2;
+  if (verdad(compara(cfv_t,Value{std::string("Inseguro")},"=="))) {
+    struct CfvUnsafeGuard{CfvUnsafeGuard(){++cfv_unsafe_depth;}~CfvUnsafeGuard(){--cfv_unsafe_depth;}} guard;
+    Value scope=cfv_env_nuevo_scope(cfv_env);
+    return cfv_exec_bloque(indice(cfv_stmt,Value{std::string("hijos")}),scope,cfv_fns);
+  }
+  if (verdad(compara(cfv_t,Value{std::string("Atributo")},"=="))) {
+    Value children=indice(cfv_stmt,Value{std::string("hijos")});
+    Value declaration=indice(children,Value{0.0});
+    Value raw_args=indice(children,Value{1.0});
+    std::string attribute=texto(indice(cfv_stmt,Value{std::string("valor")}));
+    Value result=cfv_exec_stmt(declaration,cfv_env,cfv_fns);
+    if(attribute=="Ruta"){
+      if(!verdad(compara(indice(declaration,Value{std::string("tipo")}),Value{std::string("Funcion")},"==")))
+        throw std::runtime_error("#[Ruta] solo puede decorar funciones");
+      if(numero(cfv_longitud(raw_args))!=2)throw std::runtime_error("#[Ruta] requiere ruta y método HTTP");
+      Value path=cfv_eval_expr(indice(raw_args,Value{0.0}),cfv_env,cfv_fns);
+      Value method=cfv_eval_expr(indice(raw_args,Value{1.0}),cfv_env,cfv_fns);
+      if(path.index()!=2||method.index()!=2)throw std::runtime_error("ruta y método HTTP deben ser textos");
+      Value routes=crear_lista({});
+      if(verdad(cfv_tiene_clave(cfv_fns,Value{std::string("__rutas__")})))routes=indice(cfv_fns,Value{std::string("__rutas__")});
+      auto route=std::make_shared<std::map<std::string,Value>>();
+      (*route)["ruta"]=path;(*route)["metodo"]=method;
+      (*route)["manejador"]=indice(declaration,Value{std::string("valor")});
+      (void)cfv_agregar(routes,Value{route});
+      asignar_indice(cfv_fns,Value{std::string("__rutas__")},routes);
+    }
+    return result;
+  }
   if (verdad(compara(cfv_t, Value{std::string("Declaracion", 11)}, "=="))) {
     Value cfv_val = cfv_eval_expr(indice(indice(cfv_stmt, Value{std::string("hijos", 5)}), Value{0.0}), cfv_env, cfv_fns);
     // Runtime type annotation checking
@@ -6150,6 +6341,8 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
     std::string cfv_padre_str_cls = "";
     bool cfv_clase_es_abstracta2 = false;
     Value cfv_clase_implementa2 = Value{};
+    Value cfv_clase_genericos2 = Value{};
+    Value cfv_clase_restricciones2 = Value{};
     Value cfv_mi2 = Value{0.0};
     while (verdad(compara(cfv_mi2, cfv_longitud(cfv_miembros2), "<"))) {
       Value cfv_m = indice(cfv_miembros2, cfv_mi2);
@@ -6162,6 +6355,9 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
         }
       } else if (verdad(compara(indice(cfv_m, Value{std::string("tipo")}), Value{std::string("Implementa")}, "=="))) {
         cfv_clase_implementa2 = indice(cfv_m, Value{std::string("hijos")});
+      } else if (verdad(compara(indice(cfv_m,Value{std::string("tipo")}),Value{std::string("Genericos")},"=="))) {
+        cfv_clase_genericos2=indice(cfv_m,Value{std::string("hijos")});
+        cfv_clase_restricciones2=indice(cfv_m,Value{std::string("valor")});
       } else if (verdad(compara(indice(cfv_m, Value{std::string("tipo")}), Value{std::string("CampoDef")}, "=="))) {
         auto cfv_campo_entry2 = std::make_shared<std::map<std::string,Value>>();
         (*cfv_campo_entry2)["nombre"] = indice(cfv_m, Value{std::string("valor")});
@@ -6189,6 +6385,10 @@ Value cfv_exec_stmt(Value cfv_stmt, Value cfv_env, Value cfv_fns) {
     (*cfv_clase_def2)["metodos"] = Value{cfv_metodos_map};
     if (cfv_clase_es_abstracta2) (*cfv_clase_def2)["abstracto"] = Value{true};
     if (cfv_clase_implementa2.index() == 4) (*cfv_clase_def2)["implementa"] = cfv_clase_implementa2;
+    if(cfv_clase_genericos2.index()==4){
+      (*cfv_clase_def2)["genericos"]=cfv_clase_genericos2;
+      (*cfv_clase_def2)["restricciones"]=cfv_clase_restricciones2;
+    }
     // Inherit from parent if specified
     if (!cfv_padre_str_cls.empty()) {
       (*cfv_clase_def2)["padre"] = Value{cfv_padre_str_cls};

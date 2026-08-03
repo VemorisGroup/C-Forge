@@ -1,0 +1,17 @@
+// Escritura directa sobre un bloque nativo validado por el runtime.
+
+funcion actualizar_matriz_grafica(matriz) {
+    sea comprobacion = 0
+    inseguro {
+        sea destino = memoria_asignar(matriz.longitud)
+        sea puntero = @destino
+        sea i = 0
+        mientras (i < matriz.longitud) {
+            *(puntero + i) = matriz[i]
+            comprobacion = comprobacion + *(puntero + i)
+            i = i + 1
+        }
+        memoria_liberar(destino)
+    }
+    retornar comprobacion
+}
