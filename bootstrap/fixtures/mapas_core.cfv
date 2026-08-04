@@ -1,0 +1,6 @@
+// Mapa administrado del frontend autoalojado.
+sea configuracion = {"workers": 8, "puerto": 443}
+mostrar(configuracion["workers"])
+configuracion["workers"] = configuracion["workers"] + 4
+mostrar(configuracion["workers"])
+mostrar(configuracion["puerto"])

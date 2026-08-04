@@ -118,6 +118,48 @@ funcion tipo_expresion_core(
     si (nodo.tipo == "Texto") {
         retornar "texto"
     }
+    si (nodo.tipo == "Booleano") {
+        retornar "booleano"
+    }
+    si (nodo.tipo == "Lista") {
+        sea elementos_lista: lista = nodo.hijos
+        sea indice_lista: numero = 0
+        mientras (indice_lista < longitud(elementos_lista)) {
+            tipo_expresion_core(elementos_lista[indice_lista], simbolos, errores)
+            indice_lista = indice_lista + 1
+        }
+        retornar "lista"
+    }
+    si (nodo.tipo == "Mapa") {
+        sea entradas_mapa: lista = nodo.hijos
+        sea indice_mapa: numero = 0
+        sea tipo_valor_mapa: texto = ""
+        mientras (indice_mapa < longitud(entradas_mapa)) {
+            sea tipo_clave: texto =
+                tipo_expresion_core(entradas_mapa[indice_mapa], simbolos, errores)
+            si (tipo_clave != "texto" y tipo_clave != "error") {
+                agregar(
+                    errores,
+                    diagnostico_core(
+                        "CFB2010", nodo.linea,
+                        "la clave de un mapa Core debe ser texto"
+                    )
+                )
+            }
+            sea tipo_entrada: texto = tipo_expresion_core(
+                entradas_mapa[indice_mapa + 1], simbolos, errores
+            )
+            si (tipo_valor_mapa == "") {
+                tipo_valor_mapa = tipo_entrada
+            } sino {
+                si (tipo_entrada != tipo_valor_mapa) {
+                    tipo_valor_mapa = "cualquiera"
+                }
+            }
+            indice_mapa = indice_mapa + 2
+        }
+        retornar "mapa<" + tipo_valor_mapa + ">"
+    }
     si (nodo.tipo == "Identificador") {
         retornar tipo_identificador_core(nodo, simbolos, errores)
     }
@@ -142,6 +184,19 @@ funcion tipo_expresion_core(
             simbolo.marcar_movido()
         }
         retornar tipo_objetivo
+    }
+    si (nodo.tipo == "Indice") {
+        sea partes_indice: lista = nodo.hijos
+        sea tipo_base: texto =
+            tipo_expresion_core(partes_indice[0], simbolos, errores)
+        tipo_expresion_core(partes_indice[1], simbolos, errores)
+        si (segmento_core(tipo_base, 0, 5) == "mapa<") {
+            retornar segmento_core(tipo_base, 5, longitud(tipo_base) - 1)
+        }
+        si (tipo_base == "lista" o tipo_base == "texto") {
+            retornar "cualquiera"
+        }
+        retornar "error"
     }
     si (nodo.tipo == "Binario") {
         sea hijos_binarios: lista = nodo.hijos
@@ -222,6 +277,11 @@ funcion analizar_sentencia_core(
     }
     si (nodo.tipo == "Mostrar") {
         tipo_expresion_core(hijos[0], simbolos, errores)
+        retornar errores
+    }
+    si (nodo.tipo == "Asignacion") {
+        tipo_expresion_core(hijos[0], simbolos, errores)
+        tipo_expresion_core(hijos[1], simbolos, errores)
         retornar errores
     }
     agregar(

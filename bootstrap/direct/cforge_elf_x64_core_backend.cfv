@@ -966,7 +966,7 @@ funcion empaquetar_core_elf(codigo: lista, datos: lista): lista {
 }
 
 funcion compilar_programa_core_elf(programa_original: cualquiera): lista {
-    sea programa: cualquiera = bajar_objetos_core(programa_original)
+    sea programa: cualquiera = bajar_mapas_core(bajar_objetos_core(programa_original))
     sea contexto: cualquiera =
         ContextoELFCore([], [], [], 0, [], "", [], [], 0)
     sea declaraciones: lista = programa.hijos

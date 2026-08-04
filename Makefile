@@ -36,7 +36,41 @@ endif
 
 .PHONY: all build debug release install uninstall test check stdlib-load-check \
 	cli-check malformed-check sanitize-check backend-check install-check \
-	bootstrap-check backend-core-check ir-core-check object-lowering-check release-check clean help
+	bootstrap-bundle backend-core-bundle bootstrap-check backend-core-check ir-core-check object-lowering-check release-check clean help
+
+# Regenera Stage 1 desde sus fuentes canónicas .cfv. Esto evita que el
+# compilador empaquetado quede desfasado del lexer, parser o runtime reales.
+bootstrap-bundle:
+	@{ \
+		echo '// C-Forge Stage 1 Bootstrap B4.'; \
+		echo '// Archivo generado únicamente a partir de componentes escritos en .cfv.'; \
+		for source in bootstrap/core_lexer.cfv bootstrap/core_ast.cfv \
+			bootstrap/core_parser.cfv bootstrap/core_semantics.cfv \
+			bootstrap/core_runtime.cfv bootstrap/core_emitter.cfv \
+			bootstrap/core_driver.cfv; do \
+			echo; echo "// ===== $$source ====="; cat "$$source"; \
+		done; \
+	} > bootstrap/stage1/cforge_stage1.cfv
+	@echo "  GEN  bootstrap/stage1/cforge_stage1.cfv"
+
+# Empaqueta los tres compiladores directos desde un único frontend y lowering.
+# awk solo retira el CLI del emisor mínimo; la biblioteca binaria permanece .cfv.
+backend-core-bundle:
+	@set -e; \
+	for platform in macho_arm64 elf_x64 pe_x64; do \
+		output="bootstrap/direct/cforge_$${platform}_core.cfv"; \
+		base="bootstrap/direct/cforge_$${platform}.cfv"; \
+		backend="bootstrap/direct/cforge_$${platform}_core_backend.cfv"; \
+		{ \
+			for source in bootstrap/core_lexer.cfv bootstrap/core_ast.cfv \
+				bootstrap/core_parser.cfv bootstrap/core_ir.cfv \
+				bootstrap/core_object_lowering.cfv bootstrap/core_map_lowering.cfv \
+				bootstrap/core_modules.cfv; do cat "$$source"; echo; done; \
+			awk '/^sea argumentos[^:]*: lista = argumentos_programa\(\)/ { exit } { print }' "$$base"; \
+			cat "$$backend"; \
+		} > "$$output"; \
+		done
+	@echo "  GEN  Mach-O ARM64, ELF x64 y PE x64 Core"
 
 ## Compilar (default)
 all: build
@@ -201,7 +235,7 @@ install-check: build
 ## Verificar el frontend autoalojado de C-Forge Core.
 ## Stage 0 construye Stage 1; Stage 1 construye Stage 2; Stage 2 construye
 ## Stage 3. Los dos últimos artefactos deben ser idénticos byte por byte.
-bootstrap-check:
+bootstrap-check: bootstrap-bundle
 	@set -e; dir=$$(mktemp -d /tmp/cforge-bootstrap.XXXXXX); \
 	$(CXX) -std=c++20 -O2 -Wall -Wextra -Wpedantic \
 		bootstrap/stage0/cforge_bootstrap.cpp -o "$$dir/stage0"; \
@@ -211,10 +245,12 @@ bootstrap-check:
 	cmp "$$dir/stage2" "$$dir/stage3"; \
 	"$$dir/stage3" bootstrap/fixtures/minimal.cfv -o "$$dir/minimal" >/dev/null; \
 	test "$$($$dir/minimal)" = "$$(printf 'C-Forge Core Bootstrap\n42')"; \
+	"$$dir/stage3" bootstrap/fixtures/mapas_core.cfv -o "$$dir/mapas" >/dev/null; \
+	test "$$($$dir/mapas)" = "$$(printf '8\n12\n443')"; \
 	echo "  ✓ Stage 2 y Stage 3 son idénticos; compilador Core autoalojado"
 
 ## Verificar los backends Core B6.8 sin toolchain durante la emisión.
-backend-core-check:
+backend-core-check: backend-core-bundle
 	@set -e; dir=$$(mktemp -d /tmp/cforge-backend-core.XXXXXX); \
 	$(CXX) -std=c++20 -O2 -Wall -Wextra -Wpedantic \
 		bootstrap/stage0/cforge_bootstrap.cpp -o "$$dir/stage0"; \
@@ -272,6 +308,12 @@ backend-core-check:
 		bootstrap/fixtures/modules_b616/main.cfv -o "$$dir/modulos.exe" >/dev/null; \
 	env PATH=/nonexistent "$$dir/elf-core" \
 		bootstrap/fixtures/modules_b616/main.cfv -o "$$dir/modulos-elf" >/dev/null; \
+	env PATH=/nonexistent "$$dir/macho-core" \
+		bootstrap/fixtures/machine_maps_b617.cfv -o "$$dir/mapas-macho" >/dev/null; \
+	env PATH=/nonexistent "$$dir/pe-core" \
+		bootstrap/fixtures/machine_maps_b617.cfv -o "$$dir/mapas.exe" >/dev/null; \
+	env PATH=/nonexistent "$$dir/elf-core" \
+		bootstrap/fixtures/machine_maps_b617.cfv -o "$$dir/mapas-elf" >/dev/null; \
 	if env PATH=/nonexistent "$$dir/macho-core" \
 		bootstrap/fixtures/machine_interfaces_invalid_b615.cfv \
 		-o "$$dir/interfaz-invalida" >/dev/null 2>&1; then \
@@ -306,6 +348,9 @@ backend-core-check:
 	file "$$dir/modulos-macho" | grep -q "Mach-O 64-bit executable arm64"; \
 	file "$$dir/modulos.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/modulos-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
+	file "$$dir/mapas-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/mapas.exe" | grep -q "PE32+ executable.*x86-64"; \
+	file "$$dir/mapas-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
 	if [ "$(UNAME)" = "Darwin" ] && [ "$(ARCH)" = "arm64" ]; then \
 		test "$$($$dir/uno-macho)" = "C-FORGE-B6.7-OK"; \
 		test "$$($$dir/objetos-macho)" = "C-FORGE-B6.11-OBJECT-OK"; \
@@ -314,6 +359,7 @@ backend-core-check:
 		test "$$($$dir/ciclo-macho)" = "$$(printf 'C-FORGE-B6.14-CONSTRUCTOR-OK\nC-FORGE-B6.14-DESTRUCTOR-OK')"; \
 		test "$$($$dir/interfaz-macho)" = "C-FORGE-B6.15-INTERFACE-OK"; \
 		test "$$($$dir/modulos-macho)" = "C-FORGE-B6.16-MODULES-OK"; \
+		test "$$($$dir/mapas-macho)" = "C-FORGE-B6.17-MAPS-OK"; \
 	fi; \
 	if [ "$(UNAME)" = "Linux" ] && [ "$(ARCH)" = "x86_64" ]; then \
 		test "$$($$dir/uno-elf)" = "C-FORGE-B6.7-OK"; \
@@ -323,8 +369,9 @@ backend-core-check:
 		test "$$($$dir/ciclo-elf)" = "$$(printf 'C-FORGE-B6.14-CONSTRUCTOR-OK\nC-FORGE-B6.14-DESTRUCTOR-OK')"; \
 		test "$$($$dir/interfaz-elf)" = "C-FORGE-B6.15-INTERFACE-OK"; \
 		test "$$($$dir/modulos-elf)" = "C-FORGE-B6.16-MODULES-OK"; \
+		test "$$($$dir/mapas-elf)" = "C-FORGE-B6.17-MAPS-OK"; \
 	fi; \
-	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.16 con módulos"
+	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.17 con mapas"
 
 ## Verificar el IR común de objetos que consumirán los tres backends.
 ir-core-check:

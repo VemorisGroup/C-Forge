@@ -865,7 +865,7 @@ funcion empaquetar_core_macho(
 }
 
 funcion compilar_programa_core_macho(programa_original: cualquiera): lista {
-    sea programa: cualquiera = bajar_objetos_core(programa_original)
+    sea programa: cualquiera = bajar_mapas_core(bajar_objetos_core(programa_original))
     sea contexto: cualquiera =
         ContextoARMCore([], [], [], 0, [], "", [], [], 0)
     sea declaraciones: lista = programa.hijos

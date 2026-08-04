@@ -1,0 +1,132 @@
+// C-Forge Core Map Lowering 1.
+// Convierte mapas literales con claves de texto conocidas en almacenamiento
+// contiguo antes de llegar a Mach-O, ELF o PE. Los tres backends reciben así
+// el mismo AST y no implementan semánticas incompatibles.
+
+estructura RegistroMapaCore {
+    nombre: texto
+    claves: lista
+}
+
+estructura ContextoMapasCore {
+    mapas: lista
+}
+
+funcion nombre_declaracion_mapa_core(valor: texto): texto {
+    sea salida: texto = ""
+    sea indice: numero = 0
+    mientras (indice < longitud(valor) y valor[indice] != ":") {
+        salida = salida + valor[indice]
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion texto_literal_mapa_core(valor: texto): texto {
+    afirmar(longitud(valor) >= 2, "CFMAP1001: clave de mapa inválida")
+    sea salida: texto = ""
+    sea indice: numero = 1
+    mientras (indice + 1 < longitud(valor)) {
+        salida = salida + valor[indice]
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion indice_registro_mapa_core(contexto: cualquiera, nombre: texto): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(contexto.mapas)) {
+        si (contexto.mapas[indice].nombre == nombre) { retornar indice }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion indice_clave_mapa_core(claves: lista, clave: texto): numero {
+    sea indice: numero = 0
+    mientras (indice < longitud(claves)) {
+        si (claves[indice] == clave) { retornar indice }
+        indice = indice + 1
+    }
+    retornar -1
+}
+
+funcion bajar_expresion_mapa_core(nodo: cualquiera, contexto: cualquiera): cualquiera {
+    si (nodo.tipo == "Indice") {
+        sea partes: lista = nodo.hijos
+        si (partes[0].tipo == "Identificador" y partes[1].tipo == "Texto") {
+            sea registro_indice: numero =
+                indice_registro_mapa_core(contexto, partes[0].valor)
+            si (registro_indice >= 0) {
+                sea clave: texto = texto_literal_mapa_core(partes[1].valor)
+                sea posicion: numero = indice_clave_mapa_core(
+                    contexto.mapas[registro_indice].claves, clave
+                )
+                afirmar(
+                    posicion >= 0,
+                    "CFMAP1002: clave desconocida '" + clave + "'"
+                )
+                retornar nodo_ast_core_con_hijos(
+                    "Indice", "[]", nodo.linea,
+                    [partes[0], nodo_ast_core("Numero", a_texto(posicion), nodo.linea)]
+                )
+            }
+        }
+    }
+    sea hijos: lista = []
+    sea indice: numero = 0
+    mientras (indice < longitud(nodo.hijos)) {
+        agregar(
+            hijos,
+            bajar_expresion_mapa_core(nodo.hijos[indice], contexto)
+        )
+        indice = indice + 1
+    }
+    retornar nodo_ast_core_con_hijos(nodo.tipo, nodo.valor, nodo.linea, hijos)
+}
+
+funcion bajar_sentencia_mapa_core(nodo: cualquiera, contexto: cualquiera): cualquiera {
+    si (nodo.tipo == "Declaracion" y nodo.hijos[0].tipo == "Mapa") {
+        sea entradas: lista = nodo.hijos[0].hijos
+        sea claves: lista = []
+        sea valores: lista = []
+        sea indice: numero = 0
+        mientras (indice < longitud(entradas)) {
+            afirmar(
+                entradas[indice].tipo == "Texto",
+                "CFMAP1003: el backend nativo requiere claves literales de texto"
+            )
+            agregar(claves, texto_literal_mapa_core(entradas[indice].valor))
+            agregar(
+                valores,
+                bajar_expresion_mapa_core(entradas[indice + 1], contexto)
+            )
+            indice = indice + 2
+        }
+        sea nombre: texto = nombre_declaracion_mapa_core(nodo.valor)
+        afirmar(
+            indice_registro_mapa_core(contexto, nombre) < 0,
+            "CFMAP1004: mapa duplicado '" + nombre + "'"
+        )
+        agregar(contexto.mapas, RegistroMapaCore(nombre, claves))
+        retornar nodo_ast_core_con_hijos(
+            "Declaracion", nodo.valor, nodo.linea,
+            [nodo_ast_core_con_hijos("Lista", "lista", nodo.linea, valores)]
+        )
+    }
+    retornar bajar_expresion_mapa_core(nodo, contexto)
+}
+
+funcion bajar_mapas_core(programa: cualquiera): cualquiera {
+    sea contexto: cualquiera = ContextoMapasCore([])
+    sea salida: lista = []
+    sea indice: numero = 0
+    mientras (indice < longitud(programa.hijos)) {
+        agregar(
+            salida,
+            bajar_sentencia_mapa_core(programa.hijos[indice], contexto)
+        )
+        indice = indice + 1
+    }
+    retornar nodo_ast_core_con_hijos("Programa", "", programa.linea, salida)
+}

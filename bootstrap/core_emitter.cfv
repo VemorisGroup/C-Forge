@@ -261,6 +261,9 @@ funcion emitir_expresion_core(
     si (nodo.tipo == "Lista") {
         retornar "cfv_list(" + emitir_argumentos_core(hijos, 0, contexto) + ")"
     }
+    si (nodo.tipo == "Mapa") {
+        retornar "cfv_map(" + emitir_argumentos_core(hijos, 0, contexto) + ")"
+    }
     si (nodo.tipo == "Binario") {
         retornar emitir_binario_core(nodo, contexto)
     }
@@ -276,7 +279,7 @@ funcion emitir_expresion_core(
         retornar emitir_llamada_core(nodo, contexto)
     }
     si (nodo.tipo == "Indice") {
-        retornar "cfv_index(" +
+        retornar "cfv_index_any(" +
             emitir_expresion_core(hijos[0], contexto) + ", " +
             emitir_expresion_core(hijos[1], contexto) + ")"
     }
@@ -327,6 +330,12 @@ funcion emitir_objetivo_asignacion_core(
         retornar "cfv_member_ref(" +
             objeto_emitido +
             ", \"" + objetivo.valor + "\")"
+    }
+    si (objetivo.tipo == "Indice") {
+        sea hijos_indice: lista = objetivo.hijos
+        retornar "cfv_index_ref(" +
+            emitir_expresion_core(hijos_indice[0], contexto) + ", " +
+            emitir_expresion_core(hijos_indice[1], contexto) + ")"
     }
     afirmar(falso, "objetivo de asignación no soportado")
     retornar ""
@@ -520,6 +529,7 @@ funcion emitir_programa_core(programa: cualquiera): cualquiera {
     }
     sea contexto: cualquiera = contexto_emision_core(programa)
     sea codigo: texto = runtime_cpp_core() +
+        runtime_mapas_cpp_core() +
         prototipos_core(contexto) +
         definiciones_core(programa, contexto) +
         cuerpo_principal_core(programa, contexto)

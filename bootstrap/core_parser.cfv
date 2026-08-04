@@ -123,6 +123,26 @@ funcion primaria_parser_core(estado: cualquiera): cualquiera {
             lista_argumentos_parser_core(estado, "]")
         )
     }
+    si (tomar_lexema_core(estado, "{")) {
+        sea entradas: lista = []
+        si (no comprobar_lexema_core(estado, "}")) {
+            sea continuar_mapa: booleano = verdadero
+            mientras (continuar_mapa) {
+                sea clave: cualquiera = expresion_parser_core(estado)
+                requerir_lexema_core(
+                    estado, ":", "se esperaba ':' después de la clave del mapa"
+                )
+                sea valor_mapa: cualquiera = expresion_parser_core(estado)
+                agregar(entradas, clave)
+                agregar(entradas, valor_mapa)
+                continuar_mapa = tomar_lexema_core(estado, ",")
+            }
+        }
+        requerir_lexema_core(estado, "}", "se esperaba '}' en el mapa")
+        retornar nodo_ast_core_con_hijos(
+            "Mapa", "mapa", token.linea, entradas
+        )
+    }
     si (token.tipo == "IDENT") {
         avanzar_parser_core(estado)
         si (tomar_lexema_core(estado, "(")) {

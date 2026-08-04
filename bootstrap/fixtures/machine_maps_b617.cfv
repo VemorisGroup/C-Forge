@@ -1,0 +1,7 @@
+sea configuracion = {"workers": 8, "puerto": 443}
+configuracion["workers"] = configuracion["workers"] + 4
+si (configuracion["workers"] == 12) {
+    si (configuracion["puerto"] == 443) {
+        mostrar("C-FORGE-B6.17-MAPS-OK")
+    }
+}
