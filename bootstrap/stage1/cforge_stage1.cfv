@@ -603,6 +603,36 @@ funcion sentencia_retorno_parser_core(estado: cualquiera): cualquiera {
     )
 }
 
+funcion sentencia_lanzar_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "lanzar", "se esperaba 'lanzar'"
+    )
+    sea error: cualquiera = expresion_parser_core(estado)
+    tomar_lexema_core(estado, ";")
+    retornar nodo_ast_core_con_hijos(
+        "Lanzar", "lanzar", palabra.linea, [error]
+    )
+}
+
+funcion sentencia_intentar_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "intentar", "se esperaba 'intentar'"
+    )
+    sea protegido: cualquiera = bloque_parser_core(estado)
+    requerir_lexema_core(
+        estado, "capturar", "se esperaba 'capturar' después de intentar"
+    )
+    requerir_lexema_core(estado, "(", "se esperaba '(' después de capturar")
+    sea error: cualquiera = requerir_tipo_core(
+        estado, "IDENT", "se esperaba el nombre del error"
+    )
+    requerir_lexema_core(estado, ")", "se esperaba ')' después del error")
+    sea captura: cualquiera = bloque_parser_core(estado)
+    retornar nodo_ast_core_con_hijos(
+        "Intentar", error.lexema, palabra.linea, [protegido, captura]
+    )
+}
+
 funcion sentencia_parser_core(estado: cualquiera): cualquiera {
     si (comprobar_lexema_core(estado, "sea")) {
         retornar declaracion_parser_core(estado)
@@ -621,6 +651,12 @@ funcion sentencia_parser_core(estado: cualquiera): cualquiera {
     }
     si (comprobar_lexema_core(estado, "retornar")) {
         retornar sentencia_retorno_parser_core(estado)
+    }
+    si (comprobar_lexema_core(estado, "lanzar")) {
+        retornar sentencia_lanzar_parser_core(estado)
+    }
+    si (comprobar_lexema_core(estado, "intentar")) {
+        retornar sentencia_intentar_parser_core(estado)
     }
     si (tomar_lexema_core(estado, ";")) {
         sea vacia: cualquiera = token_anterior_core(estado)
@@ -1136,6 +1172,36 @@ funcion analizar_sentencia_core(
         tipo_expresion_core(hijos[1], simbolos, errores)
         retornar errores
     }
+    si (nodo.tipo == "Lanzar") {
+        tipo_expresion_core(hijos[0], simbolos, errores)
+        retornar errores
+    }
+    si (nodo.tipo == "Intentar") {
+        sea protegidas: lista = hijos[0].hijos
+        sea indice_protegido: numero = 0
+        mientras (indice_protegido < longitud(protegidas)) {
+            analizar_sentencia_core(
+                protegidas[indice_protegido], simbolos, errores
+            )
+            indice_protegido = indice_protegido + 1
+        }
+        sea simbolos_captura: lista = []
+        sea copia: numero = 0
+        mientras (copia < longitud(simbolos)) {
+            agregar(simbolos_captura, simbolos[copia])
+            copia = copia + 1
+        }
+        agregar(simbolos_captura, SimboloCore(nodo.valor, "texto", falso))
+        sea capturas: lista = hijos[1].hijos
+        sea indice_captura: numero = 0
+        mientras (indice_captura < longitud(capturas)) {
+            analizar_sentencia_core(
+                capturas[indice_captura], simbolos_captura, errores
+            )
+            indice_captura = indice_captura + 1
+        }
+        retornar errores
+    }
     agregar(
         errores,
         diagnostico_core(
@@ -1594,6 +1660,20 @@ funcion emitir_sentencia_core(
     si (nodo.tipo == "Mientras") {
         retornar sangria + "while (cfv_truth(" +
             emitir_expresion_core(hijos[0], contexto) + ")) {\n" +
+            emitir_bloque_core(hijos[1], contexto, sangria + "    ") +
+            sangria + "}\n"
+    }
+    si (nodo.tipo == "Lanzar") {
+        retornar sangria + "throw std::runtime_error(cfv_format(" +
+            emitir_expresion_core(hijos[0], contexto) + "));\n"
+    }
+    si (nodo.tipo == "Intentar") {
+        sea nombre_error: texto = nombre_cpp_core(nodo.valor)
+        retornar sangria + "try {\n" +
+            emitir_bloque_core(hijos[0], contexto, sangria + "    ") +
+            sangria + "} catch (const std::exception& cfv_exception) {\n" +
+            sangria + "    Value " + nombre_error +
+            " = cfv_text(cfv_exception.what());\n" +
             emitir_bloque_core(hijos[1], contexto, sangria + "    ") +
             sangria + "}\n"
     }

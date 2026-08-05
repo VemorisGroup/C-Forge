@@ -247,6 +247,8 @@ bootstrap-check: bootstrap-bundle
 	test "$$($$dir/minimal)" = "$$(printf 'C-Forge Core Bootstrap\n42')"; \
 	"$$dir/stage3" bootstrap/fixtures/mapas_core.cfv -o "$$dir/mapas" >/dev/null; \
 	test "$$($$dir/mapas)" = "$$(printf '8\n12\n443')"; \
+	"$$dir/stage3" bootstrap/fixtures/excepciones_core.cfv -o "$$dir/excepciones" >/dev/null; \
+	test "$$($$dir/excepciones)" = "capturado: saldo insuficiente"; \
 	echo "  ✓ Stage 2 y Stage 3 son idénticos; compilador Core autoalojado"
 
 ## Verificar los backends Core B6.8 sin toolchain durante la emisión.

@@ -392,6 +392,20 @@ funcion emitir_sentencia_core(
             emitir_bloque_core(hijos[1], contexto, sangria + "    ") +
             sangria + "}\n"
     }
+    si (nodo.tipo == "Lanzar") {
+        retornar sangria + "throw std::runtime_error(cfv_format(" +
+            emitir_expresion_core(hijos[0], contexto) + "));\n"
+    }
+    si (nodo.tipo == "Intentar") {
+        sea nombre_error: texto = nombre_cpp_core(nodo.valor)
+        retornar sangria + "try {\n" +
+            emitir_bloque_core(hijos[0], contexto, sangria + "    ") +
+            sangria + "} catch (const std::exception& cfv_exception) {\n" +
+            sangria + "    Value " + nombre_error +
+            " = cfv_text(cfv_exception.what());\n" +
+            emitir_bloque_core(hijos[1], contexto, sangria + "    ") +
+            sangria + "}\n"
+    }
     si (nodo.tipo == "Vacia") {
         retornar ""
     }

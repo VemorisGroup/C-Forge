@@ -406,6 +406,36 @@ funcion sentencia_retorno_parser_core(estado: cualquiera): cualquiera {
     )
 }
 
+funcion sentencia_lanzar_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "lanzar", "se esperaba 'lanzar'"
+    )
+    sea error: cualquiera = expresion_parser_core(estado)
+    tomar_lexema_core(estado, ";")
+    retornar nodo_ast_core_con_hijos(
+        "Lanzar", "lanzar", palabra.linea, [error]
+    )
+}
+
+funcion sentencia_intentar_parser_core(estado: cualquiera): cualquiera {
+    sea palabra: cualquiera = requerir_lexema_core(
+        estado, "intentar", "se esperaba 'intentar'"
+    )
+    sea protegido: cualquiera = bloque_parser_core(estado)
+    requerir_lexema_core(
+        estado, "capturar", "se esperaba 'capturar' después de intentar"
+    )
+    requerir_lexema_core(estado, "(", "se esperaba '(' después de capturar")
+    sea error: cualquiera = requerir_tipo_core(
+        estado, "IDENT", "se esperaba el nombre del error"
+    )
+    requerir_lexema_core(estado, ")", "se esperaba ')' después del error")
+    sea captura: cualquiera = bloque_parser_core(estado)
+    retornar nodo_ast_core_con_hijos(
+        "Intentar", error.lexema, palabra.linea, [protegido, captura]
+    )
+}
+
 funcion sentencia_parser_core(estado: cualquiera): cualquiera {
     si (comprobar_lexema_core(estado, "sea")) {
         retornar declaracion_parser_core(estado)
@@ -424,6 +454,12 @@ funcion sentencia_parser_core(estado: cualquiera): cualquiera {
     }
     si (comprobar_lexema_core(estado, "retornar")) {
         retornar sentencia_retorno_parser_core(estado)
+    }
+    si (comprobar_lexema_core(estado, "lanzar")) {
+        retornar sentencia_lanzar_parser_core(estado)
+    }
+    si (comprobar_lexema_core(estado, "intentar")) {
+        retornar sentencia_intentar_parser_core(estado)
     }
     si (tomar_lexema_core(estado, ";")) {
         sea vacia: cualquiera = token_anterior_core(estado)

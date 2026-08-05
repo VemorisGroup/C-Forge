@@ -284,6 +284,36 @@ funcion analizar_sentencia_core(
         tipo_expresion_core(hijos[1], simbolos, errores)
         retornar errores
     }
+    si (nodo.tipo == "Lanzar") {
+        tipo_expresion_core(hijos[0], simbolos, errores)
+        retornar errores
+    }
+    si (nodo.tipo == "Intentar") {
+        sea protegidas: lista = hijos[0].hijos
+        sea indice_protegido: numero = 0
+        mientras (indice_protegido < longitud(protegidas)) {
+            analizar_sentencia_core(
+                protegidas[indice_protegido], simbolos, errores
+            )
+            indice_protegido = indice_protegido + 1
+        }
+        sea simbolos_captura: lista = []
+        sea copia: numero = 0
+        mientras (copia < longitud(simbolos)) {
+            agregar(simbolos_captura, simbolos[copia])
+            copia = copia + 1
+        }
+        agregar(simbolos_captura, SimboloCore(nodo.valor, "texto", falso))
+        sea capturas: lista = hijos[1].hijos
+        sea indice_captura: numero = 0
+        mientras (indice_captura < longitud(capturas)) {
+            analizar_sentencia_core(
+                capturas[indice_captura], simbolos_captura, errores
+            )
+            indice_captura = indice_captura + 1
+        }
+        retornar errores
+    }
     agregar(
         errores,
         diagnostico_core(
