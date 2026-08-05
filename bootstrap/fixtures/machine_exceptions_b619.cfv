@@ -1,0 +1,11 @@
+sea saldo: numero = 10
+
+intentar {
+    si (saldo < 50) {
+        lanzar "saldo insuficiente"
+    }
+    mostrar("no debe ejecutarse")
+} capturar (error) {
+    mostrar(error)
+    mostrar("captura completada")
+}

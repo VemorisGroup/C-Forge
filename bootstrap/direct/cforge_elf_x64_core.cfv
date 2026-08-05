@@ -1783,6 +1783,241 @@ funcion bajar_mapas_core(programa: cualquiera): cualquiera {
     retornar nodo_ast_core_con_hijos("Programa", "", programa.linea, salida)
 }
 
+// C-Forge Core Exception Lowering B6.19.
+// Reduce intentar/capturar/lanzar a control de flujo y valores Core antes de
+// emitir Mach-O, ELF o PE. No depende del mecanismo de excepciones de C++.
+
+estructura ContextoExcepcionesCore {
+    siguiente: numero
+}
+
+funcion identificador_excepcion_core(nombre: texto, linea: numero): cualquiera {
+    retornar nodo_ast_core("Identificador", nombre, linea)
+}
+
+funcion numero_excepcion_core(valor: numero, linea: numero): cualquiera {
+    retornar nodo_ast_core("Numero", a_texto(valor), linea)
+}
+
+funcion condicion_sin_error_core(nombre: texto, linea: numero): cualquiera {
+    retornar nodo_ast_core_con_hijos(
+        "Binario", "==", linea,
+        [identificador_excepcion_core(nombre, linea), numero_excepcion_core(0, linea)]
+    )
+}
+
+funcion reemplazar_error_core(
+    nodo: cualquiera,
+    nombre_publico: texto,
+    nombre_interno: texto
+): cualquiera {
+    si (nodo.tipo == "Identificador" y nodo.valor == nombre_publico) {
+        retornar identificador_excepcion_core(nombre_interno, nodo.linea)
+    }
+    sea hijos: lista = []
+    sea indice: numero = 0
+    mientras (indice < longitud(nodo.hijos)) {
+        agregar(
+            hijos,
+            reemplazar_error_core(
+                nodo.hijos[indice], nombre_publico, nombre_interno
+            )
+        )
+        indice = indice + 1
+    }
+    retornar nodo_ast_core_con_hijos(nodo.tipo, nodo.valor, nodo.linea, hijos)
+}
+
+funcion bajar_bloque_excepciones_core(
+    bloque: cualquiera,
+    contexto: cualquiera,
+    bandera: texto,
+    mensaje: texto,
+    reemplazo_publico: texto,
+    reemplazo_interno: texto,
+    proteger: booleano
+): cualquiera {
+    sea salida: lista = []
+    sea indice: numero = 0
+    mientras (indice < longitud(bloque.hijos)) {
+        sea original: cualquiera = reemplazar_error_core(
+            bloque.hijos[indice], reemplazo_publico, reemplazo_interno
+        )
+        sea reducido: cualquiera = bajar_sentencia_excepciones_core(
+            original, contexto, bandera, mensaje
+        )
+        si (proteger) {
+            reducido = nodo_ast_core_con_hijos(
+                "Si", "si", original.linea,
+                [
+                    condicion_sin_error_core(bandera, original.linea),
+                    nodo_ast_core_con_hijos(
+                        "Bloque", "{}", original.linea, [reducido]
+                    )
+                ]
+            )
+        }
+        agregar(salida, reducido)
+        indice = indice + 1
+    }
+    retornar nodo_ast_core_con_hijos("Bloque", "{}", bloque.linea, salida)
+}
+
+funcion bajar_sentencia_excepciones_core(
+    nodo: cualquiera,
+    contexto: cualquiera,
+    bandera: texto,
+    mensaje: texto
+): cualquiera {
+    si (nodo.tipo == "Lanzar") {
+        afirmar(
+            bandera != "",
+            "CFEX1901: lanzar requiere un bloque intentar/capturar en el backend directo"
+        )
+        sea asignar_mensaje: cualquiera = nodo_ast_core_con_hijos(
+            "Asignacion", "=", nodo.linea,
+            [identificador_excepcion_core(mensaje, nodo.linea), nodo.hijos[0]]
+        )
+        sea activar: cualquiera = nodo_ast_core_con_hijos(
+            "Asignacion", "=", nodo.linea,
+            [
+                identificador_excepcion_core(bandera, nodo.linea),
+                numero_excepcion_core(1, nodo.linea)
+            ]
+        )
+        retornar nodo_ast_core_con_hijos(
+            "Si", "si", nodo.linea,
+            [
+                numero_excepcion_core(1, nodo.linea),
+                nodo_ast_core_con_hijos(
+                    "Bloque", "{}", nodo.linea, [asignar_mensaje, activar]
+                )
+            ]
+        )
+    }
+
+    si (nodo.tipo == "Intentar") {
+        sea id: numero = contexto.siguiente
+        contexto.siguiente = contexto.siguiente + 1
+        sea bandera_local: texto = "__cfv_excepcion_activa_" + a_texto(id)
+        sea mensaje_local: texto = "__cfv_excepcion_mensaje_" + a_texto(id)
+        sea declarar_bandera: cualquiera = nodo_ast_core_con_hijos(
+            "Declaracion", bandera_local + ":numero", nodo.linea,
+            [numero_excepcion_core(0, nodo.linea)]
+        )
+        sea declarar_mensaje: cualquiera = nodo_ast_core_con_hijos(
+            "Declaracion", mensaje_local + ":texto", nodo.linea,
+            [nodo_ast_core("Texto", "\"\"", nodo.linea)]
+        )
+        sea protegido: cualquiera = bajar_bloque_excepciones_core(
+            nodo.hijos[0], contexto,
+            bandera_local, mensaje_local, "", "", verdadero
+        )
+        sea captura: cualquiera = bajar_bloque_excepciones_core(
+            nodo.hijos[1], contexto,
+            bandera, mensaje, nodo.valor, mensaje_local, falso
+        )
+        sea ejecutar_captura: cualquiera = nodo_ast_core_con_hijos(
+            "Si", "si", nodo.linea,
+            [
+                nodo_ast_core_con_hijos(
+                    "Binario", "==", nodo.linea,
+                    [
+                        identificador_excepcion_core(bandera_local, nodo.linea),
+                        numero_excepcion_core(1, nodo.linea)
+                    ]
+                ),
+                captura
+            ]
+        )
+        sea sentencias: lista = [declarar_bandera, declarar_mensaje]
+        sea indice_protegido: numero = 0
+        mientras (indice_protegido < longitud(protegido.hijos)) {
+            agregar(sentencias, protegido.hijos[indice_protegido])
+            indice_protegido = indice_protegido + 1
+        }
+        agregar(sentencias, ejecutar_captura)
+        retornar nodo_ast_core_con_hijos(
+            "Si", "si", nodo.linea,
+            [numero_excepcion_core(1, nodo.linea),
+             nodo_ast_core_con_hijos("Bloque", "{}", nodo.linea, sentencias)]
+        )
+    }
+
+    si (nodo.tipo == "Si") {
+        sea hijos_si: lista = [
+            nodo.hijos[0],
+            bajar_bloque_excepciones_core(
+                nodo.hijos[1], contexto, bandera, mensaje, "", "", falso
+            )
+        ]
+        si (longitud(nodo.hijos) > 2) {
+            agregar(
+                hijos_si,
+                bajar_bloque_excepciones_core(
+                    nodo.hijos[2], contexto, bandera, mensaje, "", "", falso
+                )
+            )
+        }
+        retornar nodo_ast_core_con_hijos("Si", nodo.valor, nodo.linea, hijos_si)
+    }
+
+    si (nodo.tipo == "Mientras") {
+        sea condicion: cualquiera = nodo.hijos[0]
+        si (bandera != "") {
+            condicion = nodo_ast_core_con_hijos(
+                "Binario", "*", nodo.linea,
+                [condicion, condicion_sin_error_core(bandera, nodo.linea)]
+            )
+        }
+        retornar nodo_ast_core_con_hijos(
+            "Mientras", nodo.valor, nodo.linea,
+            [
+                condicion,
+                bajar_bloque_excepciones_core(
+                    nodo.hijos[1], contexto, bandera, mensaje, "", "", verdadero
+                )
+            ]
+        )
+    }
+
+    si (nodo.tipo == "Funcion") {
+        sea hijos_funcion: lista = []
+        sea indice_funcion: numero = 0
+        mientras (indice_funcion + 1 < longitud(nodo.hijos)) {
+            agregar(hijos_funcion, nodo.hijos[indice_funcion])
+            indice_funcion = indice_funcion + 1
+        }
+        agregar(
+            hijos_funcion,
+            bajar_bloque_excepciones_core(
+                nodo.hijos[indice_funcion], contexto, "", "", "", "", falso
+            )
+        )
+        retornar nodo_ast_core_con_hijos(
+            "Funcion", nodo.valor, nodo.linea, hijos_funcion
+        )
+    }
+
+    retornar nodo
+}
+
+funcion bajar_excepciones_core(programa: cualquiera): cualquiera {
+    sea contexto: cualquiera = ContextoExcepcionesCore(0)
+    sea salida: lista = []
+    sea indice: numero = 0
+    mientras (indice < longitud(programa.hijos)) {
+        agregar(
+            salida,
+            bajar_sentencia_excepciones_core(
+                programa.hijos[indice], contexto, "", ""
+            )
+        )
+        indice = indice + 1
+    }
+    retornar nodo_ast_core_con_hijos("Programa", "", programa.linea, salida)
+}
+
 // C-Forge Core Modules 1: resolución recursiva de módulos .cfv.
 estructura ContextoModulosCore {
     cargando: lista
@@ -2960,7 +3195,9 @@ funcion empaquetar_core_elf(codigo: lista, datos: lista): lista {
 }
 
 funcion compilar_programa_core_elf(programa_original: cualquiera): lista {
-    sea programa: cualquiera = bajar_mapas_core(bajar_objetos_core(programa_original))
+    sea programa: cualquiera = bajar_excepciones_core(
+        bajar_mapas_core(bajar_objetos_core(programa_original))
+    )
     sea contexto: cualquiera =
         ContextoELFCore([], [], [], 0, [], "", [], [], 0)
     sea declaraciones: lista = programa.hijos

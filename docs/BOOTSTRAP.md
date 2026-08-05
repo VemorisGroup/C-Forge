@@ -22,13 +22,14 @@ construye y ejecuta esas fuentes; no basta con analizarlas como texto.
 | Stage 2/3 | Reconstrucción reproducible y comparación byte por byte |
 | Runtime autónomo | El binario ejecuta `.cfv` sin Python/JVM/.NET/Node |
 | Toolchain autónoma | Parcial: el frontend se autoaloja; el enlazado final todavía usa `clang++` |
-| Backends directos | Mach-O ARM64, ELF x64 y PE x64 Core B6.16 parciales; consulta `RUNTIME-AUTONOMY.md` |
+| Backends directos | Mach-O ARM64, ELF x64 y PE x64 Core B6.19 parciales; consulta `RUNTIME-AUTONOMY.md` |
 | Objetos nativos | Core IR 1 y Object Lowering 1 alimentan Mach-O, ELF y PE con constructores de valor, lectura y escritura de campos | verificado B6.11 |
 | Métodos nativos | Métodos de instancia de solo lectura y `este` se reducen a funciones nativas explícitas en los tres formatos | verificado B6.12 |
 | Métodos mutables | Las llamadas de efecto expanden parámetros y escrituras de `este.campo` sobre la instancia receptora | verificado B6.13 |
 | Ciclo de vida | `crear` inicializa todos los campos y `destruir` se ejecuta automáticamente en orden inverso para instancias superiores | verificado B6.14 |
 | Interfaces | `interfaz`/`implementa` validan métodos, retornos y parámetros antes de emitir los tres formatos | verificado B6.15 |
 | Módulos fuente | `importar "ruta.cfv"` resuelve dependencias relativas, evita cargas duplicadas y rechaza ciclos antes de emitir | verificado B6.16 |
+| Excepciones directas | `intentar`/`capturar`/`lanzar` se reducen a control de flujo común sin excepciones C++ | verificado B6.19 local |
 
 El término **frontend Core autoalojado** solo describe el alcance probado por
 `make bootstrap-check`. No significa que toda la toolchain sea autónoma: el
