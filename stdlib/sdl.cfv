@@ -1,186 +1,170 @@
-// stdlib/sdl.cfv — Motor de juego 2D para C-Forge (sobre SDL2)
-// Compilar interprete con: -DCFV_WITH_SDL2 -lSDL2 [-lSDL2_mixer -lSDL2_image]
-// Uso: importar "stdlib/sdl.cfv"
+// stdlib/sdl.cfv — Bindings SDL2 para C-Forge v3.3.0
+// API de bajo nivel sobre los builtins sdl_* del intérprete.
+// Para un motor de juego de alto nivel usa stdlib/juego.cfv
 //
-// Ejemplo minimo:
-//   sea v = juego_iniciar("Mi Juego", 800, 600)
-//   mientras (juego_corriendo(v)) {
-//       juego_eventos(v)
-//       juego_limpiar(v, 30, 30, 50)
-//       // ... dibujar ...
-//       juego_mostrar(v)
-//       sdl_delay(16)
+// Ejemplo mínimo:
+//   importar "stdlib/sdl.cfv"
+//   sdl_init(0)
+//   sea win = sdl_ventana("Hola", 800, 600, 0)
+//   sea ren = sdl_renderer(win)
+//   sea corriendo = verdadero
+//   mientras (corriendo) {
+//       para e en sdl_eventos() {
+//           si (e["salir"] == verdadero) { corriendo = falso }
+//       }
+//       sdl_color(ren, 30, 30, 50, 255)
+//       sdl_limpiar(ren)
+//       sdl_color(ren, 255, 100, 0, 255)
+//       sdl_rect(ren, 100, 100, 200, 200, verdadero)
+//       sdl_presentar(ren)
+//       sdl_esperar(16)
 //   }
-//   juego_terminar(v)
+//   sdl_cerrar()
 
-// ── Motor de juego ─────────────────────────────────────────────────────────
+// ── Constantes de teclas (scancodes SDL2) ─────────────────────────────────
+sea SDL_TECLA_ARRIBA    = 82
+sea SDL_TECLA_ABAJO     = 81
+sea SDL_TECLA_IZQUIERDA = 80
+sea SDL_TECLA_DERECHA   = 79
+sea SDL_TECLA_ESPACIO   = 44
+sea SDL_TECLA_ENTER     = 40
+sea SDL_TECLA_ESC       = 41
+sea SDL_TECLA_W = 26
+sea SDL_TECLA_A = 4
+sea SDL_TECLA_S = 22
+sea SDL_TECLA_D = 7
+sea SDL_TECLA_R = 21
+sea SDL_TECLA_P = 19
+sea SDL_TECLA_F = 9
+sea SDL_TECLA_1 = 30
+sea SDL_TECLA_2 = 31
+sea SDL_TECLA_3 = 32
 
-funcion juego_iniciar(titulo: texto, ancho: numero, alto: numero): mapa {
-    sea id = sdl_iniciar(titulo, ancho, alto)
-    sea estado = {
-        "id": id,
-        "ancho": ancho,
-        "alto": alto,
-        "corriendo": verdadero,
-        "teclas": {},
-        "raton_x": 0,
-        "raton_y": 0,
-        "fps_objetivo": 60,
-        "ultimo_tick": sdl_tiempo(),
-        "delta": 0
+// Tipos de eventos SDL2
+sea SDL_TIPO_SALIR      = 256
+sea SDL_TIPO_TECLA_DOWN = 768
+sea SDL_TIPO_TECLA_UP   = 769
+sea SDL_TIPO_RATON_MOV  = 1024
+sea SDL_TIPO_RATON_BTN  = 1025
+
+// Flags de ventana
+sea SDL_VENTANA_NORMAL           = 4
+sea SDL_VENTANA_PANTALLA_COMPLETA = 1
+sea SDL_VENTANA_REDIMENSIONABLE  = 32
+sea SDL_VENTANA_SIN_BORDES       = 16
+
+// Flags de init
+sea SDL_INIT_VIDEO = 32
+sea SDL_INIT_AUDIO = 16
+sea SDL_INIT_TODO  = 48
+
+// ── Helpers de eventos ─────────────────────────────────────────────────────
+
+funcion sdl_tecla_presionada(eventos: lista, scancode: numero): booleano {
+    para e en eventos {
+        si (e["tipo"] == SDL_TIPO_TECLA_DOWN y e["tecla"] == scancode) {
+            retornar verdadero
+        }
     }
-    retornar estado
+    retornar falso
 }
 
-funcion juego_corriendo(v: mapa): booleano {
-    retornar v["corriendo"]
-}
-
-funcion juego_eventos(v: mapa): nulo {
-    sea evs = sdl_eventos(v["id"])
-    para e en evs {
-        sea tipo = e["tipo"]
-        si (tipo == "salir") {
-            v["corriendo"] = falso
-        }
-        si (tipo == "tecla_abajo") {
-            v["teclas"][e["tecla"]] = verdadero
-        }
-        si (tipo == "tecla_arriba") {
-            v["teclas"][e["tecla"]] = falso
-        }
-        si (tipo == "raton_movimiento") {
-            v["raton_x"] = e["x"]
-            v["raton_y"] = e["y"]
+funcion sdl_tecla_soltada(eventos: lista, scancode: numero): booleano {
+    para e en eventos {
+        si (e["tipo"] == SDL_TIPO_TECLA_UP y e["tecla"] == scancode) {
+            retornar verdadero
         }
     }
-    // Delta time
-    sea ahora = sdl_tiempo()
-    v["delta"] = (ahora - v["ultimo_tick"]) / 1000.0
-    v["ultimo_tick"] = ahora
+    retornar falso
 }
 
-funcion juego_limpiar(v: mapa, r: numero, g: numero, b: numero): nulo {
-    sdl_limpiar(v["id"], r, g, b)
-}
-
-funcion juego_mostrar(v: mapa): nulo {
-    sdl_mostrar(v["id"])
-}
-
-funcion juego_terminar(v: mapa): nulo {
-    sdl_cerrar(v["id"])
-    sdl_terminar()
-}
-
-funcion juego_tecla(v: mapa, nombre: texto): booleano {
-    si (v["teclas"][nombre] == nulo) { retornar falso }
-    retornar v["teclas"][nombre]
-}
-
-funcion juego_fps(v: mapa): numero {
-    si (v["delta"] <= 0) { retornar 0 }
-    retornar piso(1.0 / v["delta"])
-}
-
-funcion juego_delta(v: mapa): numero {
-    retornar v["delta"]
-}
-
-// ── Dibujo ────────────────────────────────────────────────────────────────
-
-funcion dibujar_rect(v: mapa, x: numero, y: numero, ancho: numero, alto: numero, r: numero, g: numero, b: numero): nulo {
-    sdl_dibujar_rect(v["id"], x, y, ancho, alto, r, g, b, 255)
-}
-
-funcion dibujar_rect_alfa(v: mapa, x: numero, y: numero, ancho: numero, alto: numero, r: numero, g: numero, b: numero, a: numero): nulo {
-    sdl_dibujar_rect(v["id"], x, y, ancho, alto, r, g, b, a)
-}
-
-funcion dibujar_circulo(v: mapa, cx: numero, cy: numero, radio: numero, r: numero, g: numero, b: numero): nulo {
-    sdl_dibujar_circulo(v["id"], cx, cy, radio, r, g, b)
-}
-
-funcion dibujar_linea(v: mapa, x1: numero, y1: numero, x2: numero, y2: numero, r: numero, g: numero, b: numero): nulo {
-    sdl_dibujar_linea(v["id"], x1, y1, x2, y2, r, g, b)
-}
-
-funcion dibujar_pixel(v: mapa, x: numero, y: numero, r: numero, g: numero, b: numero): nulo {
-    sdl_dibujar_pixel(v["id"], x, y, r, g, b)
-}
-
-// ── Entidades (Entity-Component simple) ────────────────────────────────────
-
-funcion entidad_nueva(x: numero, y: numero, ancho: numero, alto: numero): mapa {
-    retornar {
-        "x": x, "y": y,
-        "ancho": ancho, "alto": alto,
-        "vx": 0, "vy": 0,
-        "activa": verdadero,
-        "color_r": 255, "color_g": 255, "color_b": 255
+funcion sdl_quiere_salir(eventos: lista): booleano {
+    para e en eventos {
+        si (e["salir"] == verdadero) { retornar verdadero }
+        si (e["tipo"] == SDL_TIPO_TECLA_DOWN y e["tecla"] == SDL_TECLA_ESC) {
+            retornar verdadero
+        }
     }
+    retornar falso
 }
 
-funcion entidad_mover(e: mapa, delta: numero): nulo {
-    e["x"] = e["x"] + e["vx"] * delta
-    e["y"] = e["y"] + e["vy"] * delta
+// ── Helpers de tiempo / FPS ────────────────────────────────────────────────
+
+funcion sdl_fps_limitar(objetivo: numero, ultimo_tick: numero): numero {
+    sea ahora = sdl_ticks()
+    sea transcurrido = ahora - ultimo_tick
+    sea ms_objetivo = 1000 / objetivo
+    si (transcurrido < ms_objetivo) {
+        sdl_esperar(ms_objetivo - transcurrido)
+    }
+    retornar sdl_ticks()
 }
 
-funcion entidad_dibujar(v: mapa, e: mapa): nulo {
-    si (e["activa"]) {
-        dibujar_rect(v, e["x"], e["y"], e["ancho"], e["alto"], e["color_r"], e["color_g"], e["color_b"])
+funcion sdl_delta_tiempo(ultimo_tick: numero): numero {
+    retornar (sdl_ticks() - ultimo_tick) / 1000.0
+}
+
+// ── Helpers de dibujo ─────────────────────────────────────────────────────
+
+// Dibuja un círculo aproximado con rectángulos de 2x2
+funcion sdl_circulo(ren: numero, cx: numero, cy: numero, radio: numero): nulo {
+    sea x = radio
+    sea y = 0
+    sea err = 0
+    mientras (x >= y) {
+        sdl_rect(ren, cx + x - 1, cy + y - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx + y - 1, cy + x - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx - y - 1, cy + x - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx - x - 1, cy + y - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx - x - 1, cy - y - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx - y - 1, cy - x - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx + y - 1, cy - x - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx + x - 1, cy - y - 1, 2, 2, verdadero)
+        y = y + 1
+        si (err <= 0) {
+            err = err + 2 * y + 1
+        }
+        si (err > 0) {
+            x = x - 1
+            err = err - 2 * x + 1
+        }
     }
 }
 
-funcion entidad_colision(a: mapa, b: mapa): booleano {
-    retornar (
-        a["x"] < b["x"] + b["ancho"] y
-        a["x"] + a["ancho"] > b["x"] y
-        a["y"] < b["y"] + b["alto"] y
-        a["y"] + a["alto"] > b["y"]
-    )
+// Dibuja una barra de progreso (HP, mana, carga, etc.)
+funcion sdl_barra(ren: numero, x: numero, y: numero, ancho: numero, alto: numero,
+                  valor: numero, maximo: numero,
+                  r_fondo: numero, g_fondo: numero, b_fondo: numero,
+                  r_lleno: numero, g_lleno: numero, b_lleno: numero): nulo {
+    sdl_color(ren, r_fondo, g_fondo, b_fondo, 255)
+    sdl_rect(ren, x, y, ancho, alto, verdadero)
+    sea pct = valor / maximo
+    si (pct > 1) { pct = 1 }
+    si (pct < 0) { pct = 0 }
+    sdl_color(ren, r_lleno, g_lleno, b_lleno, 255)
+    sdl_rect(ren, x, y, pct * ancho, alto, verdadero)
 }
 
-funcion entidad_en_pantalla(e: mapa, v: mapa): booleano {
-    retornar (
-        e["x"] + e["ancho"] > 0 y
-        e["x"] < v["ancho"] y
-        e["y"] + e["alto"] > 0 y
-        e["y"] < v["alto"]
-    )
-}
+// ── Utilidades matemáticas ────────────────────────────────────────────────
 
-// ── Audio ─────────────────────────────────────────────────────────────────
-
-funcion sonido_cargar(ruta: texto): numero {
-    retornar sdl_cargar_sonido(ruta)
-}
-
-funcion sonido_reproducir(id: numero): nulo {
-    sdl_reproducir_sonido(id)
-}
-
-funcion musica_reproducir(ruta: texto): nulo {
-    sdl_cargar_musica(ruta)
-}
-
-// ── Utilidades ────────────────────────────────────────────────────────────
-
-// Limitar valor entre min y max
 funcion acotar(valor: numero, minimo: numero, maximo: numero): numero {
     si (valor < minimo) { retornar minimo }
     si (valor > maximo) { retornar maximo }
     retornar valor
 }
 
-// Distancia entre dos puntos
 funcion distancia(x1: numero, y1: numero, x2: numero, y2: numero): numero {
     sea dx = x2 - x1
     sea dy = y2 - y1
-    retornar raiz(dx*dx + dy*dy)
+    retornar raiz(dx * dx + dy * dy)
 }
 
-// Interpolar linealmente
 funcion lerp(a: numero, b: numero, t: numero): numero {
     retornar a + (b - a) * t
+}
+
+funcion signo(n: numero): numero {
+    si (n > 0) { retornar 1 }
+    si (n < 0) { retornar -1 }
+    retornar 0
 }

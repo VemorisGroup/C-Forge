@@ -1,0 +1,366 @@
+// stdlib/juego.cfv — Motor de juego 2D completo para C-Forge v3.3.0
+// Proporciona: ventana, renderer, game loop, ECS, física, colisiones,
+//              cámara, tilemap, partículas, HUD, escenas.
+//
+// Uso rápido:
+//   importar "stdlib/juego.cfv"
+//   sea juego = motor_crear("Mi Juego", 800, 600, 60)
+//   sea jugador = entidad_nueva(100, 300, 32, 48)
+//   mientras (motor_frame(juego)) {
+//       fisica_aplicar(jugador, juego["delta"])
+//       motor_limpiar(juego, 20, 20, 40)
+//       entidad_dibujar(juego["ren"], jugador, 100, 200, 255)
+//       motor_presentar(juego)
+//   }
+//   motor_cerrar(juego)
+
+importar "stdlib/sdl.cfv"
+
+// ── Motor principal ────────────────────────────────────────────────────────
+
+funcion motor_crear(titulo: texto, ancho: numero, alto: numero, fps: numero): mapa {
+    sdl_init(SDL_INIT_TODO)
+    sea win = sdl_ventana(titulo, ancho, alto, SDL_VENTANA_NORMAL)
+    sea ren = sdl_renderer(win)
+    sea estado = {
+        "win": win,
+        "ren": ren,
+        "ancho": ancho,
+        "alto": alto,
+        "fps": fps,
+        "corriendo": verdadero,
+        "ultimo_tick": sdl_ticks(),
+        "delta": 0.016,
+        "frame": 0,
+        "tiempo_total": 0,
+        "teclas": {},
+        "teclas_antes": {},
+        "raton_x": 0,
+        "raton_y": 0,
+        "raton_btn": 0,
+        "cam_x": 0,
+        "cam_y": 0,
+        "escena": nulo
+    }
+    retornar estado
+}
+
+funcion motor_frame(juego: mapa): booleano {
+    si (no juego["corriendo"]) { retornar falso }
+
+    // Procesar eventos
+    juego["teclas_antes"] = juego["teclas"]
+    sea evs = sdl_eventos()
+    para e en evs {
+        si (e["salir"] == verdadero) { juego["corriendo"] = falso }
+        si (e["tipo"] == SDL_TIPO_TECLA_DOWN) {
+            juego["teclas"][e["tecla"]] = verdadero
+        }
+        si (e["tipo"] == SDL_TIPO_TECLA_UP) {
+            juego["teclas"][e["tecla"]] = falso
+        }
+        si (e["tipo"] == SDL_TIPO_RATON_MOV) {
+            juego["raton_x"] = e["x"]
+            juego["raton_y"] = e["y"]
+        }
+        si (e["tipo"] == SDL_TIPO_RATON_BTN) {
+            juego["raton_btn"] = e["boton"]
+        }
+    }
+
+    // Delta time
+    sea ahora = sdl_ticks()
+    sea elapsed = ahora - juego["ultimo_tick"]
+    juego["delta"] = elapsed / 1000.0
+    si (juego["delta"] > 0.05) { juego["delta"] = 0.05 } // cap 20fps mínimo
+    juego["ultimo_tick"] = ahora
+    juego["tiempo_total"] = juego["tiempo_total"] + juego["delta"]
+    juego["frame"] = juego["frame"] + 1
+
+    retornar verdadero
+}
+
+funcion motor_limpiar(juego: mapa, r: numero, g: numero, b: numero): nulo {
+    sdl_color(juego["ren"], r, g, b, 255)
+    sdl_limpiar(juego["ren"])
+}
+
+funcion motor_presentar(juego: mapa): nulo {
+    sdl_presentar(juego["ren"])
+    // Limitar FPS
+    sea ms_objetivo = 1000 / juego["fps"]
+    sea elapsed = sdl_ticks() - juego["ultimo_tick"]
+    si (elapsed < ms_objetivo) {
+        sdl_esperar(ms_objetivo - elapsed)
+    }
+}
+
+funcion motor_cerrar(juego: mapa): nulo {
+    sdl_cerrar()
+}
+
+funcion motor_tecla(juego: mapa, scancode: numero): booleano {
+    si (juego["teclas"][scancode] == nulo) { retornar falso }
+    retornar juego["teclas"][scancode]
+}
+
+funcion motor_tecla_recien(juego: mapa, scancode: numero): booleano {
+    sea ahora = motor_tecla(juego, scancode)
+    sea antes = juego["teclas_antes"][scancode]
+    si (antes == nulo) { antes = falso }
+    retornar ahora y no antes
+}
+
+funcion motor_fps_real(juego: mapa): numero {
+    si (juego["delta"] <= 0) { retornar 0 }
+    retornar piso(1.0 / juego["delta"])
+}
+
+// ── Cámara ─────────────────────────────────────────────────────────────────
+
+funcion camara_seguir(juego: mapa, ex: numero, ey: numero, eancho: numero, ealto: numero): nulo {
+    juego["cam_x"] = ex + eancho / 2 - juego["ancho"] / 2
+    juego["cam_y"] = ey + ealto / 2 - juego["alto"] / 2
+}
+
+funcion camara_mundo_a_pantalla(juego: mapa, x: numero, y: numero): mapa {
+    retornar {"x": x - juego["cam_x"], "y": y - juego["cam_y"]}
+}
+
+// ── Entidades ─────────────────────────────────────────────────────────────
+
+funcion entidad_nueva(x: numero, y: numero, ancho: numero, alto: numero): mapa {
+    retornar {
+        "x": x, "y": y,
+        "ancho": ancho, "alto": alto,
+        "vx": 0, "vy": 0,
+        "ax": 0, "ay": 0,
+        "en_suelo": falso,
+        "activa": verdadero,
+        "vida": 100,
+        "vida_max": 100,
+        "r": 255, "g": 255, "b": 255,
+        "textura": -1,
+        "angulo": 0,
+        "escala": 1
+    }
+}
+
+funcion entidad_dibujar(ren: numero, e: mapa, r: numero, g: numero, b: numero): nulo {
+    si (no e["activa"]) { retornar nulo }
+    si (e["textura"] >= 0) {
+        sdl_dibujar_textura(ren, e["textura"], e["x"], e["y"], e["ancho"], e["alto"], e["angulo"])
+    } sino {
+        sdl_color(ren, r, g, b, 255)
+        sdl_rect(ren, e["x"], e["y"], e["ancho"], e["alto"], verdadero)
+    }
+}
+
+funcion entidad_dibujar_cam(ren: numero, e: mapa, cam_x: numero, cam_y: numero): nulo {
+    si (no e["activa"]) { retornar nulo }
+    sea px = e["x"] - cam_x
+    sea py = e["y"] - cam_y
+    si (e["textura"] >= 0) {
+        sdl_dibujar_textura(ren, e["textura"], px, py, e["ancho"], e["alto"], e["angulo"])
+    } sino {
+        sdl_color(ren, e["r"], e["g"], e["b"], 255)
+        sdl_rect(ren, px, py, e["ancho"], e["alto"], verdadero)
+    }
+}
+
+funcion entidad_colision(a: mapa, b: mapa): booleano {
+    retornar (
+        a["x"] < b["x"] + b["ancho"] y
+        a["x"] + a["ancho"] > b["x"] y
+        a["y"] < b["y"] + b["alto"] y
+        a["y"] + a["alto"] > b["y"]
+    )
+}
+
+// ── Física 2D ─────────────────────────────────────────────────────────────
+
+sea GRAVEDAD = 800.0
+
+funcion fisica_aplicar(e: mapa, delta: numero): nulo {
+    e["vy"] = e["vy"] + GRAVEDAD * delta
+    e["x"] = e["x"] + e["vx"] * delta
+    e["y"] = e["y"] + e["vy"] * delta
+}
+
+funcion fisica_resolver_suelo(e: mapa, suelo_y: numero): nulo {
+    si (e["y"] + e["alto"] >= suelo_y) {
+        e["y"] = suelo_y - e["alto"]
+        e["vy"] = 0
+        e["en_suelo"] = verdadero
+    } sino {
+        e["en_suelo"] = falso
+    }
+}
+
+funcion fisica_resolver_colision(e: mapa, plat: mapa): booleano {
+    si (no entidad_colision(e, plat)) { retornar falso }
+    // Resolver desde abajo (caer sobre plataforma)
+    sea pie = e["y"] + e["alto"]
+    sea techo_plat = plat["y"]
+    si (pie - e["vy"] * 0.016 <= techo_plat + 4) {
+        e["y"] = techo_plat - e["alto"]
+        e["vy"] = 0
+        e["en_suelo"] = verdadero
+        retornar verdadero
+    }
+    retornar falso
+}
+
+funcion fisica_borde_pantalla(e: mapa, ancho: numero, alto: numero): nulo {
+    si (e["x"] < 0) { e["x"] = 0; e["vx"] = 0 }
+    si (e["x"] + e["ancho"] > ancho) { e["x"] = ancho - e["ancho"]; e["vx"] = 0 }
+    si (e["y"] + e["alto"] > alto) {
+        e["y"] = alto - e["alto"]
+        e["vy"] = 0
+        e["en_suelo"] = verdadero
+    }
+}
+
+// ── Tilemap ────────────────────────────────────────────────────────────────
+
+// tiles: lista de listas de números (0=vacío, 1=sólido, 2-N=tipos)
+// Colores por tipo de tile
+funcion tilemap_dibujar(ren: numero, tiles: lista, tam: numero, cam_x: numero, cam_y: numero): nulo {
+    sea fila = 0
+    para fila_tiles en tiles {
+        sea col = 0
+        para tile en fila_tiles {
+            si (tile > 0) {
+                sea px = col * tam - cam_x
+                sea py = fila * tam - cam_y
+                si (tile == 1) { sdl_color(ren, 100, 180, 100, 255) }
+                si (tile == 2) { sdl_color(ren, 150, 100, 50, 255) }
+                si (tile == 3) { sdl_color(ren, 80, 80, 200, 255) }
+                si (tile == 4) { sdl_color(ren, 200, 200, 60, 255) }
+                sdl_rect(ren, px, py, tam, tam, verdadero)
+                sdl_color(ren, 0, 0, 0, 80)
+                sdl_rect(ren, px, py, tam, tam, falso)
+            }
+            col = col + 1
+        }
+        fila = fila + 1
+    }
+}
+
+funcion tilemap_tile_en(tiles: lista, tam: numero, x: numero, y: numero): numero {
+    sea col = piso(x / tam)
+    sea fila = piso(y / tam)
+    si (fila < 0 o col < 0) { retornar 0 }
+    si (fila >= longitud(tiles)) { retornar 0 }
+    sea fila_tiles = tiles[fila]
+    si (col >= longitud(fila_tiles)) { retornar 0 }
+    retornar fila_tiles[col]
+}
+
+funcion tilemap_colision_entidad(e: mapa, tiles: lista, tam: numero): nulo {
+    // Comprobar pies (esquina inferior izquierda y derecha)
+    sea tile_pie_izq = tilemap_tile_en(tiles, tam, e["x"] + 2, e["y"] + e["alto"] + 1)
+    sea tile_pie_der = tilemap_tile_en(tiles, tam, e["x"] + e["ancho"] - 2, e["y"] + e["alto"] + 1)
+    si (tile_pie_izq > 0 o tile_pie_der > 0) {
+        sea fila_suelo = piso((e["y"] + e["alto"]) / tam)
+        e["y"] = fila_suelo * tam - e["alto"]
+        e["vy"] = 0
+        e["en_suelo"] = verdadero
+    } sino {
+        e["en_suelo"] = falso
+    }
+    // Comprobar lados
+    sea tile_der = tilemap_tile_en(tiles, tam, e["x"] + e["ancho"] + 1, e["y"] + e["alto"] / 2)
+    sea tile_izq = tilemap_tile_en(tiles, tam, e["x"] - 1, e["y"] + e["alto"] / 2)
+    si (tile_der > 0 y e["vx"] > 0) {
+        e["x"] = piso((e["x"] + e["ancho"]) / tam) * tam - e["ancho"]
+        e["vx"] = 0
+    }
+    si (tile_izq > 0 y e["vx"] < 0) {
+        e["x"] = (piso(e["x"] / tam) + 1) * tam
+        e["vx"] = 0
+    }
+}
+
+// ── Partículas ─────────────────────────────────────────────────────────────
+
+funcion particulas_crear(x: numero, y: numero, n: numero,
+                         vx_min: numero, vx_max: numero,
+                         vy_min: numero, vy_max: numero,
+                         vida: numero, r: numero, g: numero, b: numero): lista {
+    sea ps = []
+    sea i = 0
+    mientras (i < n) {
+        sea vx = vx_min + aleatorio() * (vx_max - vx_min)
+        sea vy = vy_min + aleatorio() * (vy_max - vy_min)
+        agregar(ps, {
+            "x": x, "y": y,
+            "vx": vx, "vy": vy,
+            "vida": vida, "vida_max": vida,
+            "r": r, "g": g, "b": b
+        })
+        i = i + 1
+    }
+    retornar ps
+}
+
+funcion particulas_actualizar(ps: lista, delta: numero): lista {
+    sea vivas = []
+    para p en ps {
+        p["vida"] = p["vida"] - delta
+        si (p["vida"] > 0) {
+            p["x"] = p["x"] + p["vx"] * delta
+            p["y"] = p["y"] + p["vy"] * delta
+            p["vy"] = p["vy"] + 200 * delta
+            agregar(vivas, p)
+        }
+    }
+    retornar vivas
+}
+
+funcion particulas_dibujar(ren: numero, ps: lista, cam_x: numero, cam_y: numero): nulo {
+    para p en ps {
+        sea alpha = piso(255 * p["vida"] / p["vida_max"])
+        sdl_color(ren, p["r"], p["g"], p["b"], alpha)
+        sdl_rect(ren, p["x"] - cam_x, p["y"] - cam_y, 4, 4, verdadero)
+    }
+}
+
+// ── HUD / UI ──────────────────────────────────────────────────────────────
+
+funcion hud_barra_vida(ren: numero, e: mapa, x: numero, y: numero, ancho: numero, alto: numero): nulo {
+    // Fondo gris
+    sdl_color(ren, 60, 60, 60, 255)
+    sdl_rect(ren, x, y, ancho, alto, verdadero)
+    // Barra verde/amarilla/roja según vida
+    sea pct = e["vida"] / e["vida_max"]
+    sea r = 0
+    sea g = 0
+    sea b = 0
+    si (pct > 0.6) { r = 50; g = 200; b = 50 }
+    si (pct <= 0.6 y pct > 0.3) { r = 230; g = 180; b = 0 }
+    si (pct <= 0.3) { r = 220; g = 50; b = 50 }
+    sdl_color(ren, r, g, b, 255)
+    sdl_rect(ren, x, y, pct * ancho, alto, verdadero)
+    // Borde
+    sdl_color(ren, 200, 200, 200, 255)
+    sdl_rect(ren, x, y, ancho, alto, falso)
+}
+
+funcion hud_panel(ren: numero, x: numero, y: numero, ancho: numero, alto: numero): nulo {
+    sdl_color(ren, 0, 0, 0, 160)
+    sdl_rect(ren, x, y, ancho, alto, verdadero)
+    sdl_color(ren, 180, 180, 180, 255)
+    sdl_rect(ren, x, y, ancho, alto, falso)
+}
+
+// ── Gestor de escenas ─────────────────────────────────────────────────────
+
+funcion escena_cambiar(juego: mapa, nombre: texto): nulo {
+    juego["escena"] = nombre
+}
+
+funcion escena_actual(juego: mapa): texto {
+    si (juego["escena"] == nulo) { retornar "menu" }
+    retornar juego["escena"]
+}

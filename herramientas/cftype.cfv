@@ -1,0 +1,1063 @@
+// herramientas/cftype.cfv - Type checker para C-Forge v3.4.0
+// Escrito en C-Forge puro. Soporta: anotaciones de tipo, inferencia,
+// Generics funcion<T>(x: T): T, lista<T>, mapa<K,V>.
+//
+// Uso:
+//   cforgev herramientas/cftype.cfv archivo.cfv
+//   cforgev herramientas/cftype.cfv archivo.cfv --strict
+//   cforgev herramientas/cftype.cfv archivo.cfv --json
+
+// -- Utilidades de caracteres ------------------------------------------------
+
+funcion es_letra(c: texto): booleano {
+    retornar (c >= "a" y c <= "z") o (c >= "A" y c <= "Z") o c == "_"
+}
+
+funcion es_digito(c: texto): booleano {
+    retornar c >= "0" y c <= "9"
+}
+
+funcion es_alfanum(c: texto): booleano {
+    retornar es_letra(c) o es_digito(c)
+}
+
+funcion es_espacio(c: texto): booleano {
+    retornar c == " " o c == "\t" o c == "\r" o c == "\n"
+}
+
+// -- Lexer -------------------------------------------------------------------
+// Produce una lista de tokens: [{tipo, valor, linea}, ...]
+
+funcion lexer(src: texto): lista {
+    sea tokens = []
+    sea pos = 0
+    sea linea = 1
+    sea n = longitud(src)
+
+    mientras (pos < n) {
+        sea c = src[pos]
+
+        // Salto de l-nea
+        si (c == "\n") {
+            linea = linea + 1
+            pos = pos + 1
+            continuar
+        }
+
+        // Espacios
+        si (es_espacio(c)) {
+            pos = pos + 1
+            continuar
+        }
+
+        // Comentario de l-nea
+        si (c == "/" y pos + 1 < n y src[pos + 1] == "/") {
+            mientras (pos < n y src[pos] != "\n") {
+                pos = pos + 1
+            }
+            continuar
+        }
+
+        // Comentario de bloque /* */
+        si (c == "/" y pos + 1 < n y src[pos + 1] == "*") {
+            pos = pos + 2
+            mientras (pos + 1 < n y no (src[pos] == "*" y src[pos + 1] == "/")) {
+                si (src[pos] == "\n") { linea = linea + 1 }
+                pos = pos + 1
+            }
+            pos = pos + 2
+            continuar
+        }
+
+        // String con comillas dobles
+        si (c == "\"") {
+            pos = pos + 1
+            sea val = ""
+            mientras (pos < n y src[pos] != "\"") {
+                si (src[pos] == "\\") { pos = pos + 1 }
+                si (pos < n) { val = val + src[pos] }
+                pos = pos + 1
+            }
+            pos = pos + 1
+            agregar(tokens, {"tipo": "STRING", "valor": val, "linea": linea})
+            continuar
+        }
+
+        // N-mero
+        si (es_digito(c)) {
+            sea val = ""
+            mientras (pos < n y (es_digito(src[pos]) o src[pos] == ".")) {
+                val = val + src[pos]
+                pos = pos + 1
+            }
+            agregar(tokens, {"tipo": "NUMBER", "valor": val, "linea": linea})
+            continuar
+        }
+
+        // Identificador o keyword
+        si (es_letra(c)) {
+            sea val = ""
+            mientras (pos < n y es_alfanum(src[pos])) {
+                val = val + src[pos]
+                pos = pos + 1
+            }
+            agregar(tokens, {"tipo": "IDENT", "valor": val, "linea": linea})
+            continuar
+        }
+
+        // == y !=
+        si (c == "=" y pos + 1 < n y src[pos + 1] == "=") {
+            agregar(tokens, {"tipo": "SIM", "valor": "==", "linea": linea})
+            pos = pos + 2
+            continuar
+        }
+        si (c == "!" y pos + 1 < n y src[pos + 1] == "=") {
+            agregar(tokens, {"tipo": "SIM", "valor": "!=", "linea": linea})
+            pos = pos + 2
+            continuar
+        }
+        si (c == "-" y pos + 1 < n y src[pos + 1] == ">") {
+            agregar(tokens, {"tipo": "SIM", "valor": "->", "linea": linea})
+            pos = pos + 2
+            continuar
+        }
+
+        // S-mbolo simple
+        agregar(tokens, {"tipo": "SIM", "valor": c, "linea": linea})
+        pos = pos + 1
+    }
+
+    agregar(tokens, {"tipo": "EOF", "valor": "", "linea": linea})
+    retornar tokens
+}
+
+// -- Sistema de tipos ---------------------------------------------------------
+// Representamos tipos como texto: "numero", "texto", "lista<numero>", "T", etc.
+
+sea TIPO_CUALQUIERA = "cualquiera"
+sea TIPO_NULO       = "nulo"
+sea TIPO_NUMERO     = "numero"
+sea TIPO_TEXTO      = "texto"
+sea TIPO_BOOL       = "booleano"
+sea TIPO_LISTA      = "lista"
+sea TIPO_MAPA       = "mapa"
+
+sea TIPOS_BASICOS = ["numero", "texto", "booleano", "nulo", "cualquiera",
+                     "lista", "mapa", "tupla", "entero", "flotante", "cadena"]
+
+funcion tipo_base(t: texto): texto {
+    // "lista<numero>" -> "lista"
+    si (contiene(t, "<")) {
+        sea idx = 0
+        mientras (idx < longitud(t) y t[idx] != "<") {
+            idx = idx + 1
+        }
+        retornar subcadena(t, 0, idx)
+    }
+    retornar t
+}
+
+funcion tipo_params(t: texto): texto {
+    // "lista<numero>" -> "numero"
+    si (no contiene(t, "<")) { retornar "" }
+    sea inicio = 0
+    mientras (inicio < longitud(t) y t[inicio] != "<") {
+        inicio = inicio + 1
+    }
+    si (inicio >= longitud(t)) { retornar "" }
+    retornar subcadena(t, inicio + 1, longitud(t) - inicio - 2)
+}
+
+funcion es_var_generica(t: texto): booleano {
+    // Una variable de tipo es una sola letra may-scula: T, K, V, R
+    si (longitud(t) != 1) { retornar falso }
+    retornar t >= "A" y t <= "Z"
+}
+
+funcion es_subtipo(hijo: texto, padre: texto): booleano {
+    si (padre == TIPO_CUALQUIERA o hijo == TIPO_CUALQUIERA) { retornar verdadero }
+    si (hijo == padre) { retornar verdadero }
+    si (tipo_base(hijo) == tipo_base(padre)) {
+        // Sin params en padre: compatible con cualquier instanciaci-n
+        si (tipo_params(padre) == "") { retornar verdadero }
+        si (tipo_params(hijo) == "") { retornar verdadero }
+        retornar tipo_params(hijo) == tipo_params(padre)
+    }
+    // entero/flotante/cadena son alias
+    si ((hijo == "entero" o hijo == "flotante") y padre == "numero") { retornar verdadero }
+    si (hijo == "cadena" y padre == "texto") { retornar verdadero }
+    retornar falso
+}
+
+// -- Unificaci-n de tipos gen-ricos -------------------------------------------
+
+funcion unificar(generico: texto, concreto: texto, bindings: mapa): booleano {
+    si (es_var_generica(generico)) {
+        si (tiene_clave(bindings, generico)) {
+            sea actual = bindings[generico]
+            retornar actual == concreto o concreto == TIPO_CUALQUIERA o actual == TIPO_CUALQUIERA
+        }
+        bindings[generico] = concreto
+        retornar verdadero
+    }
+    si (generico == TIPO_CUALQUIERA o concreto == TIPO_CUALQUIERA) { retornar verdadero }
+    si (tipo_base(generico) != tipo_base(concreto)) { retornar falso }
+    sea pg = tipo_params(generico)
+    sea pc = tipo_params(concreto)
+    si (pg == "" o pc == "") { retornar verdadero }
+    retornar unificar(pg, pc, bindings)
+}
+
+funcion instanciar(tipo: texto, bindings: mapa): texto {
+    si (es_var_generica(tipo)) {
+        si (tiene_clave(bindings, tipo)) { retornar bindings[tipo] }
+        retornar TIPO_CUALQUIERA
+    }
+    si (contiene(tipo, "<")) {
+        sea base = tipo_base(tipo)
+        sea inner = tipo_params(tipo)
+        retornar base + "<" + instanciar(inner, bindings) + ">"
+    }
+    retornar tipo
+}
+
+// -- Scope --------------------------------------------------------------------
+// Usamos una lista de mapos como stack de scopes
+
+funcion scope_nuevo(parent_idx: numero, scopes: lista): numero {
+    agregar(scopes, {
+        "parent": parent_idx,
+        "vars": {},
+        "fns": {}
+    })
+    retornar longitud(scopes) - 1
+}
+
+funcion scope_definir_var(idx: numero, nombre: texto, tipo: texto, scopes: lista): nulo {
+    scopes[idx]["vars"][nombre] = tipo
+}
+
+funcion scope_buscar_var(idx: numero, nombre: texto, scopes: lista): texto {
+    sea i = idx
+    mientras (i >= 0) {
+        sea s = scopes[i]
+        si (tiene_clave(s["vars"], nombre)) {
+            retornar s["vars"][nombre]
+        }
+        si (s["parent"] < 0) { retornar "" }
+        i = s["parent"]
+    }
+    retornar ""
+}
+
+funcion scope_definir_fn(idx: numero, nombre: texto, sig: mapa, scopes: lista): nulo {
+    scopes[idx]["fns"][nombre] = sig
+}
+
+funcion scope_buscar_fn(idx: numero, nombre: texto, scopes: lista): mapa {
+    sea i = idx
+    mientras (i >= 0) {
+        sea s = scopes[i]
+        si (tiene_clave(s["fns"], nombre)) {
+            retornar s["fns"][nombre]
+        }
+        si (s["parent"] < 0) { retornar {} }
+        i = s["parent"]
+    }
+    retornar {}
+}
+
+// -- Registro de builtins -----------------------------------------------------
+
+funcion registrar_builtins(scope_idx: numero, scopes: lista): nulo {
+    sea fns = [
+        {"nombre": "mostrar",      "tps": [],    "params": ["cualquiera"],              "ret": "nulo"},
+        {"nombre": "leer",         "tps": [],    "params": [],                           "ret": "texto"},
+        {"nombre": "longitud",     "tps": [],    "params": ["cualquiera"],              "ret": "numero"},
+        {"nombre": "agregar",      "tps": [],    "params": ["lista", "cualquiera"],     "ret": "nulo"},
+        {"nombre": "eliminar",     "tps": [],    "params": ["lista", "numero"],         "ret": "cualquiera"},
+        {"nombre": "a_texto",      "tps": [],    "params": ["cualquiera"],              "ret": "texto"},
+        {"nombre": "a_numero",     "tps": [],    "params": ["cualquiera"],              "ret": "numero"},
+        {"nombre": "a_booleano",   "tps": [],    "params": ["cualquiera"],              "ret": "booleano"},
+        {"nombre": "tipo_de",      "tps": [],    "params": ["cualquiera"],              "ret": "texto"},
+        {"nombre": "claves",       "tps": [],    "params": ["mapa"],                    "ret": "lista"},
+        {"nombre": "valores",      "tps": [],    "params": ["mapa"],                    "ret": "lista"},
+        {"nombre": "tiene_clave",  "tps": [],    "params": ["mapa", "cualquiera"],      "ret": "booleano"},
+        {"nombre": "piso",         "tps": [],    "params": ["numero"],                  "ret": "numero"},
+        {"nombre": "techo",        "tps": [],    "params": ["numero"],                  "ret": "numero"},
+        {"nombre": "raiz",         "tps": [],    "params": ["numero"],                  "ret": "numero"},
+        {"nombre": "abs",          "tps": [],    "params": ["numero"],                  "ret": "numero"},
+        {"nombre": "minimo",       "tps": [],    "params": ["numero", "numero"],        "ret": "numero"},
+        {"nombre": "maximo",       "tps": [],    "params": ["numero", "numero"],        "ret": "numero"},
+        {"nombre": "potencia",     "tps": [],    "params": ["numero", "numero"],        "ret": "numero"},
+        {"nombre": "aleatorio",    "tps": [],    "params": [],                           "ret": "numero"},
+        {"nombre": "subcadena",    "tps": [],    "params": ["texto", "numero", "numero"],"ret": "texto"},
+        {"nombre": "contiene",     "tps": [],    "params": ["texto", "texto"],           "ret": "booleano"},
+        {"nombre": "reemplazar",   "tps": [],    "params": ["texto", "texto", "texto"],  "ret": "texto"},
+        {"nombre": "dividir",      "tps": [],    "params": ["texto", "texto"],           "ret": "lista"},
+        {"nombre": "unir",         "tps": [],    "params": ["texto", "lista"],           "ret": "texto"},
+        {"nombre": "recortar",     "tps": [],    "params": ["texto"],                    "ret": "texto"},
+        {"nombre": "mayusculas",   "tps": [],    "params": ["texto"],                    "ret": "texto"},
+        {"nombre": "minusculas",   "tps": [],    "params": ["texto"],                    "ret": "texto"},
+        {"nombre": "leer_archivo", "tps": [],    "params": ["texto"],                    "ret": "texto"},
+        {"nombre": "escribir_archivo","tps":[],  "params": ["texto", "texto"],           "ret": "nulo"},
+        {"nombre": "existe_archivo","tps": [],   "params": ["texto"],                    "ret": "booleano"},
+        {"nombre": "eliminar_archivo","tps":[],  "params": ["texto"],                    "ret": "nulo"},
+        {"nombre": "tiempo_unix",  "tps": [],    "params": [],                           "ret": "numero"},
+        {"nombre": "dormir",       "tps": [],    "params": ["numero"],                   "ret": "nulo"},
+        {"nombre": "argumentos_programa","tps":[],"params": [],                          "ret": "lista"},
+        {"nombre": "mutex_crear",  "tps": [],    "params": [],                           "ret": "numero"},
+        {"nombre": "mutex_bloquear","tps": [],   "params": ["numero"],                   "ret": "nulo"},
+        {"nombre": "mutex_desbloquear","tps":[],  "params": ["numero"],                  "ret": "nulo"},
+        {"nombre": "hilo_crear",   "tps": [],    "params": ["cualquiera", "lista"],      "ret": "numero"},
+        {"nombre": "hilo_esperar", "tps": [],    "params": ["numero"],                   "ret": "cualquiera"},
+        {"nombre": "hilo_activo",  "tps": [],    "params": ["numero"],                   "ret": "booleano"},
+        {"nombre": "hilo_id",      "tps": [],    "params": [],                           "ret": "numero"},
+        {"nombre": "cfv_json_serializar","tps":[],"params": ["cualquiera"],              "ret": "texto"},
+        {"nombre": "cfv_json_parsear","tps":[],  "params": ["texto"],                    "ret": "cualquiera"},
+        {"nombre": "servidor_http_escuchar","tps":[],"params":["numero"],                "ret": "numero"},
+        {"nombre": "servidor_http_solicitud","tps":[],"params":["numero"],               "ret": "mapa"},
+        {"nombre": "servidor_http_responder","tps":[],"params":["numero","numero","texto","texto"],"ret":"nulo"},
+        {"nombre": "http_solicitud","tps": [],   "params": ["texto", "texto", "mapa"],  "ret": "mapa"}
+    ]
+
+    para fn en fns {
+        scope_definir_fn(scope_idx, fn["nombre"], fn, scopes)
+    }
+}
+
+// -- Parser de tipos (desde tokens) ------------------------------------------
+
+sea KEYWORDS = ["funcion", "retornar", "sea", "si", "sino", "mientras", "para",
+                "en", "verdadero", "falso", "nulo", "importar", "clase",
+                "intentar", "capturar", "lanzar", "romper", "continuar",
+                "match", "caso", "nuevo", "no", "y", "o", "publico",
+                "privado", "estatico", "abstracto"]
+
+funcion es_keyword(v: texto): booleano {
+    para k en KEYWORDS {
+        si (k == v) { retornar verdadero }
+    }
+    retornar falso
+}
+
+// -- Estado del chequeador ----------------------------------------------------
+
+sea cftype_tokens = []
+sea cftype_pos = 0
+sea cftype_scopes = []
+sea cftype_errores = []
+sea cftype_fn_actual = {}   // firma de funci-n actual
+sea cftype_strict = falso
+sea cftype_stats = {"fns": 0, "vars": 0, "generics": 0}
+
+funcion tok_peek(offset: numero): mapa {
+    sea idx = cftype_pos + offset
+    si (idx >= longitud(cftype_tokens)) {
+        retornar {"tipo": "EOF", "valor": "", "linea": 0}
+    }
+    retornar cftype_tokens[idx]
+}
+
+funcion tok_avanzar(): mapa {
+    sea t = tok_peek(0)
+    si (cftype_pos < longitud(cftype_tokens)) {
+        cftype_pos = cftype_pos + 1
+    }
+    retornar t
+}
+
+funcion tok_es(tipo: texto, valor: texto): booleano {
+    sea t = tok_peek(0)
+    si (tipo != "" y t["tipo"] != tipo) { retornar falso }
+    si (valor != "" y t["valor"] != valor) { retornar falso }
+    retornar verdadero
+}
+
+funcion tok_consumir_si(valor: texto): booleano {
+    si (tok_peek(0)["valor"] == valor) {
+        cftype_pos = cftype_pos + 1
+        retornar verdadero
+    }
+    retornar falso
+}
+
+funcion agregar_error(msg: texto, linea: numero): nulo {
+    agregar(cftype_errores, {"msg": msg, "linea": linea, "sev": "error"})
+}
+
+funcion agregar_warn(msg: texto, linea: numero): nulo {
+    si (cftype_strict) {
+        agregar(cftype_errores, {"msg": msg, "linea": linea, "sev": "advertencia"})
+    }
+}
+
+// -- Saltar expresiones balanceadas -------------------------------------------
+
+funcion saltar_balanceado(abrir: texto, cerrar: texto): nulo {
+    si (tok_peek(0)["valor"] != abrir) { retornar nulo }
+    cftype_pos = cftype_pos + 1
+    sea depth = 1
+    mientras (depth > 0 y no tok_es("EOF", "")) {
+        sea v = tok_peek(0)["valor"]
+        si (v == abrir) { depth = depth + 1 }
+        sino si (v == cerrar) {
+            depth = depth - 1
+            si (depth == 0) {
+                cftype_pos = cftype_pos + 1
+                retornar nulo
+            }
+        }
+        cftype_pos = cftype_pos + 1
+    }
+}
+
+funcion saltar_bloque(): nulo {
+    saltar_balanceado("\{", "\}")
+}
+
+// -- Parsear un tipo ----------------------------------------------------------
+
+funcion parsear_tipo(tps_genericos: lista): texto {
+    si (no tok_es("IDENT", "")) { retornar TIPO_CUALQUIERA }
+    sea nombre = tok_peek(0)["valor"]
+    cftype_pos = cftype_pos + 1
+
+    // Par-metro gen-rico <T>
+    sea params = ""
+    si (tok_peek(0)["valor"] == "<") {
+        cftype_pos = cftype_pos + 1
+        sea inner_parts = []
+        mientras (tok_peek(0)["valor"] != ">" y no tok_es("EOF", "")) {
+            sea pt = parsear_tipo(tps_genericos)
+            agregar(inner_parts, pt)
+            tok_consumir_si(",")
+        }
+        tok_consumir_si(">")
+        params = unir(", ", inner_parts)
+    }
+
+    // Normalizar aliases
+    si (nombre == "entero" o nombre == "flotante") { nombre = "numero" }
+    si (nombre == "cadena") { nombre = "texto" }
+
+    si (params != "") {
+        retornar nombre + "<" + params + ">"
+    }
+    retornar nombre
+}
+
+// -- Inferir tipo de expresi-n ------------------------------------------------
+
+funcion inferir_expr(scope_idx: numero, tps: lista): texto {
+    sea resultado = inferir_primario(scope_idx, tps)
+
+    // Consumir operadores binarios
+    sea ops_bin = ["+", "-", "*", "/", "==", "!=", "<", ">", "y", "o"]
+    sea sigue = verdadero
+    mientras (sigue) {
+        sigue = falso
+        sea v = tok_peek(0)["valor"]
+        para op en ops_bin {
+            si (v == op) {
+                cftype_pos = cftype_pos + 1
+                sea rhs = inferir_primario(scope_idx, tps)
+                // Determinar tipo del resultado
+                si (op == "==" o op == "!=" o op == "y" o op == "o" o op == "<" o op == ">") {
+                    resultado = TIPO_BOOL
+                } sino si (resultado == TIPO_TEXTO o rhs == TIPO_TEXTO) {
+                    resultado = TIPO_TEXTO
+                } sino {
+                    resultado = TIPO_NUMERO
+                }
+                sigue = verdadero
+            }
+        }
+    }
+    retornar resultado
+}
+
+funcion inferir_primario(scope_idx: numero, tps: lista): texto {
+    sea t = tok_peek(0)
+
+    // String literal
+    si (t["tipo"] == "STRING") {
+        cftype_pos = cftype_pos + 1
+        retornar TIPO_TEXTO
+    }
+
+    // N-mero
+    si (t["tipo"] == "NUMBER") {
+        cftype_pos = cftype_pos + 1
+        retornar TIPO_NUMERO
+    }
+
+    // Booleanos
+    si (t["valor"] == "verdadero" o t["valor"] == "falso") {
+        cftype_pos = cftype_pos + 1
+        retornar TIPO_BOOL
+    }
+
+    // nulo
+    si (t["valor"] == "nulo") {
+        cftype_pos = cftype_pos + 1
+        retornar TIPO_NULO
+    }
+
+    // Lista literal [...]
+    si (t["valor"] == "[") {
+        cftype_pos = cftype_pos + 1
+        sea elem_tipos = []
+        mientras (tok_peek(0)["valor"] != "]" y no tok_es("EOF", "")) {
+            sea et = inferir_expr(scope_idx, tps)
+            agregar(elem_tipos, et)
+            tok_consumir_si(",")
+        }
+        tok_consumir_si("]")
+        si (longitud(elem_tipos) > 0) {
+            retornar TIPO_LISTA + "<" + elem_tipos[0] + ">"
+        }
+        retornar TIPO_LISTA
+    }
+
+    // Mapa literal {...}
+    si (t["valor"] == "\{") {
+        saltar_balanceado("\{", "\}")
+        retornar TIPO_MAPA
+    }
+
+    // Par-ntesis
+    si (t["valor"] == "(") {
+        cftype_pos = cftype_pos + 1
+        sea inner = inferir_expr(scope_idx, tps)
+        tok_consumir_si(")")
+        retornar inner
+    }
+
+    // Negaci-n
+    si (t["valor"] == "-") {
+        cftype_pos = cftype_pos + 1
+        inferir_primario(scope_idx, tps)
+        retornar TIPO_NUMERO
+    }
+
+    // `no` booleano
+    si (t["valor"] == "no") {
+        cftype_pos = cftype_pos + 1
+        inferir_primario(scope_idx, tps)
+        retornar TIPO_BOOL
+    }
+
+    // nuevo Clase(...)
+    si (t["valor"] == "nuevo") {
+        cftype_pos = cftype_pos + 1
+        sea nombre_clase = ""
+        si (tok_es("IDENT", "")) {
+            nombre_clase = tok_peek(0)["valor"]
+            cftype_pos = cftype_pos + 1
+        }
+        saltar_balanceado("(", ")")
+        retornar nombre_clase
+    }
+
+    // Identificador
+    si (t["tipo"] == "IDENT" y no es_keyword(t["valor"])) {
+        sea nombre = t["valor"]
+        cftype_pos = cftype_pos + 1
+
+        // Llamada a funci-n
+        si (tok_peek(0)["valor"] == "(") {
+            sea sig = scope_buscar_fn(scope_idx, nombre, cftype_scopes)
+            si (longitud(sig) > 0 y tiene_clave(sig, "tps") y longitud(sig["tps"]) > 0) {
+                // Gen-rica: recoger args y unificar
+                cftype_pos = cftype_pos + 1  // (
+                sea arg_tipos = []
+                mientras (tok_peek(0)["valor"] != ")" y no tok_es("EOF", "")) {
+                    sea at = inferir_expr(scope_idx, tps)
+                    agregar(arg_tipos, at)
+                    tok_consumir_si(",")
+                }
+                tok_consumir_si(")")
+                sea bindings = {}
+                sea pi = 0
+                mientras (pi < longitud(sig["params"]) y pi < longitud(arg_tipos)) {
+                    unificar(sig["params"][pi], arg_tipos[pi], bindings)
+                    pi = pi + 1
+                }
+                cftype_stats["generics"] = cftype_stats["generics"] + 1
+                retornar instanciar(sig["ret"], bindings)
+            } sino {
+                saltar_balanceado("(", ")")
+                si (longitud(sig) > 0 y tiene_clave(sig, "ret")) {
+                    retornar sig["ret"]
+                }
+                retornar TIPO_CUALQUIERA
+            }
+        }
+
+        // Acceso encadenado .campo[idx]
+        sea tipo_actual = scope_buscar_var(scope_idx, nombre, cftype_scopes)
+        si (tipo_actual == "") { tipo_actual = TIPO_CUALQUIERA }
+
+        sea sigue_acc = verdadero
+        mientras (sigue_acc) {
+            sigue_acc = falso
+            si (tok_peek(0)["valor"] == ".") {
+                cftype_pos = cftype_pos + 1
+                si (tok_es("IDENT", "")) { cftype_pos = cftype_pos + 1 }
+                si (tok_peek(0)["valor"] == "(") { saltar_balanceado("(", ")") }
+                tipo_actual = TIPO_CUALQUIERA
+                sigue_acc = verdadero
+            } sino si (tok_peek(0)["valor"] == "[") {
+                cftype_pos = cftype_pos + 1
+                inferir_expr(scope_idx, tps)
+                tok_consumir_si("]")
+                // lista<T>[i] -> T
+                si (contiene(tipo_actual, "<")) {
+                    tipo_actual = tipo_params(tipo_actual)
+                } sino {
+                    tipo_actual = TIPO_CUALQUIERA
+                }
+                sigue_acc = verdadero
+            }
+        }
+        retornar tipo_actual
+    }
+
+    // No reconocido: avanzar si no es fin de expresi-n
+    sea v = tok_peek(0)["valor"]
+    si (v != ")" y v != "]" y v != "\}" y v != "," y no tok_es("EOF", "")) {
+        cftype_pos = cftype_pos + 1
+    }
+    retornar TIPO_CUALQUIERA
+}
+
+// -- Chequeador de statements -------------------------------------------------
+
+funcion chequear_bloque(scope_idx: numero): nulo {
+    si (tok_peek(0)["valor"] != "\{") { retornar nulo }
+    cftype_pos = cftype_pos + 1
+    mientras (tok_peek(0)["valor"] != "\}" y no tok_es("EOF", "")) {
+        sea prev = cftype_pos
+        chequear_stmt(scope_idx)
+        si (cftype_pos == prev) { cftype_pos = cftype_pos + 1 } // guard
+    }
+    tok_consumir_si("\}")
+}
+
+funcion parsear_firma(): mapa {
+    // Posici-n: justo despu-s de 'funcion'
+    // Retorna {nombre, tps, params (lista de {nombre,tipo}), ret, linea}
+    sea linea_fn = tok_peek(0)["linea"]
+
+    // Par-metros de tipo gen-rico <T, K>
+    sea tps = []
+    si (tok_peek(0)["valor"] == "<") {
+        cftype_pos = cftype_pos + 1
+        mientras (tok_peek(0)["valor"] != ">" y no tok_es("EOF", "")) {
+            si (tok_es("IDENT", "")) {
+                agregar(tps, tok_peek(0)["valor"])
+                cftype_pos = cftype_pos + 1
+            }
+            tok_consumir_si(",")
+        }
+        tok_consumir_si(">")
+    }
+
+    // Nombre
+    si (no tok_es("IDENT", "")) { retornar {} }
+    sea nombre = tok_peek(0)["valor"]
+    cftype_pos = cftype_pos + 1
+
+    // Par-metros formales
+    sea params_tipos = []
+    sea params_nombres = []
+    si (tok_peek(0)["valor"] != "(") { retornar {} }
+    cftype_pos = cftype_pos + 1
+
+    mientras (tok_peek(0)["valor"] != ")" y no tok_es("EOF", "")) {
+        si (tok_es("IDENT", "")) {
+            sea pn = tok_peek(0)["valor"]
+            cftype_pos = cftype_pos + 1
+            sea pt = TIPO_CUALQUIERA
+            si (tok_consumir_si(":")) {
+                pt = parsear_tipo(tps)
+            }
+            agregar(params_nombres, pn)
+            agregar(params_tipos, pt)
+        } sino {
+            cftype_pos = cftype_pos + 1
+        }
+        tok_consumir_si(",")
+    }
+    tok_consumir_si(")")
+
+    // Tipo de retorno
+    sea ret = TIPO_NULO
+    si (tok_consumir_si(":")) {
+        ret = parsear_tipo(tps)
+    }
+
+    retornar {
+        "nombre": nombre,
+        "tps": tps,
+        "params": params_tipos,
+        "param_nombres": params_nombres,
+        "ret": ret,
+        "linea": linea_fn
+    }
+}
+
+funcion chequear_fn(scope_idx: numero): nulo {
+    sea linea = tok_peek(0)["linea"]
+    sea firma = parsear_firma()
+    si (longitud(firma) == 0) { saltar_bloque(); retornar nulo }
+
+    // Registrar en el scope actual (permite recursividad)
+    scope_definir_fn(scope_idx, firma["nombre"], firma, cftype_scopes)
+
+    // Crear scope hijo para el cuerpo
+    sea fn_scope = scope_nuevo(scope_idx, cftype_scopes)
+
+    // Registrar par-metros como variables
+    sea pi = 0
+    mientras (pi < longitud(firma["param_nombres"])) {
+        scope_definir_var(fn_scope, firma["param_nombres"][pi], firma["params"][pi], cftype_scopes)
+        pi = pi + 1
+    }
+
+    sea fn_anterior = cftype_fn_actual
+    cftype_fn_actual = firma
+
+    chequear_bloque(fn_scope)
+
+    cftype_fn_actual = fn_anterior
+    cftype_stats["fns"] = cftype_stats["fns"] + 1
+}
+
+funcion chequear_sea(scope_idx: numero): nulo {
+    sea linea = tok_peek(0)["linea"]
+    si (no tok_es("IDENT", "")) { retornar nulo }
+    sea nombre = tok_peek(0)["valor"]
+    cftype_pos = cftype_pos + 1
+
+    sea tipo_declarado = ""
+    si (tok_consumir_si(":")) {
+        sea tps_act = []
+        si (tiene_clave(cftype_fn_actual, "tps")) {
+            tps_act = cftype_fn_actual["tps"]
+        }
+        tipo_declarado = parsear_tipo(tps_act)
+    }
+
+    sea tipo_inferido = TIPO_CUALQUIERA
+    si (tok_consumir_si("=")) {
+        sea tps_act = []
+        si (tiene_clave(cftype_fn_actual, "tps")) {
+            tps_act = cftype_fn_actual["tps"]
+        }
+        tipo_inferido = inferir_expr(scope_idx, tps_act)
+    }
+
+    si (tipo_declarado != "") {
+        si (no es_subtipo(tipo_inferido, tipo_declarado)) {
+            agregar_error(
+                "Variable '" + nombre + "': declarada como " + tipo_declarado +
+                " pero inicializada con " + tipo_inferido +
+                " - usa a_" + tipo_declarado + "() para convertir",
+                linea
+            )
+        }
+        scope_definir_var(scope_idx, nombre, tipo_declarado, cftype_scopes)
+    } sino {
+        scope_definir_var(scope_idx, nombre, tipo_inferido, cftype_scopes)
+    }
+    cftype_stats["vars"] = cftype_stats["vars"] + 1
+}
+
+funcion chequear_retorno(scope_idx: numero): nulo {
+    sea linea = tok_peek(0)["linea"]
+    sea v = tok_peek(0)["valor"]
+    si (v == "\}" o tok_es("EOF", "")) { retornar nulo }
+
+    sea tps_act = []
+    si (tiene_clave(cftype_fn_actual, "tps")) {
+        tps_act = cftype_fn_actual["tps"]
+    }
+    sea tipo_ret = inferir_expr(scope_idx, tps_act)
+
+    si (cftype_strict y tiene_clave(cftype_fn_actual, "ret")) {
+        sea esperado = cftype_fn_actual["ret"]
+        si (no es_subtipo(tipo_ret, esperado) y esperado != TIPO_CUALQUIERA) {
+            agregar_error(
+                "Retorno de '" + cftype_fn_actual["nombre"] + "': " +
+                "se esperaba " + esperado + " pero es " + tipo_ret,
+                linea
+            )
+        }
+    }
+}
+
+funcion chequear_stmt(scope_idx: numero): nulo {
+    sea t = tok_peek(0)
+    sea v = t["valor"]
+
+    si (v == "funcion") {
+        cftype_pos = cftype_pos + 1
+        chequear_fn(scope_idx)
+        retornar nulo
+    }
+
+    si (v == "sea") {
+        cftype_pos = cftype_pos + 1
+        chequear_sea(scope_idx)
+        retornar nulo
+    }
+
+    si (v == "retornar") {
+        cftype_pos = cftype_pos + 1
+        chequear_retorno(scope_idx)
+        retornar nulo
+    }
+
+    si (v == "si" o v == "sino") {
+        cftype_pos = cftype_pos + 1
+        si (v == "sino" y tok_peek(0)["valor"] == "si") {
+            cftype_pos = cftype_pos + 1
+        }
+        si (tok_peek(0)["valor"] == "(") { saltar_balanceado("(", ")") }
+        si (tok_peek(0)["valor"] == "\{") {
+            sea s = scope_nuevo(scope_idx, cftype_scopes)
+            chequear_bloque(s)
+        }
+        retornar nulo
+    }
+
+    si (v == "mientras") {
+        cftype_pos = cftype_pos + 1
+        si (tok_peek(0)["valor"] == "(") { saltar_balanceado("(", ")") }
+        si (tok_peek(0)["valor"] == "\{") {
+            sea s = scope_nuevo(scope_idx, cftype_scopes)
+            chequear_bloque(s)
+        }
+        retornar nulo
+    }
+
+    si (v == "para") {
+        cftype_pos = cftype_pos + 1
+        sea s = scope_nuevo(scope_idx, cftype_scopes)
+        si (tok_es("IDENT", "")) {
+            sea iter = tok_peek(0)["valor"]
+            cftype_pos = cftype_pos + 1
+            scope_definir_var(s, iter, TIPO_CUALQUIERA, cftype_scopes)
+        }
+        si (tok_peek(0)["valor"] == "en") { cftype_pos = cftype_pos + 1 }
+        inferir_expr(s, [])
+        si (tok_peek(0)["valor"] == "\{") { chequear_bloque(s) }
+        retornar nulo
+    }
+
+    si (v == "intentar") {
+        cftype_pos = cftype_pos + 1
+        sea s = scope_nuevo(scope_idx, cftype_scopes)
+        si (tok_peek(0)["valor"] == "\{") { chequear_bloque(s) }
+        si (tok_peek(0)["valor"] == "capturar") {
+            cftype_pos = cftype_pos + 1
+            si (tok_peek(0)["valor"] == "(") {
+                cftype_pos = cftype_pos + 1
+                si (tok_es("IDENT", "")) {
+                    sea ev = tok_peek(0)["valor"]
+                    cftype_pos = cftype_pos + 1
+                    scope_definir_var(s, ev, TIPO_TEXTO, cftype_scopes)
+                }
+                tok_consumir_si(")")
+            }
+            si (tok_peek(0)["valor"] == "\{") { chequear_bloque(s) }
+        }
+        retornar nulo
+    }
+
+    si (v == "importar") {
+        cftype_pos = cftype_pos + 1
+        si (t["tipo"] == "STRING" o tok_es("STRING", "")) { cftype_pos = cftype_pos + 1 }
+        retornar nulo
+    }
+
+    si (v == "romper" o v == "continuar" o v == "lanzar") {
+        cftype_pos = cftype_pos + 1
+        si (v == "lanzar") { inferir_expr(scope_idx, []) }
+        retornar nulo
+    }
+
+    si (v == "match") {
+        cftype_pos = cftype_pos + 1
+        inferir_expr(scope_idx, [])
+        si (tok_peek(0)["valor"] == "\{") {
+            cftype_pos = cftype_pos + 1
+            mientras (tok_peek(0)["valor"] != "\}" y no tok_es("EOF", "")) {
+                si (tok_peek(0)["valor"] == "caso") { cftype_pos = cftype_pos + 1 }
+                sea prev = cftype_pos
+                chequear_stmt(scope_idx)
+                si (cftype_pos == prev) { cftype_pos = cftype_pos + 1 }
+            }
+            tok_consumir_si("\}")
+        }
+        retornar nulo
+    }
+
+    // Expresi-n (asignaci-n o llamada)
+    si (t["tipo"] == "IDENT" y no es_keyword(v)) {
+        sea nombre = v
+        cftype_pos = cftype_pos + 1
+
+        // Acceso a campo: a.b.c
+        mientras (tok_peek(0)["valor"] == ".") {
+            cftype_pos = cftype_pos + 1
+            si (tok_es("IDENT", "")) {
+                nombre = tok_peek(0)["valor"]
+                cftype_pos = cftype_pos + 1
+            }
+        }
+
+        // Llamada
+        si (tok_peek(0)["valor"] == "(") {
+            sea sig = scope_buscar_fn(scope_idx, nombre, cftype_scopes)
+            saltar_balanceado("(", ")")
+            retornar nulo
+        }
+
+        // -ndice
+        si (tok_peek(0)["valor"] == "[") { saltar_balanceado("[", "]") }
+
+        // Asignaci-n
+        si (tok_consumir_si("=")) {
+            inferir_expr(scope_idx, [])
+        }
+        retornar nulo
+    }
+}
+
+// -- Chequeo completo del archivo ---------------------------------------------
+
+funcion chequear_archivo(scope_idx: numero): nulo {
+    mientras (no tok_es("EOF", "")) {
+        sea prev = cftype_pos
+        sea v = tok_peek(0)["valor"]
+
+        si (v == "funcion") {
+            cftype_pos = cftype_pos + 1
+            chequear_fn(scope_idx)
+        } sino si (v == "sea") {
+            cftype_pos = cftype_pos + 1
+            chequear_sea(scope_idx)
+        } sino si (v == "importar") {
+            cftype_pos = cftype_pos + 1
+            si (tok_es("STRING", "")) { cftype_pos = cftype_pos + 1 }
+        } sino si (v == "clase") {
+            cftype_pos = cftype_pos + 1
+            si (tok_es("IDENT", "")) { cftype_pos = cftype_pos + 1 }
+            si (tok_peek(0)["valor"] == "\{") {
+                sea cs = scope_nuevo(scope_idx, cftype_scopes)
+                chequear_bloque(cs)
+            }
+        } sino {
+            chequear_stmt(scope_idx)
+        }
+
+        si (cftype_pos == prev) { cftype_pos = cftype_pos + 1 } // guard
+    }
+}
+
+// -- Reporte -------------------------------------------------------------------
+
+funcion imprimir_reporte(archivo: texto, src: texto, usar_json: booleano): nulo {
+    sea lineas = dividir(src, "\n")
+    sea n_errores = 0
+    sea n_warns = 0
+
+    para e en cftype_errores {
+        si (e["sev"] == "error") { n_errores = n_errores + 1 }
+        sino { n_warns = n_warns + 1 }
+    }
+
+    si (usar_json) {
+        sea errs_json = "["
+        sea primero = verdadero
+        para e en cftype_errores {
+            si (no primero) { errs_json = errs_json + "," }
+            errs_json = errs_json + "\{\"linea\":" + a_texto(e["linea"]) +
+                        ",\"msg\":\"" + e["msg"] + "\",\"sev\":\"" + e["sev"] + "\"\}"
+            primero = falso
+        }
+        errs_json = errs_json + "]"
+        mostrar("\{\"archivo\":\"" + archivo + "\",\"errores\":" + errs_json +
+                ",\"stats\":\{\"fns\":" + a_texto(cftype_stats["fns"]) +
+                ",\"vars\":" + a_texto(cftype_stats["vars"]) +
+                ",\"generics\":" + a_texto(cftype_stats["generics"]) +
+                "\},\"ok\":" + a_texto(n_errores == 0) + "\}")
+        retornar nulo
+    }
+
+    para e en cftype_errores {
+        sea label = "[ERROR]"
+        si (e["sev"] == "advertencia") { label = "[ADVERTENCIA]" }
+        mostrar(label + " " + archivo + ":" + a_texto(e["linea"]) + " - " + e["msg"])
+        sea ln = e["linea"]
+        si (ln > 0 y ln <= longitud(lineas)) {
+            mostrar("  " + a_texto(ln) + " | " + lineas[ln - 1])
+        }
+    }
+
+    mostrar("")
+    si (n_errores > 0) {
+        mostrar("- " + a_texto(n_errores) + " error(es)  " + a_texto(n_warns) + " advertencia(s)")
+    } sino {
+        mostrar("- Sin errores  " + a_texto(n_warns) + " advertencia(s)")
+    }
+    mostrar("  funciones: " + a_texto(cftype_stats["fns"]) +
+            "  variables: " + a_texto(cftype_stats["vars"]) +
+            "  generics: " + a_texto(cftype_stats["generics"]))
+}
+
+// -- Main ----------------------------------------------------------------------
+
+sea args = argumentos_programa()
+si (longitud(args) < 1) {
+    mostrar("Uso: cforgev herramientas/cftype.cfv <archivo.cfv> [--strict] [--json]")
+    mostrar("  --strict   Reporta advertencias de tipos impl-citos")
+    mostrar("  --json     Salida en formato JSON")
+    mostrar("")
+    mostrar("Ejemplo:")
+    mostrar("  cforgev herramientas/cftype.cfv stdlib/json.cfv")
+}  sino {
+    sea archivo = args[0]
+    sea usar_json = falso
+
+    sea i = 1
+    mientras (i < longitud(args)) {
+        si (args[i] == "--strict") { cftype_strict = verdadero }
+        si (args[i] == "--json")   { usar_json = verdadero }
+        i = i + 1
+    }
+
+    sea src = ""
+    intentar {
+        src = leer_archivo(archivo)
+    } capturar (e) {
+        mostrar("[ERROR] No se pudo leer '" + archivo + "': " + e)
+        retornar nulo
+    }
+
+    // Inicializar
+    cftype_tokens = lexer(src)
+    cftype_pos = 0
+    cftype_scopes = []
+    cftype_errores = []
+    cftype_fn_actual = {}
+
+    sea global_scope = scope_nuevo(-1, cftype_scopes)
+    registrar_builtins(global_scope, cftype_scopes)
+    chequear_archivo(global_scope)
+
+    imprimir_reporte(archivo, src, usar_json)
+}

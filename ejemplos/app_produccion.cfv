@@ -1,0 +1,328 @@
+// ejemplos/app_produccion.cfv — App de producción completa en C-Forge v3.3.0
+// Demuestra: HTTP real, JSON, mutex, hilos, manejo de errores, auth JWT-like
+//
+// Es una API REST para una app de tareas (TODO app) con:
+//   - Autenticación por token
+//   - Operaciones CRUD
+//   - Hilos para requests concurrentes
+//   - Métricas en tiempo real
+//
+// Ejecutar: cforgev ejemplos/app_produccion.cfv
+// Probar:
+//   curl http://localhost:4000/salud
+//   curl -X POST http://localhost:4000/auth/login \
+//        -H "Content-Type: application/json" \
+//        -d '{"usuario":"admin","contrasena":"cforge123"}'
+
+importar "stdlib/json.cfv"
+
+mostrar("══════════════════════════════════════════════")
+mostrar("  C-Forge TODO API  v3.3.0 — Puerto 4000")
+mostrar("══════════════════════════════════════════════")
+
+// ── Base de datos en memoria ───────────────────────────────────────────────
+sea tareas = [
+    {"id": 1, "titulo": "Aprender C-Forge", "hecho": verdadero,  "usuario": "admin"},
+    {"id": 2, "titulo": "Crear un juego",   "hecho": falso,       "usuario": "admin"},
+    {"id": 3, "titulo": "Publicar paquete", "hecho": falso,       "usuario": "admin"}
+]
+sea siguiente_id = 4
+sea mutex_tareas = mutex_crear()
+
+// Usuarios: usuario -> {contrasena, token}
+sea usuarios = {
+    "admin": {"contrasena": "cforge123", "token": "tok_admin_12345"},
+    "javier": {"contrasena": "secreto",  "token": "tok_javier_99999"}
+}
+
+// ── Métricas ───────────────────────────────────────────────────────────────
+sea metricas = {
+    "peticiones_total": 0,
+    "peticiones_ok": 0,
+    "peticiones_error": 0,
+    "inicio": 0
+}
+sea mutex_metricas = mutex_crear()
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+funcion respuesta_json(req: mapa, estado: numero, datos: cualquiera): nulo {
+    sea cuerpo = json_serializar(datos)
+    servidor_http_responder(req["_srv_id"], estado, cuerpo, "application/json; charset=utf-8")
+}
+
+funcion respuesta_error(req: mapa, estado: numero, mensaje: texto): nulo {
+    respuesta_json(req, estado, {"error": mensaje, "estado": estado})
+}
+
+funcion token_valido(req: mapa): booleano {
+    sea auth = req["cabeceras"]["Authorization"]
+    si (auth == nulo) { auth = req["cabeceras"]["authorization"] }
+    si (auth == nulo) { retornar falso }
+    para nombre en claves(usuarios) {
+        si ("Bearer " + usuarios[nombre]["token"] == auth) {
+            retornar verdadero
+        }
+    }
+    retornar falso
+}
+
+funcion usuario_del_token(req: mapa): texto {
+    sea auth = req["cabeceras"]["Authorization"]
+    si (auth == nulo) { auth = req["cabeceras"]["authorization"] }
+    si (auth == nulo) { retornar nulo }
+    para nombre en claves(usuarios) {
+        si ("Bearer " + usuarios[nombre]["token"] == auth) {
+            retornar nombre
+        }
+    }
+    retornar nulo
+}
+
+funcion incrementar_metrica(clave: texto): nulo {
+    mutex_bloquear(mutex_metricas)
+    metricas[clave] = metricas[clave] + 1
+    mutex_desbloquear(mutex_metricas)
+}
+
+// ── Manejadores de rutas ───────────────────────────────────────────────────
+
+funcion manejar_salud(req: mapa): nulo {
+    respuesta_json(req, 200, {
+        "estado": "ok",
+        "version": "3.3.0",
+        "lenguaje": "C-Forge",
+        "metricas": metricas
+    })
+}
+
+funcion manejar_login(req: mapa): nulo {
+    intentar {
+        sea body = json_parsear(req["cuerpo"])
+        sea usuario   = body["usuario"]
+        sea contrasena = body["contrasena"]
+
+        si (usuarios[usuario] == nulo) {
+            respuesta_error(req, 401, "Usuario no encontrado")
+            retornar nulo
+        }
+        si (usuarios[usuario]["contrasena"] != contrasena) {
+            respuesta_error(req, 401, "Contraseña incorrecta")
+            retornar nulo
+        }
+        respuesta_json(req, 200, {
+            "token": usuarios[usuario]["token"],
+            "usuario": usuario,
+            "mensaje": "Bienvenido a C-Forge API!"
+        })
+    } capturar (e) {
+        respuesta_error(req, 400, "JSON inválido: " + e)
+    }
+}
+
+funcion manejar_listar_tareas(req: mapa): nulo {
+    si (no token_valido(req)) {
+        respuesta_error(req, 401, "Token requerido")
+        retornar nulo
+    }
+    sea usuario = usuario_del_token(req)
+    mutex_bloquear(mutex_tareas)
+    sea mis_tareas = []
+    para t en tareas {
+        si (t["usuario"] == usuario) {
+            agregar(mis_tareas, t)
+        }
+    }
+    mutex_desbloquear(mutex_tareas)
+    respuesta_json(req, 200, {"tareas": mis_tareas, "total": longitud(mis_tareas)})
+}
+
+funcion manejar_crear_tarea(req: mapa): nulo {
+    si (no token_valido(req)) {
+        respuesta_error(req, 401, "Token requerido")
+        retornar nulo
+    }
+    intentar {
+        sea body   = json_parsear(req["cuerpo"])
+        sea titulo = body["titulo"]
+        si (titulo == nulo o longitud(titulo) == 0) {
+            respuesta_error(req, 400, "El título es requerido")
+            retornar nulo
+        }
+        sea usuario = usuario_del_token(req)
+        mutex_bloquear(mutex_tareas)
+        sea nueva = {
+            "id": siguiente_id,
+            "titulo": titulo,
+            "hecho": falso,
+            "usuario": usuario
+        }
+        siguiente_id = siguiente_id + 1
+        agregar(tareas, nueva)
+        mutex_desbloquear(mutex_tareas)
+        respuesta_json(req, 201, nueva)
+    } capturar (e) {
+        respuesta_error(req, 400, "Error: " + e)
+    }
+}
+
+funcion manejar_completar_tarea(req: mapa, id_str: texto): nulo {
+    si (no token_valido(req)) {
+        respuesta_error(req, 401, "Token requerido")
+        retornar nulo
+    }
+    sea id_buscar = a_numero(id_str)
+    sea usuario   = usuario_del_token(req)
+    mutex_bloquear(mutex_tareas)
+    sea encontrada = falso
+    para t en tareas {
+        si (t["id"] == id_buscar y t["usuario"] == usuario) {
+            t["hecho"] = verdadero
+            encontrada = verdadero
+        }
+    }
+    mutex_desbloquear(mutex_tareas)
+    si (encontrada) {
+        respuesta_json(req, 200, {"mensaje": "Tarea marcada como completada", "id": id_buscar})
+    } sino {
+        respuesta_error(req, 404, "Tarea no encontrada")
+    }
+}
+
+funcion manejar_eliminar_tarea(req: mapa, id_str: texto): nulo {
+    si (no token_valido(req)) {
+        respuesta_error(req, 401, "Token requerido")
+        retornar nulo
+    }
+    sea id_buscar = a_numero(id_str)
+    sea usuario   = usuario_del_token(req)
+    mutex_bloquear(mutex_tareas)
+    sea nuevas = []
+    sea eliminada = falso
+    para t en tareas {
+        si (t["id"] == id_buscar y t["usuario"] == usuario) {
+            eliminada = verdadero
+        } sino {
+            agregar(nuevas, t)
+        }
+    }
+    tareas = nuevas
+    mutex_desbloquear(mutex_tareas)
+    si (eliminada) {
+        respuesta_json(req, 200, {"mensaje": "Tarea eliminada", "id": id_buscar})
+    } sino {
+        respuesta_error(req, 404, "Tarea no encontrada")
+    }
+}
+
+funcion manejar_metricas(req: mapa): nulo {
+    respuesta_json(req, 200, metricas)
+}
+
+// ── Router ─────────────────────────────────────────────────────────────────
+funcion enrutar(req: mapa): nulo {
+    sea metodo = req["metodo"]
+    sea ruta   = req["ruta"]
+
+    incrementar_metrica("peticiones_total")
+
+    intentar {
+        // GET /salud
+        si (metodo == "GET" y ruta == "/salud") {
+            manejar_salud(req)
+        }
+        // POST /auth/login
+        sino si (metodo == "POST" y ruta == "/auth/login") {
+            manejar_login(req)
+        }
+        // GET /tareas
+        sino si (metodo == "GET" y ruta == "/tareas") {
+            manejar_listar_tareas(req)
+        }
+        // POST /tareas
+        sino si (metodo == "POST" y ruta == "/tareas") {
+            manejar_crear_tarea(req)
+        }
+        // PATCH /tareas/:id/completar
+        sino si (metodo == "PATCH" y longitud(ruta) > 10) {
+            // Parsear /tareas/N/completar
+            sea partes = []
+            sea parte = ""
+            para c en ruta {
+                si (c == "/") {
+                    si (longitud(parte) > 0) { agregar(partes, parte) }
+                    parte = ""
+                } sino {
+                    parte = parte + c
+                }
+            }
+            si (longitud(parte) > 0) { agregar(partes, parte) }
+            si (longitud(partes) == 3 y partes[0] == "tareas" y partes[2] == "completar") {
+                manejar_completar_tarea(req, partes[1])
+            } sino {
+                respuesta_error(req, 404, "Ruta no encontrada: " + ruta)
+            }
+        }
+        // DELETE /tareas/:id
+        sino si (metodo == "DELETE" y longitud(ruta) > 8) {
+            sea partes = []
+            sea parte = ""
+            para c en ruta {
+                si (c == "/") {
+                    si (longitud(parte) > 0) { agregar(partes, parte) }
+                    parte = ""
+                } sino {
+                    parte = parte + c
+                }
+            }
+            si (longitud(parte) > 0) { agregar(partes, parte) }
+            si (longitud(partes) == 2 y partes[0] == "tareas") {
+                manejar_eliminar_tarea(req, partes[1])
+            } sino {
+                respuesta_error(req, 404, "Ruta no encontrada: " + ruta)
+            }
+        }
+        // GET /metricas
+        sino si (metodo == "GET" y ruta == "/metricas") {
+            manejar_metricas(req)
+        }
+        sino {
+            respuesta_error(req, 404, "Ruta no encontrada: " + metodo + " " + ruta)
+        }
+        incrementar_metrica("peticiones_ok")
+    } atrapar (err) {
+        incrementar_metrica("peticiones_error")
+        intentar {
+            respuesta_error(req, 500, "Error interno: " + err)
+        } atrapar (e2) {
+            // Ignorar error al responder
+        }
+    }
+}
+
+// ── Servidor ───────────────────────────────────────────────────────────────
+sea srv = servidor_http_escuchar(4000)
+
+mostrar("")
+mostrar("✓ Servidor escuchando en http://localhost:4000")
+mostrar("")
+mostrar("Endpoints disponibles:")
+mostrar("  GET  /salud               → Estado del servidor")
+mostrar("  POST /auth/login          → Obtener token")
+mostrar("  GET  /tareas              → Listar tareas (requiere token)")
+mostrar("  POST /tareas              → Crear tarea  (requiere token)")
+mostrar("  PATCH /tareas/:id/completar → Completar (requiere token)")
+mostrar("  DELETE /tareas/:id         → Eliminar   (requiere token)")
+mostrar("  GET  /metricas            → Ver métricas")
+mostrar("")
+mostrar("Credenciales de prueba:")
+mostrar("  admin  / cforge123")
+mostrar("  javier / secreto")
+mostrar("")
+mostrar("Presiona Ctrl+C para detener.")
+mostrar("══════════════════════════════════════════════")
+
+mientras (verdadero) {
+    sea req = servidor_http_solicitud(srv)
+    mostrar("[" + req["metodo"] + "] " + req["ruta"])
+    enrutar(req)
+}

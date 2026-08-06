@@ -1439,9 +1439,7 @@ Value cfv_es_letra(Value cfv_c) {
 }
 Value cfv_es_alfanum(Value cfv_c) {
   cfv_jit_hit("es_alfanum");
- [[maybe_unused]] size_t cfv_c_tipo = cfv_c.index();
   return Value{verdad(cfv_es_letra(cfv_c)) || verdad(cfv_es_digito(cfv_c))};
-  return Value{};
 }
 Value cfv_subcadena(Value cfv_fuente, Value cfv_inicio, Value cfv_fin) {
   cfv_jit_hit("subcadena");
@@ -2664,6 +2662,21 @@ Value cfv_parse_primaria(Value cfv_p) {
     std::string cfv_raw_with_quotes = texto(cfv_lex_str);
     std::string cfv_raw_str = cfv_raw_with_quotes.size() >= 2 ? cfv_raw_with_quotes.substr(1, cfv_raw_with_quotes.size()-2) : cfv_raw_with_quotes;
     if (cfv_raw_str.find('{') == std::string::npos) {
+      // Handle \} escape in simple strings (no interpolation needed)
+      if (cfv_raw_str.find("\\}") != std::string::npos) {
+        std::string cfv_fixed = "";
+        size_t cfv_si = 0;
+        while (cfv_si < cfv_raw_str.size()) {
+          if (cfv_raw_str[cfv_si] == '\\' && cfv_si+1 < cfv_raw_str.size() && cfv_raw_str[cfv_si+1] == '}') {
+            cfv_fixed += '}';
+            cfv_si += 2;
+          } else {
+            cfv_fixed += cfv_raw_str[cfv_si];
+            cfv_si++;
+          }
+        }
+        return cfv_nodo(Value{std::string("Texto", 5)}, Value{std::string("\"") + cfv_fixed + std::string("\"")}, crear_lista({}));
+      }
       return cfv_nodo(Value{std::string("Texto", 5)}, cfv_lex_str, crear_lista({}));
     }
     // String interpolation: build + chain
@@ -2693,9 +2706,16 @@ Value cfv_parse_primaria(Value cfv_p) {
         cfv_interp_parts.push_back(cfv_atext_node_i);
       } else {
         if (cfv_raw_str[cfv_ii] == '\\' && cfv_ii+1 < cfv_raw_str.size()) {
-          cfv_cur_text += cfv_raw_str[cfv_ii];
-          cfv_cur_text += cfv_raw_str[cfv_ii+1];
-          cfv_ii += 2;
+          char cfv_next = cfv_raw_str[cfv_ii+1];
+          if (cfv_next == '{' || cfv_next == '}') {
+            // \{ and \} are escaped braces — add literal brace, don't interpolate
+            cfv_cur_text += cfv_next;
+            cfv_ii += 2;
+          } else {
+            cfv_cur_text += cfv_raw_str[cfv_ii];
+            cfv_cur_text += cfv_next;
+            cfv_ii += 2;
+          }
         } else {
           cfv_cur_text += cfv_raw_str[cfv_ii];
           cfv_ii++;
@@ -3458,6 +3478,386 @@ static int cfv_canal_next_id=1;
 [[maybe_unused]] static Value cfv_hilo_dormir_fn(const Value& ms){
   double d=ms.data.index()==1?std::get<double>(ms.data):0;
   std::this_thread::sleep_for(std::chrono::milliseconds((int)d));return Value{};}
+
+// ── Hilos reales (std::thread) ───────────────────────────────────────────────
+struct CfvHiloHandle{std::shared_ptr<std::thread>t;Value resultado;bool terminado=false;std::mutex mu;std::condition_variable cv;};
+static std::mutex cfv_hilos_mu;
+static std::map<int,std::shared_ptr<CfvHiloHandle>>cfv_hilos;
+static int cfv_hilo_next_id=1;
+// ── Mutex real ───────────────────────────────────────────────────────────────
+static std::mutex cfv_mutexes_mu;
+static std::map<int,std::shared_ptr<std::mutex>>cfv_mutexes;
+static int cfv_mutex_next_id=1;
+static Value cfv_mutex_crear_fn(){auto m=std::make_shared<std::mutex>();std::lock_guard<std::mutex>lk(cfv_mutexes_mu);int id=cfv_mutex_next_id++;cfv_mutexes[id]=m;return Value{(double)id};}
+static Value cfv_mutex_bloquear_fn(const Value&iv){int id=(int)std::get<double>(iv.data);std::shared_ptr<std::mutex>m;{std::lock_guard<std::mutex>lk(cfv_mutexes_mu);auto it=cfv_mutexes.find(id);if(it==cfv_mutexes.end())throw std::runtime_error("mutex_bloquear: no encontrado");m=it->second;}m->lock();return Value{};}
+static Value cfv_mutex_desbloquear_fn(const Value&iv){int id=(int)std::get<double>(iv.data);std::shared_ptr<std::mutex>m;{std::lock_guard<std::mutex>lk(cfv_mutexes_mu);auto it=cfv_mutexes.find(id);if(it==cfv_mutexes.end())throw std::runtime_error("mutex_desbloquear: no encontrado");m=it->second;}m->unlock();return Value{};}
+static Value cfv_mutex_intentar_fn(const Value&iv){int id=(int)std::get<double>(iv.data);std::shared_ptr<std::mutex>m;{std::lock_guard<std::mutex>lk(cfv_mutexes_mu);auto it=cfv_mutexes.find(id);if(it==cfv_mutexes.end())return Value{false};m=it->second;}return Value{m->try_lock()};}
+static Value cfv_hilo_id_fn(){std::hash<std::thread::id>h;return Value{(double)(h(std::this_thread::get_id())&0xFFFFFF)};}
+static Value cfv_hilo_esperar_fn(const Value&iv){int id=(int)std::get<double>(iv.data);std::shared_ptr<CfvHiloHandle>h;{std::lock_guard<std::mutex>lk(cfv_hilos_mu);auto it=cfv_hilos.find(id);if(it==cfv_hilos.end())return Value{};h=it->second;}// Esperar con condition_variable hasta que el hilo marque terminado=true
+{std::unique_lock<std::mutex>lk(cfv_hilos_mu);h->cv.wait(lk,[&]{return h->terminado;});}return h->resultado;}
+static Value cfv_hilo_activo_fn(const Value&iv){int id=(int)std::get<double>(iv.data);std::lock_guard<std::mutex>lk(cfv_hilos_mu);auto it=cfv_hilos.find(id);if(it==cfv_hilos.end())return Value{false};return Value{!it->second->terminado};}
+
+// hilo_crear(fn_lambda, [arg1, arg2, ...]) — lanza un std::thread real
+// fn_lambda debe ser una función C-Forge (capturada como Mapa con __lambda)
+// Retorna el ID del hilo para usar con hilo_esperar/hilo_activo
+// Clonar un mapa de funciones para aislar cada hilo
+static Value cfv_clonar_fns(const Value& fns){
+  if(auto* mp=std::get_if<Mapa>(&fns.data)){
+    auto nuevo=std::make_shared<std::map<std::string,Value>>(**mp);
+    return Value{nuevo};
+  }
+  return fns;
+}
+
+static Value cfv_hilo_crear_fn(const Value& fn_v, const Value& args_v,
+                                Value cuerpo_cap, Value entorno_cap,
+                                Value fns_cap, std::vector<std::string> params_cap){
+  (void)fn_v; (void)args_v;
+  // Cada hilo obtiene su propia copia del mapa de funciones para evitar data races
+  Value fns_hilo = cfv_clonar_fns(fns_cap);
+  auto handle = std::make_shared<CfvHiloHandle>();
+  int id;
+  {std::lock_guard<std::mutex>lk(cfv_hilos_mu);id=cfv_hilo_next_id++;cfv_hilos[id]=handle;}
+  {
+    std::thread t([handle,cuerpo_cap,entorno_cap,fns_hilo,params_cap,args_v]()mutable{
+      try{
+        Value scope = cfv_env_nuevo_scope(entorno_cap);
+        auto* alv = std::get_if<Lista>(&args_v.data);
+        for(size_t i=0;i<params_cap.size();i++){
+          Value val{};
+          if(alv && i < (*alv)->size()) val=(**alv)[i];
+          cfv_env_asignar(scope, Value{params_cap[i]}, val);
+        }
+        Value senal = cfv_exec_bloque(cuerpo_cap, scope, fns_hilo);
+        auto* sl = std::get_if<Lista>(&senal.data);
+        if(sl && (*sl)->size()>=2){
+          std::string sig = texto((**sl)[0]);
+          if(sig=="retornar"||sig=="normal") handle->resultado=(**sl)[1];
+        }
+      } catch(std::exception& e){
+        handle->resultado=Value{std::string(e.what())};
+      } catch(...){
+        handle->resultado=Value{std::string("error en hilo")};
+      }
+      {std::lock_guard<std::mutex>lk(cfv_hilos_mu); handle->terminado=true;}
+      handle->cv.notify_all();
+    });
+    t.detach(); // Detach para que ~thread() no llame terminate()
+  }
+  return Value{(double)id};
+}
+
+// ── SDL2 dinámico vía dlopen ──────────────────────────────────────────────────
+// Cargamos SDL2 en tiempo de ejecución para no requerir SDL2 en compile-time.
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
+struct CfvSdl2 {
+  void* lib=nullptr; void* lib_img=nullptr; void* lib_mix=nullptr; void* lib_ttf=nullptr;
+  // SDL core
+  int(*Init)(unsigned)=nullptr;
+  void(*Quit)()=nullptr;
+  void*(*CreateWindow)(const char*,int,int,int,int,unsigned)=nullptr;
+  void(*DestroyWindow)(void*)=nullptr;
+  void*(*CreateRenderer)(void*,int,unsigned)=nullptr;
+  void(*DestroyRenderer)(void*)=nullptr;
+  int(*SetRenderDrawColor)(void*,unsigned char,unsigned char,unsigned char,unsigned char)=nullptr;
+  int(*RenderClear)(void*)=nullptr;
+  void(*RenderPresent)(void*)=nullptr;
+  int(*RenderFillRect)(void*,const int*)=nullptr;
+  int(*RenderDrawRect)(void*,const int*)=nullptr;
+  int(*RenderDrawLine)(void*,int,int,int,int)=nullptr;
+  int(*RenderCopy)(void*,void*,const int*,const int*)=nullptr;
+  void(*RenderSetScale)(void*,float,float)=nullptr;
+  int(*PollEvent)(void*)=nullptr;
+  unsigned(*GetTicks)()=nullptr;
+  void(*Delay)(unsigned)=nullptr;
+  void*(*CreateTextureFromSurface)(void*,void*)=nullptr;
+  void(*DestroyTexture)(void*)=nullptr;
+  void(*FreeSurface)(void*)=nullptr;
+  int(*QueryTexture)(void*,unsigned*,int*,int*,int*)=nullptr;
+  int(*RenderCopyEx)(void*,void*,const int*,const int*,double,const int*,int)=nullptr;
+  void(*GetWindowSize)(void*,int*,int*)=nullptr;
+  int(*SetRenderDrawBlendMode)(void*,int)=nullptr;
+  // SDL_image
+  void*(*IMG_Load)(const char*)=nullptr;
+  void*(*IMG_LoadTexture)(void*,const char*)=nullptr;
+  // SDL_mixer
+  int(*Mix_OpenAudio)(int,unsigned short,int,int)=nullptr;
+  void*(*Mix_LoadWAV)(const char*)=nullptr;
+  int(*Mix_PlayChannel)(int,void*,int)=nullptr;
+  void*(*Mix_LoadMUS)(const char*)=nullptr;
+  int(*Mix_PlayMusic)(void*,int)=nullptr;
+  void(*Mix_HaltMusic)()=nullptr;
+  void(*Mix_FreeChunk)(void*)=nullptr;
+  void(*Mix_FreeMusic)(void*)=nullptr;
+  void(*Mix_CloseAudio)()=nullptr;
+  int(*Mix_Volume)(int,int)=nullptr;
+  int(*Mix_VolumeMusic)(int)=nullptr;
+  // SDL_ttf
+  int(*TTF_Init)()=nullptr;
+  void*(*TTF_OpenFont)(const char*,int)=nullptr;
+  void*(*TTF_RenderText_Blended)(void*,const char*,unsigned)=nullptr;
+  void(*TTF_CloseFont)(void*)=nullptr;
+  void(*TTF_Quit)()=nullptr;
+  bool loaded=false;
+};
+static CfvSdl2 cfv_sdl2;
+
+static bool cfv_sdl2_cargar(){
+  if(cfv_sdl2.loaded)return true;
+#ifndef _WIN32
+  const char* libs[]={"libSDL2-2.0.so.0","libSDL2.so","libSDL2-2.0.dylib","libSDL2.dylib",nullptr};
+  for(int i=0;libs[i];i++){cfv_sdl2.lib=dlopen(libs[i],RTLD_LAZY|RTLD_GLOBAL);if(cfv_sdl2.lib)break;}
+  if(!cfv_sdl2.lib)return false;
+  #define SDLSYM(fn) cfv_sdl2.fn=(decltype(cfv_sdl2.fn))dlsym(cfv_sdl2.lib,"SDL_"#fn)
+  SDLSYM(Init);SDLSYM(Quit);SDLSYM(CreateWindow);SDLSYM(DestroyWindow);
+  SDLSYM(CreateRenderer);SDLSYM(DestroyRenderer);SDLSYM(SetRenderDrawColor);
+  SDLSYM(RenderClear);SDLSYM(RenderPresent);SDLSYM(RenderFillRect);
+  SDLSYM(RenderDrawRect);SDLSYM(RenderDrawLine);SDLSYM(RenderCopy);
+  SDLSYM(RenderSetScale);SDLSYM(PollEvent);SDLSYM(GetTicks);SDLSYM(Delay);
+  SDLSYM(CreateTextureFromSurface);SDLSYM(DestroyTexture);SDLSYM(FreeSurface);
+  SDLSYM(QueryTexture);SDLSYM(RenderCopyEx);SDLSYM(GetWindowSize);
+  SDLSYM(SetRenderDrawBlendMode);
+  #undef SDLSYM
+  // SDL_image
+  const char* imglibs[]={"libSDL2_image-2.0.so.0","libSDL2_image.so","libSDL2_image-2.0.dylib",nullptr};
+  for(int i=0;imglibs[i];i++){cfv_sdl2.lib_img=dlopen(imglibs[i],RTLD_LAZY);if(cfv_sdl2.lib_img)break;}
+  if(cfv_sdl2.lib_img){
+    cfv_sdl2.IMG_Load=(decltype(cfv_sdl2.IMG_Load))dlsym(cfv_sdl2.lib_img,"IMG_Load");
+    cfv_sdl2.IMG_LoadTexture=(decltype(cfv_sdl2.IMG_LoadTexture))dlsym(cfv_sdl2.lib_img,"IMG_LoadTexture");}
+  // SDL_mixer
+  const char* mixlibs[]={"libSDL2_mixer-2.0.so.0","libSDL2_mixer.so","libSDL2_mixer-2.0.dylib",nullptr};
+  for(int i=0;mixlibs[i];i++){cfv_sdl2.lib_mix=dlopen(mixlibs[i],RTLD_LAZY);if(cfv_sdl2.lib_mix)break;}
+  if(cfv_sdl2.lib_mix){
+    #define MIXSYM(fn) cfv_sdl2.fn=(decltype(cfv_sdl2.fn))dlsym(cfv_sdl2.lib_mix,#fn)
+    MIXSYM(Mix_OpenAudio);MIXSYM(Mix_LoadWAV);MIXSYM(Mix_PlayChannel);
+    MIXSYM(Mix_LoadMUS);MIXSYM(Mix_PlayMusic);MIXSYM(Mix_HaltMusic);
+    MIXSYM(Mix_FreeChunk);MIXSYM(Mix_FreeMusic);MIXSYM(Mix_CloseAudio);
+    MIXSYM(Mix_Volume);MIXSYM(Mix_VolumeMusic);
+    #undef MIXSYM
+  }
+  // SDL_ttf
+  const char* ttflibs[]={"libSDL2_ttf-2.0.so.0","libSDL2_ttf.so","libSDL2_ttf-2.0.dylib",nullptr};
+  for(int i=0;ttflibs[i];i++){cfv_sdl2.lib_ttf=dlopen(ttflibs[i],RTLD_LAZY);if(cfv_sdl2.lib_ttf)break;}
+  if(cfv_sdl2.lib_ttf){
+    cfv_sdl2.TTF_Init=(decltype(cfv_sdl2.TTF_Init))dlsym(cfv_sdl2.lib_ttf,"TTF_Init");
+    cfv_sdl2.TTF_OpenFont=(decltype(cfv_sdl2.TTF_OpenFont))dlsym(cfv_sdl2.lib_ttf,"TTF_OpenFont");
+    cfv_sdl2.TTF_RenderText_Blended=(decltype(cfv_sdl2.TTF_RenderText_Blended))dlsym(cfv_sdl2.lib_ttf,"TTF_RenderText_Blended");
+    cfv_sdl2.TTF_CloseFont=(decltype(cfv_sdl2.TTF_CloseFont))dlsym(cfv_sdl2.lib_ttf,"TTF_CloseFont");
+    cfv_sdl2.TTF_Quit=(decltype(cfv_sdl2.TTF_Quit))dlsym(cfv_sdl2.lib_ttf,"TTF_Quit");}
+  cfv_sdl2.loaded=true; return true;
+#else
+  return false;
+#endif
+}
+
+// Handle maps: ventana_id→ptr, renderer_id→ptr, textura_id→ptr
+static std::map<int,void*>cfv_sdl_ventanas,cfv_sdl_renderers,cfv_sdl_texturas,cfv_sdl_fuentes,cfv_sdl_sonidos,cfv_sdl_musicas;
+static int cfv_sdl_next_id=1;
+
+static Value cfv_sdl_init_fn(const Value&flags){
+  if(!cfv_sdl2_cargar())throw std::runtime_error("sdl_init: SDL2 no encontrado. Instala libSDL2.");
+  unsigned f=flags.index()==1?(unsigned)std::get<double>(flags.data):0x00000020u|0x00000010u; // VIDEO|AUDIO
+  if(cfv_sdl2.Init(f)!=0)throw std::runtime_error("sdl_init: fallo al inicializar SDL2");
+  if(cfv_sdl2.TTF_Init)cfv_sdl2.TTF_Init();
+  if(cfv_sdl2.Mix_OpenAudio)cfv_sdl2.Mix_OpenAudio(44100,0x8010,2,2048);
+  return Value{true};}
+
+static Value cfv_sdl_ventana_fn(const Value&titulo,const Value&ancho,const Value&alto,const Value&flags_v){
+  if(!cfv_sdl2.CreateWindow)throw std::runtime_error("sdl_ventana: SDL2 no inicializado");
+  std::string t=titulo.index()==2?std::get<std::string>(titulo.data):"C-Forge";
+  int w=ancho.index()==1?(int)std::get<double>(ancho.data):800;
+  int h=alto.index()==1?(int)std::get<double>(alto.data):600;
+  unsigned f=flags_v.index()==1?(unsigned)std::get<double>(flags_v.data):0x00000004u; // SHOWN
+  void* win=cfv_sdl2.CreateWindow(t.c_str(),0x1FFF0000u,0x1FFF0000u,w,h,f);
+  if(!win)throw std::runtime_error("sdl_ventana: no se pudo crear la ventana");
+  int id=cfv_sdl_next_id++;cfv_sdl_ventanas[id]=win;return Value{(double)id};}
+
+static Value cfv_sdl_renderer_fn(const Value&vid){
+  int id=(int)std::get<double>(vid.data);
+  auto it=cfv_sdl_ventanas.find(id);
+  if(it==cfv_sdl_ventanas.end())throw std::runtime_error("sdl_renderer: ventana no encontrada");
+  void* ren=cfv_sdl2.CreateRenderer(it->second,-1,0x00000002u|0x00000004u); // ACCELERATED|PRESENTVSYNC
+  if(!ren)throw std::runtime_error("sdl_renderer: no se pudo crear renderer");
+  int rid=cfv_sdl_next_id++;cfv_sdl_renderers[rid]=ren;return Value{(double)rid};}
+
+static Value cfv_sdl_color_fn(const Value&rid,const Value&r,const Value&g,const Value&b,const Value&a){
+  auto it=cfv_sdl_renderers.find((int)std::get<double>(rid.data));
+  if(it==cfv_sdl_renderers.end())return Value{};
+  cfv_sdl2.SetRenderDrawColor(it->second,
+    (unsigned char)(r.index()==1?std::get<double>(r.data):255),
+    (unsigned char)(g.index()==1?std::get<double>(g.data):255),
+    (unsigned char)(b.index()==1?std::get<double>(b.data):255),
+    (unsigned char)(a.index()==1?std::get<double>(a.data):255));return Value{};}
+
+static Value cfv_sdl_limpiar_fn(const Value&rid){
+  auto it=cfv_sdl_renderers.find((int)std::get<double>(rid.data));
+  if(it!=cfv_sdl_renderers.end())cfv_sdl2.RenderClear(it->second);return Value{};}
+
+static Value cfv_sdl_presentar_fn(const Value&rid){
+  auto it=cfv_sdl_renderers.find((int)std::get<double>(rid.data));
+  if(it!=cfv_sdl_renderers.end())cfv_sdl2.RenderPresent(it->second);return Value{};}
+
+static Value cfv_sdl_rect_fn(const Value&rid,const Value&x,const Value&y,const Value&w,const Value&h,const Value&relleno){
+  auto it=cfv_sdl_renderers.find((int)std::get<double>(rid.data));
+  if(it==cfv_sdl_renderers.end())return Value{};
+  int rect[4]={(int)std::get<double>(x.data),(int)std::get<double>(y.data),
+               (int)std::get<double>(w.data),(int)std::get<double>(h.data)};
+  bool fill=relleno.index()!=3||std::get<bool>(relleno.data);
+  if(fill)cfv_sdl2.RenderFillRect(it->second,rect);
+  else cfv_sdl2.RenderDrawRect(it->second,rect);return Value{};}
+
+static Value cfv_sdl_linea_fn(const Value&rid,const Value&x1,const Value&y1,const Value&x2,const Value&y2){
+  auto it=cfv_sdl_renderers.find((int)std::get<double>(rid.data));
+  if(it==cfv_sdl_renderers.end())return Value{};
+  cfv_sdl2.RenderDrawLine(it->second,(int)std::get<double>(x1.data),(int)std::get<double>(y1.data),
+    (int)std::get<double>(x2.data),(int)std::get<double>(y2.data));return Value{};}
+
+static Value cfv_sdl_cargar_textura_fn(const Value&rid,const Value&ruta){
+  auto it=cfv_sdl_renderers.find((int)std::get<double>(rid.data));
+  if(it==cfv_sdl_renderers.end())throw std::runtime_error("sdl_cargar_textura: renderer no encontrado");
+  std::string path=std::get<std::string>(ruta.data);
+  void* tex=nullptr;
+  if(cfv_sdl2.IMG_LoadTexture)tex=cfv_sdl2.IMG_LoadTexture(it->second,path.c_str());
+  if(!tex)throw std::runtime_error("sdl_cargar_textura: no se pudo cargar '"+path+"'. Instala libSDL2-image.");
+  int tid=cfv_sdl_next_id++;cfv_sdl_texturas[tid]=tex;return Value{(double)tid};}
+
+static Value cfv_sdl_dibujar_textura_fn(const Value&rid,const Value&tid,
+    const Value&dx,const Value&dy,const Value&dw,const Value&dh,const Value&angulo){
+  auto rit=cfv_sdl_renderers.find((int)std::get<double>(rid.data));
+  auto tit=cfv_sdl_texturas.find((int)std::get<double>(tid.data));
+  if(rit==cfv_sdl_renderers.end()||tit==cfv_sdl_texturas.end())return Value{};
+  int dst[4]={(int)std::get<double>(dx.data),(int)std::get<double>(dy.data),
+              (int)std::get<double>(dw.data),(int)std::get<double>(dh.data)};
+  double ang=angulo.index()==1?std::get<double>(angulo.data):0.0;
+  if(ang!=0.0)cfv_sdl2.RenderCopyEx(rit->second,tit->second,nullptr,dst,ang,nullptr,0);
+  else cfv_sdl2.RenderCopy(rit->second,tit->second,nullptr,dst);return Value{};}
+
+static Value cfv_sdl_destruir_textura_fn(const Value&tid){
+  auto it=cfv_sdl_texturas.find((int)std::get<double>(tid.data));
+  if(it!=cfv_sdl_texturas.end()){cfv_sdl2.DestroyTexture(it->second);cfv_sdl_texturas.erase(it);}return Value{};}
+
+static Value cfv_sdl_eventos_fn(){
+  // Devuelve lista de eventos: cada evento es un mapa {tipo, tecla, x, y, boton}
+  auto lista=std::make_shared<std::vector<Value>>();
+  if(!cfv_sdl2.PollEvent)return Value{lista};
+  unsigned char event_buf[56]={};
+  while(cfv_sdl2.PollEvent(event_buf)){
+    unsigned tipo=*reinterpret_cast<unsigned*>(event_buf);
+    auto ev=std::make_shared<std::map<std::string,Value>>();
+    (*ev)["tipo"]=Value{(double)tipo};
+    if(tipo==0x300||tipo==0x301){ // SDL_KEYDOWN/UP
+      unsigned scan=*reinterpret_cast<unsigned*>(event_buf+16);
+      (*ev)["tecla"]=Value{(double)scan};
+      (*ev)["presionada"]=Value{tipo==0x300};}
+    else if(tipo==0x400||tipo==0x401){ // MOUSEMOTION/BUTTON
+      int mx=*reinterpret_cast<int*>(event_buf+20);
+      int my=*reinterpret_cast<int*>(event_buf+24);
+      (*ev)["x"]=Value{(double)mx};(*ev)["y"]=Value{(double)my};
+      if(tipo==0x401)(*ev)["boton"]=Value{(double)event_buf[16]};}
+    else if(tipo==0x100){(*ev)["salir"]=Value{true};} // SDL_QUIT
+    lista->push_back(Value{ev});}
+  return Value{lista};}
+
+static Value cfv_sdl_ticks_fn(){return cfv_sdl2.GetTicks?Value{(double)cfv_sdl2.GetTicks()}:Value{0.0};}
+static Value cfv_sdl_esperar_fn(const Value&ms){
+  if(cfv_sdl2.Delay)cfv_sdl2.Delay((unsigned)(ms.index()==1?std::get<double>(ms.data):16));return Value{};}
+
+static Value cfv_sdl_cargar_sonido_fn(const Value&ruta){
+  if(!cfv_sdl2.Mix_LoadWAV)throw std::runtime_error("sdl_cargar_sonido: SDL2_mixer no disponible");
+  std::string path=std::get<std::string>(ruta.data);
+  void* chunk=cfv_sdl2.Mix_LoadWAV(path.c_str());
+  if(!chunk)throw std::runtime_error("sdl_cargar_sonido: no se pudo cargar '"+path+"'");
+  int sid=cfv_sdl_next_id++;cfv_sdl_sonidos[sid]=chunk;return Value{(double)sid};}
+
+static Value cfv_sdl_reproducir_sonido_fn(const Value&sid,const Value&repetir){
+  auto it=cfv_sdl_sonidos.find((int)std::get<double>(sid.data));
+  if(it==cfv_sdl_sonidos.end())return Value{};
+  int rep=repetir.index()==1?(int)std::get<double>(repetir.data):0;
+  if(cfv_sdl2.Mix_PlayChannel)cfv_sdl2.Mix_PlayChannel(-1,it->second,rep);return Value{};}
+
+static Value cfv_sdl_cargar_musica_fn(const Value&ruta){
+  if(!cfv_sdl2.Mix_LoadMUS)throw std::runtime_error("sdl_cargar_musica: SDL2_mixer no disponible");
+  std::string path=std::get<std::string>(ruta.data);
+  void* mus=cfv_sdl2.Mix_LoadMUS(path.c_str());
+  if(!mus)throw std::runtime_error("sdl_cargar_musica: no se pudo cargar '"+path+"'");
+  int mid=cfv_sdl_next_id++;cfv_sdl_musicas[mid]=mus;return Value{(double)mid};}
+
+static Value cfv_sdl_reproducir_musica_fn(const Value&mid,const Value&rep){
+  auto it=cfv_sdl_musicas.find((int)std::get<double>(mid.data));
+  if(it==cfv_sdl_musicas.end())return Value{};
+  int r=rep.index()==1?(int)std::get<double>(rep.data):-1;
+  if(cfv_sdl2.Mix_PlayMusic)cfv_sdl2.Mix_PlayMusic(it->second,r);return Value{};}
+
+static Value cfv_sdl_volumen_fn(const Value&vol){
+  int v=vol.index()==1?(int)std::get<double>(vol.data):128;
+  if(cfv_sdl2.Mix_Volume)cfv_sdl2.Mix_Volume(-1,v);
+  if(cfv_sdl2.Mix_VolumeMusic)cfv_sdl2.Mix_VolumeMusic(v);return Value{};}
+
+static Value cfv_sdl_cerrar_fn(){
+  for(auto&[id,t]:cfv_sdl_texturas)if(cfv_sdl2.DestroyTexture)cfv_sdl2.DestroyTexture(t);
+  for(auto&[id,r]:cfv_sdl_renderers)if(cfv_sdl2.DestroyRenderer)cfv_sdl2.DestroyRenderer(r);
+  for(auto&[id,w]:cfv_sdl_ventanas)if(cfv_sdl2.DestroyWindow)cfv_sdl2.DestroyWindow(w);
+  for(auto&[id,c]:cfv_sdl_sonidos)if(cfv_sdl2.Mix_FreeChunk)cfv_sdl2.Mix_FreeChunk(c);
+  for(auto&[id,m]:cfv_sdl_musicas)if(cfv_sdl2.Mix_FreeMusic)cfv_sdl2.Mix_FreeMusic(m);
+  cfv_sdl_texturas.clear();cfv_sdl_renderers.clear();cfv_sdl_ventanas.clear();
+  cfv_sdl_sonidos.clear();cfv_sdl_musicas.clear();
+  if(cfv_sdl2.Mix_CloseAudio)cfv_sdl2.Mix_CloseAudio();
+  if(cfv_sdl2.TTF_Quit)cfv_sdl2.TTF_Quit();
+  if(cfv_sdl2.Quit)cfv_sdl2.Quit();return Value{};}
+
+static Value cfv_sdl_disponible_fn(){return Value{cfv_sdl2_cargar()};}
+
+// ── UDP Sockets ──────────────────────────────────────────────────────────────
+#ifndef _WIN32
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+static std::map<int,int>cfv_udp_sockets;
+static int cfv_udp_next_id=1;
+static Value cfv_udp_crear_fn(const Value&puerto_v){
+  int fd=socket(AF_INET,SOCK_DGRAM,0);
+  if(fd<0)throw std::runtime_error("udp_crear: no se pudo crear socket");
+  if(puerto_v.index()==1){
+    int puerto=(int)std::get<double>(puerto_v.data);
+    struct sockaddr_in addr{};addr.sin_family=AF_INET;addr.sin_port=htons(puerto);addr.sin_addr.s_addr=INADDR_ANY;
+    int reuse=1;setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
+    if(bind(fd,(struct sockaddr*)&addr,sizeof(addr))<0){::close(fd);throw std::runtime_error("udp_crear: bind fallo en puerto "+std::to_string(puerto));}}
+  // Non-blocking
+  fcntl(fd,F_SETFL,fcntl(fd,F_GETFL,0)|O_NONBLOCK);
+  int id=cfv_udp_next_id++;cfv_udp_sockets[id]=fd;return Value{(double)id};}
+static Value cfv_udp_enviar_fn(const Value&sid,const Value&host_v,const Value&puerto_v,const Value&datos_v){
+  auto it=cfv_udp_sockets.find((int)std::get<double>(sid.data));
+  if(it==cfv_udp_sockets.end())throw std::runtime_error("udp_enviar: socket no encontrado");
+  std::string host=std::get<std::string>(host_v.data);
+  int puerto=(int)std::get<double>(puerto_v.data);
+  std::string datos=std::get<std::string>(datos_v.data);
+  struct sockaddr_in addr{};addr.sin_family=AF_INET;addr.sin_port=htons(puerto);
+  if(inet_pton(AF_INET,host.c_str(),&addr.sin_addr)<=0)throw std::runtime_error("udp_enviar: IP inválida");
+  sendto(it->second,datos.c_str(),datos.size(),0,(struct sockaddr*)&addr,sizeof(addr));return Value{};}
+static Value cfv_udp_recibir_fn(const Value&sid){
+  auto it=cfv_udp_sockets.find((int)std::get<double>(sid.data));
+  if(it==cfv_udp_sockets.end())return Value{};
+  char buf[65536];struct sockaddr_in src{};socklen_t slen=sizeof(src);
+  ssize_t n=recvfrom(it->second,buf,sizeof(buf)-1,0,(struct sockaddr*)&src,&slen);
+  if(n<=0)return Value{};
+  buf[n]=0;
+  auto res=std::make_shared<std::map<std::string,Value>>();
+  (*res)["datos"]=Value{std::string(buf,n)};
+  char ipbuf[INET_ADDRSTRLEN];inet_ntop(AF_INET,&src.sin_addr,ipbuf,sizeof(ipbuf));
+  (*res)["origen"]=Value{std::string(ipbuf)};
+  (*res)["puerto"]=Value{(double)ntohs(src.sin_port)};
+  return Value{res};}
+static Value cfv_udp_cerrar_fn(const Value&sid){
+  auto it=cfv_udp_sockets.find((int)std::get<double>(sid.data));
+  if(it!=cfv_udp_sockets.end()){::close(it->second);cfv_udp_sockets.erase(it);}return Value{};}
+#else
+static Value cfv_udp_crear_fn(const Value&){throw std::runtime_error("udp: no soportado en Windows aún");}
+static Value cfv_udp_enviar_fn(const Value&,const Value&,const Value&,const Value&){return Value{};}
+static Value cfv_udp_recibir_fn(const Value&){return Value{};}
+static Value cfv_udp_cerrar_fn(const Value&){return Value{};}
+#endif
 
 // ── Sistema / Proceso / Env ───────────────────────────────────────────────────
 [[maybe_unused]] static Value cfv_env_obtener_fn(const Value& nv){
@@ -5076,6 +5476,143 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
   if (verdad(compara(cfv_nombre, Value{std::string("hilo_dormir")}, "=="))) {
     return cfv_hilo_dormir_fn(indice(cfv_args,Value{0.0}));
   }
+  // ── Mutex real ─────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("mutex_crear")}, "=="))) {
+    return cfv_mutex_crear_fn();
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("mutex_bloquear")}, "=="))) {
+    return cfv_mutex_bloquear_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("mutex_desbloquear")}, "=="))) {
+    return cfv_mutex_desbloquear_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("mutex_intentar")}, "=="))) {
+    return cfv_mutex_intentar_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("hilo_id")}, "=="))) {
+    return cfv_hilo_id_fn();
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("hilo_esperar")}, "=="))) {
+    return cfv_hilo_esperar_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("hilo_activo")}, "=="))) {
+    return cfv_hilo_activo_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("hilo_crear")}, "=="))) {
+    Value fn_v = indice(cfv_args, Value{0.0});
+    Value args_v = cfv_args.index()==4 && numero(cfv_longitud(cfv_args))>=2
+                   ? indice(cfv_args, Value{1.0}) : crear_lista({});
+    // Admitir tanto lambdas como nombre de función en cfv_fns
+    auto* lmp = std::get_if<Mapa>(&fn_v.data);
+    if(lmp && (*lmp)->count("__lambda") && verdad((**lmp)["__lambda"])){
+      Value cuerpo  = (**lmp)["cuerpo"];
+      Value entorno = (**lmp)["env"];
+      Value params  = (**lmp)["params"];
+      std::vector<std::string> params_vec;
+      if(auto* pla=std::get_if<Lista>(&params.data)){
+        for(auto& p:(**pla)) params_vec.push_back(texto(p));
+      }
+      return cfv_hilo_crear_fn(fn_v,args_v,cuerpo,entorno,cfv_fns,params_vec);
+    }
+    // Nombre de función como texto
+    if(fn_v.index()==2){
+      std::string nombre_fn=std::get<std::string>(fn_v.data);
+      if(auto* fmap=std::get_if<Mapa>(&cfv_fns.data)){
+        auto it=(*fmap)->find(nombre_fn);
+        if(it!=(*fmap)->end()){
+          auto* fmp=std::get_if<Mapa>(&it->second.data);
+          if(fmp){
+            Value cuerpo  = (**fmp)["cuerpo"];
+            Value entorno = (**fmp).count("env") ? (**fmp)["env"] : cfv_env;
+            Value params  = (**fmp)["params"];
+            std::vector<std::string> params_vec;
+            if(auto* pla=std::get_if<Lista>(&params.data)){
+              for(auto& p:(**pla)) params_vec.push_back(texto(p));
+            }
+            return cfv_hilo_crear_fn(fn_v,args_v,cuerpo,entorno,cfv_fns,params_vec);
+          }
+        }
+      }
+    }
+    throw std::runtime_error("hilo_crear: se esperaba una función o nombre de función");
+  }
+  // ── SDL2 ───────────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_disponible")}, "=="))) {
+    return cfv_sdl_disponible_fn();
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_init")}, "=="))) {
+    return cfv_sdl_init_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_ventana")}, "=="))) {
+    return cfv_sdl_ventana_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_renderer")}, "=="))) {
+    return cfv_sdl_renderer_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_color")}, "=="))) {
+    return cfv_sdl_color_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}),indice(cfv_args,Value{4.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_limpiar")}, "=="))) {
+    return cfv_sdl_limpiar_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_presentar")}, "=="))) {
+    return cfv_sdl_presentar_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_rect")}, "=="))) {
+    return cfv_sdl_rect_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}),indice(cfv_args,Value{4.0}),indice(cfv_args,Value{5.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_linea")}, "=="))) {
+    return cfv_sdl_linea_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}),indice(cfv_args,Value{4.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_cargar_textura")}, "=="))) {
+    return cfv_sdl_cargar_textura_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_dibujar_textura")}, "=="))) {
+    return cfv_sdl_dibujar_textura_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}),indice(cfv_args,Value{4.0}),indice(cfv_args,Value{5.0}),indice(cfv_args,Value{6.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_destruir_textura")}, "=="))) {
+    return cfv_sdl_destruir_textura_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_eventos")}, "=="))) {
+    return cfv_sdl_eventos_fn();
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_ticks")}, "=="))) {
+    return cfv_sdl_ticks_fn();
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_esperar")}, "=="))) {
+    return cfv_sdl_esperar_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_cargar_sonido")}, "=="))) {
+    return cfv_sdl_cargar_sonido_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_reproducir_sonido")}, "=="))) {
+    return cfv_sdl_reproducir_sonido_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_cargar_musica")}, "=="))) {
+    return cfv_sdl_cargar_musica_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_reproducir_musica")}, "=="))) {
+    return cfv_sdl_reproducir_musica_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_volumen")}, "=="))) {
+    return cfv_sdl_volumen_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_cerrar")}, "=="))) {
+    return cfv_sdl_cerrar_fn();
+  }
+  // ── UDP ────────────────────────────────────────────────────────────────────
+  if (verdad(compara(cfv_nombre, Value{std::string("udp_crear")}, "=="))) {
+    return cfv_udp_crear_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("udp_enviar")}, "=="))) {
+    return cfv_udp_enviar_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("udp_recibir")}, "=="))) {
+    return cfv_udp_recibir_fn(indice(cfv_args,Value{0.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("udp_cerrar")}, "=="))) {
+    return cfv_udp_cerrar_fn(indice(cfv_args,Value{0.0}));
+  }
   // ── Sistema ────────────────────────────────────────────────────────────────
   if (verdad(compara(cfv_nombre, Value{std::string("env_obtener")}, "=="))) {
     return cfv_env_obtener_fn(indice(cfv_args,Value{0.0}));
@@ -5305,7 +5842,28 @@ Value cfv_eval_expr(Value cfv_nodo_e, Value cfv_env, Value cfv_fns) {
     return Value{};
   }
   if (verdad(compara(cfv_t, Value{std::string("Identificador", 13)}, "=="))) {
-    return cfv_env_buscar(cfv_env, indice(cfv_nodo_e, Value{std::string("valor", 5)}));
+    Value cfv_id_nombre = indice(cfv_nodo_e, Value{std::string("valor", 5)});
+    // Buscar primero en el entorno; si no está, buscar en cfv_fns (funciones declaradas)
+    if (verdad(cfv_env_tiene(cfv_env, cfv_id_nombre))) {
+      return cfv_env_buscar(cfv_env, cfv_id_nombre);
+    }
+    if(auto* fmap=std::get_if<Mapa>(&cfv_fns.data)){
+      std::string nombre_fn=cfv_id_nombre.index()==2?std::get<std::string>(cfv_id_nombre.data):"";
+      auto it=(*fmap)->find(nombre_fn);
+      if(it!=(*fmap)->end()){
+        // Envolver como lambda para poder pasar como valor de primera clase
+        auto lmp=std::make_shared<std::map<std::string,Value>>();
+        if(auto* fndef=std::get_if<Mapa>(&it->second.data)){
+          (*lmp)["params"] = (**fndef)["params"];
+          (*lmp)["cuerpo"] = (**fndef)["cuerpo"];
+          (*lmp)["env"]    = (**fndef).count("env") ? (**fndef)["env"] : cfv_env;
+        }
+        (*lmp)["__lambda"] = Value{true};
+        (*lmp)["__nombre"] = cfv_id_nombre;
+        return Value{lmp};
+      }
+    }
+    return cfv_env_buscar(cfv_env, cfv_id_nombre); // lanzará error normal
   }
   if (verdad(compara(cfv_t, Value{std::string("Lista", 5)}, "=="))) {
     Value cfv_resultado = crear_lista({});
@@ -6574,7 +7132,7 @@ const char* cfv_eval_json(const char* code) {
 }
 
 // Obtener version del interprete
-const char* cfv_version() { return "2.6.0"; }
+const char* cfv_version() { return "3.2.0"; }
 
 // Verificar disponibilidad de SDL2
 int cfv_has_sdl2() {
@@ -6598,7 +7156,7 @@ int cfv_has_openssl() {
 
 [[maybe_unused]] static void cfv_print_cli_help() {
   std::cout
-    << "C-Forge 2.6.0\n"
+    << "C-Forge 3.2.0\n"
     << "Uso:\n"
     << "  cforge archivo.cfv              Ejecutar un programa\n"
     << "  cforge run archivo.cfv          Ejecutar un programa\n"

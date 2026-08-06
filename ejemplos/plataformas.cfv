@@ -1,0 +1,369 @@
+// ejemplos/plataformas.cfv — Juego de plataformas completo en C-Forge v3.3.0
+// Demuestra: SDL2, física, tilemap, partículas, HUD, escenas, sonido, cámara
+//
+// Para ejecutar necesitas SDL2 instalado:
+//   Ubuntu/Debian: sudo apt install libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-mixer-2.0-0
+//   macOS:         brew install sdl2 sdl2_image sdl2_mixer
+//
+// Ejecutar: cforgev ejemplos/plataformas.cfv
+
+importar "stdlib/juego.cfv"
+
+// ── Constantes del juego ──────────────────────────────────────────────────
+sea ANCHO = 800
+sea ALTO  = 600
+sea TILE  = 32
+sea VELOCIDAD_JUGADOR = 220
+sea FUERZA_SALTO      = -520
+sea ANCHO_MUNDO       = 60  // tiles de ancho
+
+// ── Mapa del nivel 1 ──────────────────────────────────────────────────────
+// 0=vacío  1=tierra  2=roca  3=agua  4=moneda
+sea NIVEL_1 = [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,4,0,0,0,0,4,0,0,0,0,0,4,4,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,1,1,1,0,0,0,1,1,1,0,0,0,1,1,1,1,0,0,0,1,1,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,4,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,1,1,0,0,0,0,1,1,1,1,1,1,0,0,0,0,1,1,1,1,1,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,4,0,0,0,0,0,0,0,0,0,4,4,4,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [1,1,1,1,1,1,1,0,0,0,0,0,1,1,1,1,1,1,1,0,0,0,1,1,1],
+    [2,2,2,2,2,2,2,3,3,3,3,3,2,2,2,2,2,2,2,3,3,3,2,2,2],
+    [2,2,2,2,2,2,2,3,3,3,3,3,2,2,2,2,2,2,2,3,3,3,2,2,2],
+    [2,2,2,2,2,2,2,3,3,3,3,3,2,2,2,2,2,2,2,3,3,3,2,2,2],
+    [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],
+    [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]
+]
+
+// ── Estado global ──────────────────────────────────────────────────────────
+sea jugador    = nulo
+sea particulas = []
+sea puntos     = 0
+sea vidas      = 3
+sea juego      = nulo
+
+// ── Inicializar jugador ────────────────────────────────────────────────────
+funcion crear_jugador(): mapa {
+    sea p = entidad_nueva(2 * TILE, 10 * TILE, 28, 44)
+    p["vida"] = 100
+    p["vida_max"] = 100
+    p["r"] = 80
+    p["g"] = 160
+    p["b"] = 255
+    p["saltando"] = falso
+    p["mirando_der"] = verdadero
+    p["invencible"] = 0
+    p["animacion"] = 0
+    retornar p
+}
+
+// ── Actualizar jugador ─────────────────────────────────────────────────────
+funcion actualizar_jugador(p: mapa, delta: numero): nulo {
+    // Movimiento horizontal
+    sea mov_x = 0
+    si (motor_tecla(juego, SDL_TECLA_IZQUIERDA) o motor_tecla(juego, SDL_TECLA_A)) {
+        mov_x = -1
+        p["mirando_der"] = falso
+    }
+    si (motor_tecla(juego, SDL_TECLA_DERECHA) o motor_tecla(juego, SDL_TECLA_D)) {
+        mov_x = 1
+        p["mirando_der"] = verdadero
+    }
+    p["vx"] = mov_x * VELOCIDAD_JUGADOR
+
+    // Saltar
+    si ((motor_tecla_recien(juego, SDL_TECLA_ESPACIO) o
+         motor_tecla_recien(juego, SDL_TECLA_W) o
+         motor_tecla_recien(juego, SDL_TECLA_ARRIBA)) y p["en_suelo"]) {
+        p["vy"] = FUERZA_SALTO
+        p["en_suelo"] = falso
+    }
+
+    // Física
+    fisica_aplicar(p, delta)
+
+    // Colisión con tilemap
+    tilemap_colision_entidad(p, NIVEL_1, TILE)
+
+    // Borde izquierdo del mundo
+    si (p["x"] < 0) { p["x"] = 0; p["vx"] = 0 }
+
+    // Caída al vacío — morir
+    si (p["y"] > longitud(NIVEL_1) * TILE + 100) {
+        vidas = vidas - 1
+        p["x"] = 2 * TILE
+        p["y"] = 10 * TILE
+        p["vx"] = 0
+        p["vy"] = 0
+    }
+
+    // Invencibilidad tras daño
+    si (p["invencible"] > 0) {
+        p["invencible"] = p["invencible"] - delta
+    }
+
+    // Animación
+    p["animacion"] = p["animacion"] + delta * 8
+}
+
+// ── Recoger monedas ────────────────────────────────────────────────────────
+funcion comprobar_monedas(p: mapa): nulo {
+    sea fila = 0
+    para fila_tiles en NIVEL_1 {
+        sea col = 0
+        para tile en fila_tiles {
+            si (tile == 4) {
+                // Hitbox de moneda (centro del tile)
+                sea mx = col * TILE + TILE / 4
+                sea my = fila * TILE + TILE / 4
+                sea mw = TILE / 2
+                sea mh = TILE / 2
+                sea moneda = {"x": mx, "y": my, "ancho": mw, "alto": mh}
+                si (entidad_colision(p, moneda)) {
+                    NIVEL_1[fila][col] = 0
+                    puntos = puntos + 10
+                    // Partículas de moneda
+                    sea ps_nuevas = particulas_crear(
+                        col * TILE + TILE / 2, fila * TILE + TILE / 2,
+                        12, -80, 80, -120, -20, 0.6,
+                        255, 220, 30
+                    )
+                    para p_nueva en ps_nuevas {
+                        agregar(particulas, p_nueva)
+                    }
+                }
+            }
+            col = col + 1
+        }
+        fila = fila + 1
+    }
+}
+
+// ── Dibujar jugador ────────────────────────────────────────────────────────
+funcion dibujar_jugador(ren: numero, p: mapa, cam_x: numero, cam_y: numero): nulo {
+    sea px = p["x"] - cam_x
+    sea py = p["y"] - cam_y
+
+    // Parpadeo si invencible
+    si (p["invencible"] > 0) {
+        sea fase = piso(p["invencible"] * 10)
+        si (fase % 2 == 0) { retornar nulo }
+    }
+
+    // Cuerpo principal
+    sdl_color(ren, p["r"], p["g"], p["b"], 255)
+    sdl_rect(ren, px, py, p["ancho"], p["alto"], verdadero)
+
+    // Cara
+    sdl_color(ren, 240, 200, 160, 255)
+    sdl_rect(ren, px + 4, py + 4, 20, 16, verdadero)
+
+    // Ojos
+    sdl_color(ren, 20, 20, 20, 255)
+    si (p["mirando_der"]) {
+        sdl_rect(ren, px + 14, py + 8, 4, 4, verdadero)
+        sdl_rect(ren, px + 20, py + 8, 4, 4, verdadero)
+    } sino {
+        sdl_rect(ren, px + 4,  py + 8, 4, 4, verdadero)
+        sdl_rect(ren, px + 10, py + 8, 4, 4, verdadero)
+    }
+
+    // Piernas animadas
+    sea fase_pierna = piso(p["animacion"]) % 4
+    si (p["en_suelo"] y (p["vx"] != 0)) {
+        si (fase_pierna < 2) {
+            sdl_color(ren, 60, 60, 180, 255)
+            sdl_rect(ren, px + 2,  py + p["alto"] - 14, 10, 14, verdadero)
+            sdl_rect(ren, px + 16, py + p["alto"] - 8,  10, 8, verdadero)
+        } sino {
+            sdl_color(ren, 60, 60, 180, 255)
+            sdl_rect(ren, px + 2,  py + p["alto"] - 8,  10, 8, verdadero)
+            sdl_rect(ren, px + 16, py + p["alto"] - 14, 10, 14, verdadero)
+        }
+    } sino {
+        sdl_color(ren, 60, 60, 180, 255)
+        sdl_rect(ren, px + 2,  py + p["alto"] - 12, 10, 12, verdadero)
+        sdl_rect(ren, px + 16, py + p["alto"] - 12, 10, 12, verdadero)
+    }
+}
+
+// ── HUD ────────────────────────────────────────────────────────────────────
+funcion dibujar_hud(ren: numero, p: mapa): nulo {
+    // Panel superior
+    sdl_color(ren, 0, 0, 0, 140)
+    sdl_rect(ren, 0, 0, ANCHO, 40, verdadero)
+
+    // Barra de vida
+    sdl_color(ren, 60, 60, 60, 255)
+    sdl_rect(ren, 10, 10, 120, 18, verdadero)
+    sea pct_vida = jugador["vida"] / jugador["vida_max"]
+    si (pct_vida > 0.6) { sdl_color(ren, 50, 200, 50, 255) }
+    si (pct_vida <= 0.6 y pct_vida > 0.3) { sdl_color(ren, 230, 180, 0, 255) }
+    si (pct_vida <= 0.3) { sdl_color(ren, 220, 50, 50, 255) }
+    sdl_rect(ren, 10, 10, pct_vida * 120, 18, verdadero)
+    sdl_color(ren, 200, 200, 200, 255)
+    sdl_rect(ren, 10, 10, 120, 18, falso)
+
+    // Vidas (corazones)
+    sea i = 0
+    mientras (i < vidas) {
+        sdl_color(ren, 220, 40, 40, 255)
+        sdl_rect(ren, 140 + i * 26, 10, 20, 18, verdadero)
+        i = i + 1
+    }
+
+    // Puntos
+    sdl_color(ren, 255, 220, 30, 255)
+    sdl_rect(ren, ANCHO - 110, 12, 14, 14, verdadero)
+
+    // FPS
+    sea fps = motor_fps_real(juego)
+    sdl_color(ren, 100, 100, 100, 255)
+    sdl_rect(ren, ANCHO - 50, 8, 40, 20, verdadero)
+    sdl_color(ren, 200, 200, 200, 255)
+    sdl_rect(ren, ANCHO - 48, 10, 36, 16, falso)
+}
+
+// ── Escena de menú ─────────────────────────────────────────────────────────
+funcion dibujar_menu(): nulo {
+    sea ren = juego["ren"]
+    motor_limpiar(juego, 15, 10, 40)
+
+    // Título
+    sdl_color(ren, 255, 160, 30, 255)
+    sdl_rect(ren, ANCHO / 2 - 180, 150, 360, 8, verdadero)
+    sdl_rect(ren, ANCHO / 2 - 180, 220, 360, 8, verdadero)
+    sdl_rect(ren, ANCHO / 2 - 180, 150, 8, 70, verdadero)
+    sdl_rect(ren, ANCHO / 2 + 172, 150, 8, 70, verdadero)
+
+    // Decoración
+    sdl_color(ren, 80, 160, 80, 255)
+    sdl_rect(ren, 0, ALTO - 80, ANCHO, 80, verdadero)
+    sdl_color(ren, 60, 120, 60, 255)
+    sdl_rect(ren, 0, ALTO - 80, ANCHO, 8, verdadero)
+
+    // Instrucción (ENTER = jugar)
+    sdl_color(ren, 200, 200, 200, 255)
+    sea t = piso(juego["tiempo_total"] * 2) % 2
+    si (t == 0) {
+        sdl_rect(ren, ANCHO / 2 - 100, 320, 200, 4, verdadero)
+        sdl_rect(ren, ANCHO / 2 - 100, 340, 200, 4, verdadero)
+        sdl_rect(ren, ANCHO / 2 - 100, 360, 200, 4, verdadero)
+    }
+
+    // Controles
+    sdl_color(ren, 150, 150, 150, 255)
+    sdl_rect(ren, ANCHO / 2 - 80, 420, 160, 2, verdadero)
+}
+
+// ── Escena de game over ────────────────────────────────────────────────────
+funcion dibujar_game_over(): nulo {
+    sea ren = juego["ren"]
+    motor_limpiar(juego, 40, 10, 10)
+    sdl_color(ren, 220, 50, 50, 255)
+    sdl_rect(ren, ANCHO / 2 - 160, ALTO / 2 - 40, 320, 80, falso)
+    sdl_color(ren, 255, 255, 255, 255)
+    sdl_rect(ren, ANCHO / 2 - 80, ALTO / 2 + 60, 160, 4, verdadero)
+}
+
+// ── MAIN ───────────────────────────────────────────────────────────────────
+juego   = motor_crear("C-Forge Plataformas", ANCHO, ALTO, 60)
+jugador = crear_jugador()
+sea escena_actual = "menu"
+
+mostrar("🎮 C-Forge Plataformas iniciado!")
+mostrar("   Controles: ← → (mover)  ESPACIO/W (saltar)  ESC (salir)")
+mostrar("   Recoge las monedas amarillas!")
+
+mientras (motor_frame(juego)) {
+
+    // ── Escena: Menú ────────────────────────────────────────────────────
+    si (escena_actual == "menu") {
+        dibujar_menu()
+        si (motor_tecla_recien(juego, SDL_TECLA_ENTER) o
+            motor_tecla_recien(juego, SDL_TECLA_ESPACIO)) {
+            escena_actual = "juego"
+            jugador = crear_jugador()
+            puntos  = 0
+            vidas   = 3
+        }
+        si (motor_tecla_recien(juego, SDL_TECLA_ESC)) {
+            juego["corriendo"] = falso
+        }
+        motor_presentar(juego)
+        continuar
+    }
+
+    // ── Escena: Game Over ───────────────────────────────────────────────
+    si (escena_actual == "game_over") {
+        dibujar_game_over()
+        si (motor_tecla_recien(juego, SDL_TECLA_ENTER)) {
+            escena_actual = "menu"
+        }
+        si (motor_tecla_recien(juego, SDL_TECLA_ESC)) {
+            juego["corriendo"] = falso
+        }
+        motor_presentar(juego)
+        continuar
+    }
+
+    // ── Escena: Juego ───────────────────────────────────────────────────
+    sea delta = juego["delta"]
+
+    // Actualizar
+    actualizar_jugador(jugador, delta)
+    comprobar_monedas(jugador)
+    particulas = particulas_actualizar(particulas, delta)
+
+    // Cámara centrada en el jugador
+    camara_seguir(juego, jugador["x"], jugador["y"], jugador["ancho"], jugador["alto"])
+    sea cam_x = juego["cam_x"]
+    sea cam_y = juego["cam_y"]
+    si (cam_x < 0) { cam_x = 0 }
+    si (cam_y < 0) { cam_y = 0 }
+
+    // Comprobar game over
+    si (vidas <= 0) {
+        escena_actual = "game_over"
+        continuar
+    }
+
+    // ── Dibujar ────────────────────────────────────────────────────────
+    sea ren = juego["ren"]
+
+    // Fondo (degradado simulado con bandas)
+    sdl_color(ren, 30, 50, 100, 255)
+    sdl_rect(ren, 0, 0, ANCHO, ALTO / 3, verdadero)
+    sdl_color(ren, 50, 70, 140, 255)
+    sdl_rect(ren, 0, ALTO / 3, ANCHO, ALTO / 3, verdadero)
+    sdl_color(ren, 40, 60, 120, 255)
+    sdl_rect(ren, 0, 2 * ALTO / 3, ANCHO, ALTO / 3, verdadero)
+
+    // Nubes decorativas
+    sdl_color(ren, 180, 200, 240, 60)
+    sdl_rect(ren, 80  - (cam_x * 0.2) % ANCHO, 60,  120, 40, verdadero)
+    sdl_rect(ren, 350 - (cam_x * 0.15) % ANCHO, 90,  150, 35, verdadero)
+    sdl_rect(ren, 620 - (cam_x * 0.1) % ANCHO,  50,  100, 30, verdadero)
+
+    // Tilemap
+    tilemap_dibujar(ren, NIVEL_1, TILE, cam_x, cam_y)
+
+    // Partículas
+    particulas_dibujar(ren, particulas, cam_x, cam_y)
+
+    // Jugador
+    dibujar_jugador(ren, jugador, cam_x, cam_y)
+
+    // HUD (siempre sobre todo)
+    dibujar_hud(ren, jugador)
+
+    motor_presentar(juego)
+}
+
+motor_cerrar(juego)
+mostrar("Juego terminado. Puntos: " + a_texto(puntos))

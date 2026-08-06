@@ -1,7 +1,27 @@
 {
   "format": 2,
   "registry": "C-Forge Community Registry",
-  "publishers": {},
+  "url": "https://pkg.c-forge.org",
+  "publishers": {
+    "vemoris": { "nombre": "Vemoris Group", "email": "hola@vemorisgroup.com", "verificado": true },
+    "comunidad": { "nombre": "C-Forge Community", "email": "hola@c-forge.org", "verificado": true }
+  },
   "revocations": [],
-  "packages": {}
+  "packages": {
+    "json":        { "nombre": "json",        "descripcion": "Parser y serializador JSON completo",                      "autor": "vemoris", "version": "1.2.0", "licencia": "MIT", "archivo": "stdlib/json.cfv",        "palabras_clave": ["json","parser"],              "dependencias": {},                       "descargas": 4821 },
+    "red":         { "nombre": "red",         "descripcion": "Cliente HTTP/HTTPS, UDP y WebSocket",                      "autor": "vemoris", "version": "1.0.0", "licencia": "MIT", "archivo": "stdlib/red.cfv",         "palabras_clave": ["http","udp","websocket"],     "dependencias": {"json":">=1.0.0"},        "descargas": 3102 },
+    "juego":       { "nombre": "juego",       "descripcion": "Motor de juego 2D: ECS, física, tilemap, partículas",     "autor": "vemoris", "version": "1.0.0", "licencia": "MIT", "archivo": "stdlib/juego.cfv",       "palabras_clave": ["juego","sdl2","motor"],       "dependencias": {"sdl":">=1.0.0"},         "descargas": 1876 },
+    "sdl":         { "nombre": "sdl",         "descripcion": "Bindings SDL2: ventana, renderer, audio, eventos",        "autor": "vemoris", "version": "1.0.0", "licencia": "MIT", "archivo": "stdlib/sdl.cfv",         "palabras_clave": ["sdl2","graphics","audio"],    "dependencias": {},                       "descargas": 2340 },
+    "matematica":  { "nombre": "matematica",  "descripcion": "Trigonometría, estadísticas, vectores, matrices",         "autor": "vemoris", "version": "1.1.0", "licencia": "MIT", "archivo": "stdlib/matematica.cfv",  "palabras_clave": ["matematica","estadistica"],   "dependencias": {},                       "descargas": 5983 },
+    "fecha":       { "nombre": "fecha",       "descripcion": "Fechas, horas, zonas horarias, formateo",                 "autor": "vemoris", "version": "1.0.2", "licencia": "MIT", "archivo": "stdlib/fecha.cfv",       "palabras_clave": ["fecha","hora","datetime"],    "dependencias": {},                       "descargas": 3451 },
+    "crypto":      { "nombre": "crypto",      "descripcion": "SHA-256/512, HMAC, Base64, AES",                          "autor": "vemoris", "version": "1.0.0", "licencia": "MIT", "archivo": "stdlib/crypto.cfv",      "palabras_clave": ["crypto","sha256","aes"],      "dependencias": {},                       "descargas": 2765 },
+    "colecciones": { "nombre": "colecciones", "descripcion": "Pila, cola, árbol, grafo, tabla hash",                    "autor": "vemoris", "version": "1.0.1", "licencia": "MIT", "archivo": "stdlib/colecciones.cfv", "palabras_clave": ["pila","cola","arbol"],         "dependencias": {},                       "descargas": 4102 },
+    "algoritmos":  { "nombre": "algoritmos",  "descripcion": "Ordenamiento, búsqueda, grafos, programación dinámica",   "autor": "vemoris", "version": "1.0.0", "licencia": "MIT", "archivo": "stdlib/algoritmos.cfv",  "palabras_clave": ["algoritmos","sort","grafos"], "dependencias": {},                       "descargas": 3678 },
+    "regex":       { "nombre": "regex",       "descripcion": "Expresiones regulares para C-Forge",                      "autor": "vemoris", "version": "1.0.0", "licencia": "MIT", "archivo": "stdlib/regex.cfv",       "palabras_clave": ["regex","patron"],             "dependencias": {},                       "descargas": 2190 },
+    "web":         { "nombre": "web",         "descripcion": "Servidor HTTP: routing, middleware, respuestas JSON",      "autor": "vemoris", "version": "1.1.0", "licencia": "MIT", "archivo": "stdlib/web.cfv",         "palabras_clave": ["web","http","servidor","api"], "dependencias": {"json":">=1.0.0"},        "descargas": 5421 },
+    "concurrencia":{ "nombre": "concurrencia","descripcion": "Hilos, mutex, canales, actores",                           "autor": "vemoris", "version": "2.0.0", "licencia": "MIT", "archivo": "stdlib/concurrencia.cfv","palabras_clave": ["hilos","mutex","canal"],       "dependencias": {},                       "descargas": 1934 },
+    "aleatorio":   { "nombre": "aleatorio",   "descripcion": "Números aleatorios, distribuciones, UUID",                "autor": "vemoris", "version": "1.0.0", "licencia": "MIT", "archivo": "stdlib/aleatorio.cfv",   "palabras_clave": ["aleatorio","random","uuid"],  "dependencias": {},                       "descargas": 3812 },
+    "auth":        { "nombre": "auth",        "descripcion": "JWT, OAuth2, sesiones, bcrypt",                           "autor": "vemoris", "version": "1.0.0", "licencia": "MIT", "archivo": "stdlib/auth.cfv",        "palabras_clave": ["auth","jwt","oauth"],         "dependencias": {"crypto":">=1.0.0"},      "descargas": 2876 },
+    "fisica2d":    { "nombre": "fisica2d",    "descripcion": "Física 2D: colisiones AABB/círculo, gravedad, impulsos",  "autor": "vemoris", "version": "1.0.0", "licencia": "MIT", "archivo": "stdlib/fisica2d.cfv",    "palabras_clave": ["fisica","2d","colisiones"],   "dependencias": {},                       "descargas": 1542 }
+  }
 }

@@ -1,0 +1,425 @@
+// herramientas/cfpkg.cfv -Package manager CLI para C-Forge v3.3.0
+// Uso: cforgev herramientas/cfpkg.cfv <comando> [args]
+//
+//   cfpkg install <paquete>         Instala un paquete
+//   cfpkg remove  <paquete>         Elimina un paquete
+//   cfpkg search  <termino>         Busca paquetes
+//   cfpkg list                      Lista paquetes instalados
+//   cfpkg info    <paquete>         Informacion de un paquete
+//   cfpkg update                    Actualiza todos los paquetes
+//   cfpkg publish <nombre> <archivo> Publica un paquete (requiere token)
+//   cfpkg version                   Version de cfpkg
+
+importar "stdlib/json.cfv"
+
+sea CFPKG_VERSION  = "1.0.0"
+sea REGISTRY_URL   = "https://pkg.c-forge.org/index.json"
+sea REGISTRY_LOCAL = "../registry/index.json"
+sea INSTALL_DIR    = "../paquetes"
+
+// -- Utilidades -------------------------------------------------------------
+
+funcion cfpkg_log(msg: texto): nulo {
+    mostrar("[cfpkg] " + msg)
+}
+
+funcion cfpkg_ok(msg: texto): nulo {
+    mostrar("[OK] " + msg)
+}
+
+funcion cfpkg_error(msg: texto): nulo {
+    mostrar("[ERROR] Error: " + msg)
+}
+
+funcion cfpkg_info(msg: texto): nulo {
+    mostrar("  " + msg)
+}
+
+funcion separador(): nulo {
+    mostrar("---------------------------------------------")
+}
+
+// -- Cargar registry --------------------------------------------------------
+
+funcion cargar_registry(): mapa {
+    // Intentar primero local (desarrollo), luego remoto
+    intentar {
+        sea contenido = leer_archivo(REGISTRY_LOCAL)
+        sea data = json_parsear(contenido)
+        retornar data
+    } capturar (e_local) {
+        intentar {
+            sea resp = http_get(REGISTRY_URL)
+            retornar json_parsear(resp)
+        } capturar (e_red) {
+            cfpkg_error("No se puede cargar el registry.")
+            cfpkg_info("Local: " + e_local)
+            cfpkg_info("Red:   " + e_red)
+            retornar {"packages": {}}
+        }
+    }
+}
+
+// -- Leer/guardar paquetes instalados --------------------------------------
+
+funcion leer_instalados(): mapa {
+    intentar {
+        sea contenido = leer_archivo(INSTALL_DIR + "/instalados.json")
+        retornar json_parsear(contenido)
+    } capturar (e) {
+        retornar {}
+    }
+}
+
+funcion guardar_instalados(instalados: mapa): nulo {
+    sea dir = INSTALL_DIR
+    intentar {
+        escribir_archivo(dir + "/instalados.json", json_serializar(instalados))
+    } capturar (e) {
+        cfpkg_error("No se pudo guardar estado: " + e)
+    }
+}
+
+// -- Comandos ---------------------------------------------------------------
+
+funcion cmd_install(nombre_pkg: texto): nulo {
+    cfpkg_log("Instalando '" + nombre_pkg + "'...")
+
+    sea registry = cargar_registry()
+    sea packages = registry["packages"]
+
+    si (no tiene_clave(packages, nombre_pkg)) {
+        cfpkg_error("Paquete '" + nombre_pkg + "' no encontrado en el registry.")
+        cfpkg_info("Prueba: cfpkg search " + nombre_pkg)
+        retornar nulo
+    }
+
+    sea pkg = packages[nombre_pkg]
+    sea instalados = leer_instalados()
+
+    si (tiene_clave(instalados, nombre_pkg)) {
+        cfpkg_info("'" + nombre_pkg + "' ya esta instalado (v" + instalados[nombre_pkg] + ")")
+        cfpkg_info("Para actualizar: cfpkg update")
+        retornar nulo
+    }
+
+    // Instalar dependencias primero
+    si (tiene_clave(pkg, "dependencias")) {
+        sea deps = pkg["dependencias"]
+        para dep en claves(deps) {
+            si (no tiene_clave(instalados, dep)) {
+                cfpkg_log("Instalando dependencia '" + dep + "'...")
+                cmd_install(dep)
+            }
+        }
+    }
+
+    // Copiar archivo del paquete
+    // pkg["archivo"] es relativo a la raiz del repo (e.g. "stdlib/json.cfv")
+    // cfpkg.cfv vive en herramientas/, asi que necesitamos subir un nivel
+    sea archivo_origen = "../" + pkg["archivo"]
+    sea archivo_destino = INSTALL_DIR + "/" + nombre_pkg + ".cfv"
+
+    intentar {
+        sea contenido = leer_archivo(archivo_origen)
+        escribir_archivo(archivo_destino, contenido)
+        instalados[nombre_pkg] = pkg["version"]
+        guardar_instalados(instalados)
+        cfpkg_ok("Instalado " + nombre_pkg + " v" + pkg["version"])
+        cfpkg_info("Archivo: " + archivo_destino)
+        cfpkg_info("Para usar: importar \"" + archivo_destino + "\"")
+    } capturar (e) {
+        cfpkg_error("No se pudo instalar '" + nombre_pkg + "': " + e)
+        cfpkg_info("(El paquete existe en el registry pero el archivo fuente no esta disponible localmente)")
+        cfpkg_info("Descarga desde: https://pkg.c-forge.org/pkg/" + nombre_pkg)
+    }
+}
+
+funcion cmd_remove(nombre_pkg: texto): nulo {
+    sea instalados = leer_instalados()
+
+    si (no tiene_clave(instalados, nombre_pkg)) {
+        cfpkg_error("'" + nombre_pkg + "' no esta instalado.")
+        retornar nulo
+    }
+
+    sea archivo = INSTALL_DIR + "/" + nombre_pkg + ".cfv"
+    intentar {
+        eliminar_archivo(archivo)
+    } capturar (e) {
+        // Ignorar si no existe el archivo
+    }
+
+    // Eliminar de instalados
+    sea nuevos = {}
+    para clave en claves(instalados) {
+        si (clave != nombre_pkg) {
+            nuevos[clave] = instalados[clave]
+        }
+    }
+    guardar_instalados(nuevos)
+    cfpkg_ok("Eliminado '" + nombre_pkg + "'")
+}
+
+funcion cmd_search(termino: texto): nulo {
+    sea registry = cargar_registry()
+    sea packages = registry["packages"]
+    sea encontrados = 0
+
+    separador()
+    mostrar("Resultados para '" + termino + "':")
+    separador()
+
+    para nombre en claves(packages) {
+        sea pkg = packages[nombre]
+        sea desc = pkg["descripcion"]
+        sea kws = pkg["palabras_clave"]
+
+        sea coincide = falso
+        si (longitud(termino) == 0) { coincide = verdadero }
+        si (no coincide) {
+            // Buscar en nombre
+            sea idx = 0
+            mientras (idx <= longitud(nombre) - longitud(termino)) {
+                si (subcadena(nombre, idx, longitud(termino)) == termino) {
+                    coincide = verdadero
+                }
+                idx = idx + 1
+            }
+        }
+        si (no coincide) {
+            // Buscar en descripcion
+            sea idx = 0
+            mientras (idx <= longitud(desc) - longitud(termino)) {
+                si (subcadena(desc, idx, longitud(termino)) == termino) {
+                    coincide = verdadero
+                }
+                idx = idx + 1
+            }
+        }
+
+        si (coincide) {
+            mostrar("  " + nombre + " v" + pkg["version"] + " -" + desc)
+            mostrar("    Descargas: " + a_texto(pkg["descargas"]) + "  Licencia: " + pkg["licencia"])
+            encontrados = encontrados + 1
+        }
+    }
+
+    si (encontrados == 0) {
+        mostrar("  Sin resultados.")
+    }
+    separador()
+    mostrar("  " + a_texto(encontrados) + " paquete(s) encontrado(s)")
+}
+
+funcion cmd_list(): nulo {
+    sea instalados = leer_instalados()
+    sea claves_pkg = claves(instalados)
+
+    separador()
+    mostrar("Paquetes instalados:")
+    separador()
+
+    si (longitud(claves_pkg) == 0) {
+        mostrar("  (ninguno)")
+        mostrar("  Instala con: cfpkg install <paquete>")
+    } sino {
+        para nombre en claves_pkg {
+            mostrar("  " + nombre + " v" + instalados[nombre])
+        }
+    }
+    separador()
+    mostrar("  Total: " + a_texto(longitud(claves_pkg)) + " paquete(s)")
+}
+
+funcion cmd_info(nombre_pkg: texto): nulo {
+    sea registry = cargar_registry()
+    sea packages = registry["packages"]
+
+    si (no tiene_clave(packages, nombre_pkg)) {
+        cfpkg_error("Paquete '" + nombre_pkg + "' no encontrado.")
+        retornar nulo
+    }
+
+    sea pkg = packages[nombre_pkg]
+    sea instalados = leer_instalados()
+    sea instalado = tiene_clave(instalados, nombre_pkg)
+
+    separador()
+    mostrar("Paquete: " + pkg["nombre"])
+    separador()
+    cfpkg_info("Descripcion: " + pkg["descripcion"])
+    cfpkg_info("Version:     " + pkg["version"])
+    cfpkg_info("Autor:       " + pkg["autor"])
+    cfpkg_info("Licencia:    " + pkg["licencia"])
+    cfpkg_info("Descargas:   " + a_texto(pkg["descargas"]))
+    cfpkg_info("Archivo:     " + pkg["archivo"])
+
+    si (tiene_clave(pkg, "dependencias") y longitud(claves(pkg["dependencias"])) > 0) {
+        cfpkg_info("Deps:        " + json_serializar(pkg["dependencias"]))
+    } sino {
+        cfpkg_info("Deps:        (ninguna)")
+    }
+
+    si (instalado) {
+        cfpkg_info("Estado:      [OK] instalado v" + instalados[nombre_pkg])
+    } sino {
+        cfpkg_info("Estado:      no instalado  ->  cfpkg install " + nombre_pkg)
+    }
+    separador()
+}
+
+funcion cmd_update(): nulo {
+    sea instalados = leer_instalados()
+    sea registry = cargar_registry()
+    sea packages = registry["packages"]
+    sea actualizados = 0
+
+    cfpkg_log("Comprobando actualizaciones...")
+
+    para nombre en claves(instalados) {
+        si (tiene_clave(packages, nombre)) {
+            sea version_nueva = packages[nombre]["version"]
+            sea version_actual = instalados[nombre]
+            si (version_nueva != version_actual) {
+                cfpkg_log("Actualizando " + nombre + " " + version_actual + " -> " + version_nueva)
+                // Re-copiar archivo
+                sea archivo_origen = packages[nombre]["archivo"]
+                sea archivo_destino = INSTALL_DIR + "/" + nombre + ".cfv"
+                intentar {
+                    sea contenido = leer_archivo(archivo_origen)
+                    escribir_archivo(archivo_destino, contenido)
+                    instalados[nombre] = version_nueva
+                    cfpkg_ok(nombre + " actualizado a v" + version_nueva)
+                    actualizados = actualizados + 1
+                } capturar (e) {
+                    cfpkg_error("No se pudo actualizar " + nombre + ": " + e)
+                }
+            }
+        }
+    }
+
+    guardar_instalados(instalados)
+
+    si (actualizados == 0) {
+        cfpkg_ok("Todo actualizado.")
+    } sino {
+        cfpkg_ok(a_texto(actualizados) + " paquete(s) actualizado(s).")
+    }
+}
+
+funcion cmd_publish(nombre_pkg: texto, archivo: texto): nulo {
+    cfpkg_log("Publicando '" + nombre_pkg + "' desde '" + archivo + "'...")
+    cfpkg_info("Comprobando archivo...")
+
+    intentar {
+        sea contenido = leer_archivo(archivo)
+        cfpkg_info("Archivo OK (" + a_texto(longitud(contenido)) + " bytes)")
+    } capturar (e) {
+        cfpkg_error("No se puede leer '" + archivo + "': " + e)
+        retornar nulo
+    }
+
+    cfpkg_info("Para publicar en el registry oficial:")
+    cfpkg_info("  1. Crear un cfpkg.json en tu proyecto")
+    cfpkg_info("  2. Enviar un PR a https://github.com/VemorisGroup/C-Forge/tree/main/registry")
+    cfpkg_info("  3. O usar la API: POST https://pkg.c-forge.org/publish")
+    cfpkg_info("")
+    cfpkg_info("Formato cfpkg.json:")
+    sea ejemplo_json = "  " + nombre_pkg + " v1.0.0 - descripcion, licencia MIT"
+    cfpkg_info(ejemplo_json)
+}
+
+funcion cmd_version(): nulo {
+    mostrar("cfpkg v" + CFPKG_VERSION + " -C-Forge Package Manager")
+    mostrar("Registry: " + REGISTRY_URL)
+    mostrar("Sitio:    https://pkg.c-forge.org")
+}
+
+funcion cmd_ayuda(): nulo {
+    separador()
+    mostrar("cfpkg -C-Forge Package Manager v" + CFPKG_VERSION)
+    separador()
+    mostrar("Comandos:")
+    cfpkg_info("install <paquete>           Instala un paquete")
+    cfpkg_info("remove  <paquete>           Elimina un paquete")
+    cfpkg_info("search  [termino]           Busca paquetes")
+    cfpkg_info("list                        Lista paquetes instalados")
+    cfpkg_info("info    <paquete>           Informacion de un paquete")
+    cfpkg_info("update                      Actualiza todos los paquetes")
+    cfpkg_info("publish <nombre> <archivo>  Publica un paquete")
+    cfpkg_info("version                     Muestra la version")
+    separador()
+    mostrar("Ejemplos:")
+    cfpkg_info("cforgev herramientas/cfpkg.cfv install json")
+    cfpkg_info("cforgev herramientas/cfpkg.cfv search juego")
+    cfpkg_info("cforgev herramientas/cfpkg.cfv info web")
+    separador()
+    mostrar("Registry: https://pkg.c-forge.org")
+}
+
+// -- Main -------------------------------------------------------------------
+// argumentos_programa() devuelve los args del usuario (sin el nombre del script)
+// args[0]=comando, args[1]=primer arg, etc.
+sea args = argumentos_programa()
+
+si (longitud(args) < 1) {
+    cmd_ayuda()
+    retornar nulo
+}
+
+sea comando = args[0]
+
+si (comando == "install") {
+    si (longitud(args) < 2) {
+        cfpkg_error("Uso: cfpkg install <paquete>")
+    } sino {
+        cmd_install(args[1])
+    }
+}
+
+si (comando == "remove" o comando == "uninstall") {
+    si (longitud(args) < 2) {
+        cfpkg_error("Uso: cfpkg remove <paquete>")
+    } sino {
+        cmd_remove(args[1])
+    }
+}
+
+si (comando == "search" o comando == "buscar") {
+    sea termino = ""
+    si (longitud(args) >= 2) { termino = args[1] }
+    cmd_search(termino)
+}
+
+si (comando == "list" o comando == "listar") {
+    cmd_list()
+}
+
+si (comando == "info") {
+    si (longitud(args) < 2) {
+        cfpkg_error("Uso: cfpkg info <paquete>")
+    } sino {
+        cmd_info(args[1])
+    }
+}
+
+si (comando == "update" o comando == "actualizar") {
+    cmd_update()
+}
+
+si (comando == "publish" o comando == "publicar") {
+    si (longitud(args) < 3) {
+        cfpkg_error("Uso: cfpkg publish <nombre> <archivo>")
+    } sino {
+        cmd_publish(args[1], args[2])
+    }
+}
+
+si (comando == "version" o comando == "--version" o comando == "-v") {
+    cmd_version()
+}
+
+si (comando == "help" o comando == "ayuda" o comando == "--help" o comando == "-h") {
+    cmd_ayuda()
+}

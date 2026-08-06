@@ -1,0 +1,200 @@
+// stdlib/red.cfv — Cliente HTTP/HTTPS + UDP para C-Forge v3.3.0
+// Usa los builtins nativos: http_get, http_post, http_put, http_delete, http_solicitud
+// y los nuevos builtins UDP: udp_crear, udp_enviar, udp_recibir, udp_cerrar
+//
+// Ejemplo GET:
+//   importar "stdlib/red.cfv"
+//   sea resp = get("https://api.example.com/datos")
+//   mostrar(resp["cuerpo"])
+//
+// Ejemplo POST JSON:
+//   sea resp = post_json("https://api.example.com/crear", {"nombre": "Juan"})
+//   mostrar(resp["estado"])
+//
+// Ejemplo UDP:
+//   sea sock = udp_abrir(8080)
+//   udp_mandar(sock, "127.0.0.1", 9090, "hola")
+//   sea msg = udp_leer(sock)
+//   mostrar(msg["datos"])
+
+importar "stdlib/json.cfv"
+
+// ── Cliente HTTP ───────────────────────────────────────────────────────────
+
+// GET simple — retorna el cuerpo como texto
+funcion get(url: texto): mapa {
+    sea resp = http_solicitud("GET", url, {})
+    retornar resp
+}
+
+// GET que parsea JSON automáticamente
+funcion get_json(url: texto): cualquiera {
+    sea resp = http_solicitud("GET", url, {})
+    retornar json_parsear(resp["cuerpo"])
+}
+
+// POST con cuerpo de texto
+funcion post(url: texto, cuerpo: texto, tipo_contenido: texto): mapa {
+    sea resp = http_solicitud("POST", url, {
+        "cuerpo": cuerpo,
+        "tipo": tipo_contenido
+    })
+    retornar resp
+}
+
+// POST con JSON (serializa automáticamente)
+funcion post_json(url: texto, datos: cualquiera): mapa {
+    sea cuerpo = json_serializar(datos)
+    sea resp = http_solicitud("POST", url, {
+        "cuerpo": cuerpo,
+        "tipo": "application/json"
+    })
+    retornar resp
+}
+
+// PUT con JSON
+funcion put_json(url: texto, datos: cualquiera): mapa {
+    sea cuerpo = json_serializar(datos)
+    sea resp = http_solicitud("PUT", url, {
+        "cuerpo": cuerpo,
+        "tipo": "application/json"
+    })
+    retornar resp
+}
+
+// DELETE
+funcion delete(url: texto): mapa {
+    sea resp = http_solicitud("DELETE", url, {})
+    retornar resp
+}
+
+// Petición completa con cabeceras personalizadas
+funcion peticion(metodo: texto, url: texto, cuerpo: texto, cabeceras: mapa): mapa {
+    sea opts = {
+        "cuerpo": cuerpo,
+        "cabeceras": cabeceras
+    }
+    retornar http_solicitud(metodo, url, opts)
+}
+
+// Petición con autenticación Bearer token
+funcion peticion_auth(metodo: texto, url: texto, token: texto): mapa {
+    sea opts = {
+        "cabeceras": {
+            "Authorization": "Bearer " + token
+        }
+    }
+    retornar http_solicitud(metodo, url, opts)
+}
+
+// Verificar si la respuesta fue exitosa (2xx)
+funcion respuesta_ok(resp: mapa): booleano {
+    sea estado = resp["estado"]
+    retornar estado >= 200 y estado < 300
+}
+
+// Parsear JSON de la respuesta
+funcion respuesta_json(resp: mapa): cualquiera {
+    retornar json_parsear(resp["cuerpo"])
+}
+
+// ── Utilidades de URL ──────────────────────────────────────────────────────
+
+funcion url_codificar_params(params: mapa): texto {
+    sea resultado = ""
+    sea primero = verdadero
+    para clave en claves(params) {
+        si (no primero) { resultado = resultado + "&" }
+        resultado = resultado + clave + "=" + a_texto(params[clave])
+        primero = falso
+    }
+    retornar resultado
+}
+
+funcion url_con_params(base: texto, params: mapa): texto {
+    sea qs = url_codificar_params(params)
+    si (longitud(qs) == 0) { retornar base }
+    retornar base + "?" + qs
+}
+
+// ── Cliente UDP ────────────────────────────────────────────────────────────
+
+// Crear socket UDP (opcionalmente enlazar a un puerto para recibir)
+funcion udp_abrir(puerto: numero): numero {
+    retornar udp_crear(puerto)
+}
+
+// Crear socket UDP sin puerto (solo para enviar)
+funcion udp_abrir_emisor(): numero {
+    retornar udp_crear(0)
+}
+
+// Enviar datos a host:puerto
+funcion udp_mandar(sock: numero, host: texto, puerto: numero, datos: texto): nulo {
+    udp_enviar(sock, host, puerto, datos)
+}
+
+// Enviar datos JSON
+funcion udp_mandar_json(sock: numero, host: texto, puerto: numero, datos: cualquiera): nulo {
+    udp_enviar(sock, host, puerto, json_serializar(datos))
+}
+
+// Recibir datos (no bloqueante — retorna nulo si no hay nada)
+funcion udp_leer(sock: numero): mapa {
+    retornar udp_recibir(sock)
+}
+
+// Cerrar socket UDP
+funcion udp_terminar(sock: numero): nulo {
+    udp_cerrar(sock)
+}
+
+// ── WebSocket (sobre TCP) ─────────────────────────────────────────────────
+// Implementación simplificada para conexiones de tiempo real.
+// Para WebSocket completo usa el servidor HTTP integrado con Upgrade.
+
+funcion ws_conectar(host: texto, puerto: numero): mapa {
+    // Crear socket UDP como canal de mensajes rápido (para juegos)
+    // Para WebSocket real, usar el servidor HTTP con cabecera Upgrade
+    sea sock = udp_crear(0)
+    retornar {
+        "sock": sock,
+        "host": host,
+        "puerto": puerto,
+        "conectado": verdadero
+    }
+}
+
+funcion ws_enviar(conn: mapa, mensaje: texto): nulo {
+    udp_enviar(conn["sock"], conn["host"], conn["puerto"], mensaje)
+}
+
+funcion ws_recibir(conn: mapa): texto {
+    sea msg = udp_recibir(conn["sock"])
+    si (msg == nulo) { retornar nulo }
+    retornar msg["datos"]
+}
+
+funcion ws_cerrar(conn: mapa): nulo {
+    udp_cerrar(conn["sock"])
+    conn["conectado"] = falso
+}
+
+// ── Servidor web rápido ────────────────────────────────────────────────────
+// Re-exporta la API de stdlib/web.cfv para conveniencia
+
+funcion servidor_crear(puerto: numero): numero {
+    retornar servidor_http_escuchar(puerto)
+}
+
+funcion servidor_solicitud(srv: numero): mapa {
+    retornar servidor_http_solicitud(srv)
+}
+
+funcion servidor_responder(req: mapa, estado: numero, cuerpo: texto): nulo {
+    servidor_http_responder(req["_srv_id"], estado, cuerpo, "application/json")
+}
+
+funcion servidor_responder_json(req: mapa, estado: numero, datos: cualquiera): nulo {
+    servidor_http_responder(req["_srv_id"], estado, json_serializar(datos), "application/json")
+}

@@ -10,25 +10,39 @@ LIBS     := -lpthread -ldl
 TARGET   := cforge
 SRC      := cforgev.cpp
 PREFIX   ?= /usr/local
-VERSION  := 2.6.0
+VERSION  := 3.2.0
 
 # Detección de plataforma
 UNAME := $(shell uname -s)
 ARCH  := $(shell uname -m)
 
 # OpenSSL
+# En Linux hay que verificar TANTO la librería (.so) COMO los headers de desarrollo.
+# Sistemas con libssl3 pero sin libssl-dev tienen el .so pero no openssl/sha.h,
+# lo que hace que -DCFV_WITH_OPENSSL rompa la compilación.
 ifeq ($(UNAME),Darwin)
     OPENSSL_PREFIX := $(shell brew --prefix openssl 2>/dev/null || echo /usr/local)
     INCLUDES  += -I$(OPENSSL_PREFIX)/include
     LIBS      += -L$(OPENSSL_PREFIX)/lib -lssl -lcrypto
     CXXFLAGS  += -DCFV_WITH_OPENSSL
 else
-    OPENSSL_LIB := $(wildcard /usr/lib/$(ARCH)-linux-gnu/libcrypto.so.3 \
-                               /usr/lib/x86_64-linux-gnu/libcrypto.so.3 \
-                               /usr/lib/libcrypto.so)
+    OPENSSL_LIB := $(firstword $(wildcard \
+        /usr/lib/$(ARCH)-linux-gnu/libcrypto.so.3 \
+        /usr/lib/x86_64-linux-gnu/libcrypto.so.3 \
+        /usr/lib/aarch64-linux-gnu/libcrypto.so.3 \
+        /usr/lib/libcrypto.so))
+    # Buscar headers en rutas estándar Y en la instalación de Node (fallback común)
+    OPENSSL_HDR := $(firstword $(wildcard \
+        /usr/include/openssl/sha.h \
+        /usr/local/include/openssl/sha.h \
+        /usr/include/node/openssl/sha.h))
     ifneq ($(OPENSSL_LIB),)
-        LIBS     += $(firstword $(OPENSSL_LIB))
-        CXXFLAGS += -DCFV_WITH_OPENSSL
+    ifneq ($(OPENSSL_HDR),)
+        OPENSSL_INC := $(patsubst %/openssl/sha.h,%,$(OPENSSL_HDR))
+        INCLUDES  += -I$(OPENSSL_INC)
+        LIBS      += $(OPENSSL_LIB)
+        CXXFLAGS  += -DCFV_WITH_OPENSSL
+    endif
     endif
 endif
 
