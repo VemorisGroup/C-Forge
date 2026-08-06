@@ -598,6 +598,33 @@ funcion emitir_sentencia_arm(nodo: cualquiera, contexto: cualquiera) {
         emitir_mostrar_arm(nodo, contexto)
         retornar 0
     }
+    si (nodo.tipo == "LanzarABI") {
+        afirmar(contexto.retorno_actual != "", "lanzar fuera de una función")
+        emitir_texto_arm(hijos[0], contexto)
+        // ABI C-Forge: x0=valor, x1=error, x2=mensaje, x3=longitud.
+        palabra_arm(contexto, 2852127712 + 0 * 65536 + 2)
+        palabra_arm(contexto, 2852127712 + 1 * 65536 + 3)
+        emitir_mov_registro_arm(contexto, 1, 1)
+        emitir_mov_registro_arm(contexto, 0, 0)
+        operacion_arm(contexto, "b", 0, contexto.retorno_actual)
+        retornar 0
+    }
+    si (nodo.tipo == "LlamadaProtegida") {
+        emitir_expresion_arm(hijos[0], contexto)
+        sea fin_llamada: texto = nombre_unico_arm(contexto, "sin_error_llamada")
+        operacion_arm(contexto, "cbz", 1, fin_llamada)
+        sea texto_error: cualquiera = buscar_texto_arm(contexto, hijos[2].valor)
+        palabra_arm(contexto, 2852127712 + 2 * 65536 + 0)
+        emitir_guardar_variable_arm(contexto, texto_error.puntero)
+        palabra_arm(contexto, 2852127712 + 3 * 65536 + 0)
+        emitir_guardar_variable_arm(contexto, texto_error.longitud)
+        emitir_mov_inmediato_arm(contexto, 1)
+        emitir_guardar_variable_arm(
+            contexto, desplazamiento_simbolo_arm(contexto, hijos[1].valor)
+        )
+        etiqueta_arm(contexto, fin_llamada)
+        retornar 0
+    }
     si (nodo.tipo == "Si") {
         sea etiqueta_sino: texto = nombre_unico_arm(contexto, "sino")
         sea etiqueta_fin: texto = nombre_unico_arm(contexto, "fin_si")
@@ -947,6 +974,7 @@ funcion compilar_programa_core_macho(programa_original: cualquiera): lista {
             contexto
         )
         emitir_mov_inmediato_arm(contexto, 0)
+        emitir_mov_registro_arm(contexto, 0, 1)
         etiqueta_arm(contexto, contexto.retorno_actual)
         palabra_arm(contexto, 2436892671)
         palabra_arm(contexto, 2831242227)

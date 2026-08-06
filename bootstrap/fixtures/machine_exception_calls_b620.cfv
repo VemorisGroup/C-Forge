@@ -1,0 +1,12 @@
+funcion retirar() {
+    lanzar "saldo insuficiente desde funcion"
+    mostrar("funcion continuo incorrectamente")
+}
+
+intentar {
+    retirar()
+    mostrar("bloque continuo incorrectamente")
+} capturar (error) {
+    mostrar(error)
+    mostrar("propagacion capturada")
+}

@@ -61,6 +61,19 @@ funcion bajar_bloque_excepciones_core(
         sea reducido: cualquiera = bajar_sentencia_excepciones_core(
             original, contexto, bandera, mensaje
         )
+        si (
+            proteger y original.tipo == "Expresion" y
+            original.hijos[0].tipo == "Llamada"
+        ) {
+            reducido = nodo_ast_core_con_hijos(
+                "LlamadaProtegida", "llamada", original.linea,
+                [
+                    original.hijos[0],
+                    identificador_excepcion_core(bandera, original.linea),
+                    identificador_excepcion_core(mensaje, original.linea)
+                ]
+            )
+        }
         si (proteger) {
             reducido = nodo_ast_core_con_hijos(
                 "Si", "si", original.linea,
@@ -85,10 +98,11 @@ funcion bajar_sentencia_excepciones_core(
     mensaje: texto
 ): cualquiera {
     si (nodo.tipo == "Lanzar") {
-        afirmar(
-            bandera != "",
-            "CFEX1901: lanzar requiere un bloque intentar/capturar en el backend directo"
-        )
+        si (bandera == "") {
+            retornar nodo_ast_core_con_hijos(
+                "LanzarABI", "lanzar", nodo.linea, [nodo.hijos[0]]
+            )
+        }
         sea asignar_mensaje: cualquiera = nodo_ast_core_con_hijos(
             "Asignacion", "=", nodo.linea,
             [identificador_excepcion_core(mensaje, nodo.linea), nodo.hijos[0]]

@@ -729,6 +729,33 @@ funcion emitir_sentencia_core_pe(nodo: cualquiera, contexto: cualquiera) {
         emitir_mostrar_core_pe(nodo, contexto)
         retornar 0
     }
+    si (nodo.tipo == "LanzarABI") {
+        afirmar(contexto.retorno_actual != "", "lanzar fuera de una función")
+        emitir_texto_core_pe(hijos[0], contexto)
+        // ABI interna C-Forge: rax=valor, rcx=error, r8=mensaje, r9=longitud.
+        operacion_bytes_pe(contexto, [73, 137, 192, 73, 137, 209])
+        operacion_bytes_pe(contexto, [72, 199, 193, 1, 0, 0, 0])
+        operacion_bytes_pe(contexto, bytes_mov_rax_core_pe(0))
+        operacion_control_pe(contexto, "jmp", contexto.retorno_actual, 0)
+        retornar 0
+    }
+    si (nodo.tipo == "LlamadaProtegida") {
+        emitir_expresion_core_pe(hijos[0], contexto)
+        sea fin_llamada: texto = nombre_unico_core_pe(contexto, "sin_error_llamada")
+        operacion_bytes_pe(contexto, [72, 133, 201])
+        operacion_control_pe(contexto, "jz", fin_llamada, 0)
+        sea texto_error: cualquiera = buscar_texto_core_pe(contexto, hijos[2].valor)
+        operacion_bytes_pe(contexto, [76, 137, 192])
+        emitir_guardar_variable_core_pe(contexto, texto_error.puntero)
+        operacion_bytes_pe(contexto, [76, 137, 200])
+        emitir_guardar_variable_core_pe(contexto, texto_error.longitud)
+        operacion_bytes_pe(contexto, bytes_mov_rax_core_pe(1))
+        emitir_guardar_variable_core_pe(
+            contexto, desplazamiento_simbolo_core_pe(contexto, hijos[1].valor)
+        )
+        etiqueta_core_pe(contexto, fin_llamada)
+        retornar 0
+    }
     si (nodo.tipo == "Si") {
         sea etiqueta_sino: texto =
             nombre_unico_core_pe(contexto, "sino")
@@ -1138,6 +1165,7 @@ funcion compilar_programa_core_pe(programa_original: cualquiera): lista {
             contexto
         )
         operacion_bytes_pe(contexto, bytes_mov_rax_core_pe(0))
+        operacion_bytes_pe(contexto, [72, 199, 193, 0, 0, 0, 0])
         etiqueta_core_pe(contexto, contexto.retorno_actual)
         operacion_bytes_pe(contexto, [72, 137, 236, 93, 195])
 

@@ -26,7 +26,7 @@ Hay tres emisores escritos en C-Forge:
 - `bootstrap/direct/cforge_elf_x64.cfv`
 - `bootstrap/direct/cforge_pe_x64.cfv`
 
-Además, los tres formatos tienen variantes Core B6.19:
+Además, los tres formatos tienen variantes Core B6.20:
 
 - `bootstrap/direct/cforge_macho_arm64_core.cfv`
 - `bootstrap/direct/cforge_elf_x64_core.cfv`
@@ -37,7 +37,7 @@ cuya forma es `mostrar("texto")`. `make backend-check` genera los artefactos,
 verifica sus cabeceras con `file` y ejecuta únicamente el formato soportado por
 el anfitrión.
 
-`make backend-core-check` construye los compiladores Core B6.19 una vez con
+`make backend-core-check` construye los compiladores Core B6.20 una vez con
 Stage 0 y después ejecuta la emisión con un `PATH` aislado. Las variantes Core
 generan directamente Mach-O, ELF y PE deterministas para variables, aritmética,
 condiciones, ciclos, funciones, listas y texto dinámico. En macOS ARM64 se
@@ -87,8 +87,12 @@ B6.19 añade `bootstrap/core_exception_lowering.cfv`: transforma
 `intentar`/`capturar`/`lanzar` en estado de error y control de flujo Core común
 antes de la emisión. El gate genera los tres formatos, ejecuta el formato del
 anfitrión y comprueba que las sentencias posteriores a `lanzar` no se ejecuten.
-El alcance actual es local a un bloque; la propagación entre llamadas requiere
-una ABI de resultados ampliada y permanece en progreso.
+B6.20 amplía ese alcance con una ABI para llamadas directas: el valor viaja en el registro de
+retorno, acompañado por indicador de error, puntero al mensaje y longitud. Una
+función que ejecuta `lanzar` abandona inmediatamente su cuerpo y el bloque
+`intentar` llamador captura el mensaje sin soporte de excepciones del sistema.
+Las llamadas dentro de expresiones compuestas todavía requieren lowering
+adicional y permanecen en progreso.
 
 ## Criterio para declarar autonomía completa
 

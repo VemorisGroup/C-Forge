@@ -323,6 +323,12 @@ backend-core-check: backend-core-bundle
 		bootstrap/fixtures/machine_exceptions_b619.cfv -o "$$dir/excepciones.exe" >/dev/null; \
 	env PATH=/nonexistent "$$dir/elf-core" \
 		bootstrap/fixtures/machine_exceptions_b619.cfv -o "$$dir/excepciones-elf" >/dev/null; \
+	env PATH=/nonexistent "$$dir/macho-core" \
+		bootstrap/fixtures/machine_exception_calls_b620.cfv -o "$$dir/excepciones-funcion-macho" >/dev/null; \
+	env PATH=/nonexistent "$$dir/pe-core" \
+		bootstrap/fixtures/machine_exception_calls_b620.cfv -o "$$dir/excepciones-funcion.exe" >/dev/null; \
+	env PATH=/nonexistent "$$dir/elf-core" \
+		bootstrap/fixtures/machine_exception_calls_b620.cfv -o "$$dir/excepciones-funcion-elf" >/dev/null; \
 	if env PATH=/nonexistent "$$dir/macho-core" \
 		bootstrap/fixtures/machine_interfaces_invalid_b615.cfv \
 		-o "$$dir/interfaz-invalida" >/dev/null 2>&1; then \
@@ -363,6 +369,9 @@ backend-core-check: backend-core-bundle
 	file "$$dir/excepciones-macho" | grep -q "Mach-O 64-bit executable arm64"; \
 	file "$$dir/excepciones.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/excepciones-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
+	file "$$dir/excepciones-funcion-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/excepciones-funcion.exe" | grep -q "PE32+ executable.*x86-64"; \
+	file "$$dir/excepciones-funcion-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
 	if [ "$(UNAME)" = "Darwin" ] && [ "$(ARCH)" = "arm64" ]; then \
 		test "$$($$dir/uno-macho)" = "C-FORGE-B6.7-OK"; \
 		test "$$($$dir/objetos-macho)" = "C-FORGE-B6.11-OBJECT-OK"; \
@@ -373,6 +382,7 @@ backend-core-check: backend-core-bundle
 		test "$$($$dir/modulos-macho)" = "C-FORGE-B6.16-MODULES-OK"; \
 		test "$$($$dir/mapas-macho)" = "C-FORGE-B6.17-MAPS-OK"; \
 		test "$$($$dir/excepciones-macho)" = "$$(printf 'saldo insuficiente\ncaptura completada')"; \
+		test "$$($$dir/excepciones-funcion-macho)" = "$$(printf 'saldo insuficiente desde funcion\npropagacion capturada')"; \
 	fi; \
 	if [ "$(UNAME)" = "Linux" ] && [ "$(ARCH)" = "x86_64" ]; then \
 		test "$$($$dir/uno-elf)" = "C-FORGE-B6.7-OK"; \
@@ -384,8 +394,9 @@ backend-core-check: backend-core-bundle
 		test "$$($$dir/modulos-elf)" = "C-FORGE-B6.16-MODULES-OK"; \
 		test "$$($$dir/mapas-elf)" = "C-FORGE-B6.17-MAPS-OK"; \
 		test "$$($$dir/excepciones-elf)" = "$$(printf 'saldo insuficiente\ncaptura completada')"; \
+		test "$$($$dir/excepciones-funcion-elf)" = "$$(printf 'saldo insuficiente desde funcion\npropagacion capturada')"; \
 	fi; \
-	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.19 con excepciones"
+	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.20 con ABI de excepciones"
 
 ## Verificar el IR común de objetos que consumirán los tres backends.
 ir-core-check:

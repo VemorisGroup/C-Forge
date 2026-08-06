@@ -143,7 +143,7 @@ para conocer el estado verificable.
 - Windows: backend experimental; falta validación física completa.
 
 Los emisores mínimos Mach-O ARM64, ELF x64 y PE x64 aceptan el programa
-`mostrar("texto")`. Los tres incluyen también variantes Core B6.19 para
+`mostrar("texto")`. Los tres incluyen también variantes Core B6.20 para
 variables, aritmética, control, funciones, listas y texto dinámico. El gate comprueba sus cabeceras y ejecuta
 únicamente el formato compatible con el sistema anfitrión. Todavía no son
 backends completos del lenguaje.
@@ -172,7 +172,8 @@ El ejemplo modular divide una simulación de videojuego entre entidades, reglas
 y programa principal y genera los tres formatos nativos.
 B6.19 reduce excepciones locales `intentar`/`capturar`/`lanzar` a un control de
 flujo común y las genera sin toolchain externa para Mach-O, ELF y PE. La
-propagación entre funciones continúa marcada como trabajo en progreso.
+ABI B6.20 propaga errores de llamadas directas entre funciones mediante
+registros propios de C-Forge y permite capturarlos sin excepciones C++.
 
 No se anunciará compatibilidad total con una plataforma hasta que instalación,
 ejecución, pruebas y desinstalación estén verificadas en ella.
