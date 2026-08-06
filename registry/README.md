@@ -1,5 +1,7 @@
 # Registro público de paquetes C-Forge
 
+URL oficial del registro: **[pkg.c-forge.org](https://pkg.c-forge.org)**
+
 Este directorio define el índice público, auditable y versionado del gestor `cforge pkg`.
 Cada versión del formato 2 debe publicar una URL HTTPS, el SHA-256 exacto del
 archivo `.tar.gz`, la clave pública Ed25519, su `key_id` y la firma. El cliente

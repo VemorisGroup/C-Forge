@@ -1,6 +1,8 @@
 # C-Forge Language
 
-Soporte oficial de lenguaje para archivos `.cfv` de **C-Forge 2.6 estable**.
+Soporte oficial de lenguaje para archivos `.cfv` de **C-Forge 3.2**.
+
+**[c-forge.org](https://c-forge.org)** · [Documentación](https://docs.c-forge.org) · [Playground](https://play.c-forge.org)
 
 ## Funciones
 

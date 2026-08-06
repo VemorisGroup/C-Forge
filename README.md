@@ -2,11 +2,13 @@
 
 ![C-Forge](assets/cforgev-logo.svg)
 
+**[c-forge.org](https://c-forge.org)** · [Documentación](https://docs.c-forge.org) · [Playground](https://play.c-forge.org) · [Paquetes](https://pkg.c-forge.org) · [GitHub](https://github.com/VemorisGroup/C-Forge)
+
 C-Forge es un lenguaje de programación creado por Vemoris Group.
 Su objetivo es ofrecer una sintaxis clara, ejecución nativa y una biblioteca
 estándar escrita en el propio lenguaje.
 
-> Estado actual: **C-Forge 2.6.0 estable**. El núcleo, CLI y biblioteca estable
+> Estado actual: **C-Forge 3.2.0**. El núcleo, CLI y biblioteca estable
 > superan el gate reproducible `make release-check`. Las capacidades marcadas
 > como experimentales no forman parte del contrato estable. C-Forge no posee
 > todavía certificación regulatoria para sistemas bancarios, médicos,
@@ -188,6 +190,10 @@ ha completado una auditoría de seguridad profesional independiente.
 
 ## Documentación
 
+- [Sitio oficial](https://c-forge.org)
+- [Documentación completa](https://docs.c-forge.org)
+- [Playground online](https://play.c-forge.org)
+- [Registro de paquetes](https://pkg.c-forge.org)
 - [Especificación](ESPECIFICACION.md)
 - [Dirección del núcleo](docs/CORE-DIRECTION.md)
 - [Bootstrap](docs/BOOTSTRAP.md)

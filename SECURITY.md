@@ -1,17 +1,19 @@
 # Seguridad de C-Forge
 
+Sitio oficial: **[c-forge.org](https://c-forge.org)**
+
 ## Versiones
 
-`2.6.x` es la rama estable mantenida y recibe correcciones de seguridad. No posee
+`3.2.x` es la rama estable mantenida y recibe correcciones de seguridad. No posee
 certificación regulatoria para entornos críticos. No ejecute scripts `.cfv` desconocidos:
 los procesos, archivos y la red pueden acceder a capacidades del sistema.
 
 ## Informar vulnerabilidades
 
 No publiques detalles explotables en un issue público. Contacta a
-`hola@vemorisgroup.com` indicando versión, plataforma, reproducción mínima e impacto.
-Vemoris Group debe confirmar recepción, coordinar una corrección y publicar un aviso
-cuando exista una versión reparada.
+`seguridad@c-forge.org` o `hola@vemorisgroup.com` indicando versión, plataforma,
+reproducción mínima e impacto. Vemoris Group debe confirmar recepción, coordinar
+una corrección y publicar un aviso cuando exista una versión reparada.
 
 ## Controles automatizados
 

@@ -1,5 +1,10 @@
 # Publicación de C-Forge
 
+**Sitio oficial:** [c-forge.org](https://c-forge.org)
+**Documentación:** [docs.c-forge.org](https://docs.c-forge.org)
+**Playground:** [play.c-forge.org](https://play.c-forge.org)
+**Paquetes:** [pkg.c-forge.org](https://pkg.c-forge.org)
+
 ## GitHub
 
 Antes de crear el repositorio, revisa que el nombre público sea `C-Forge` y que
@@ -8,7 +13,7 @@ la licencia propietaria incluida represente la decisión de Vemoris Group.
 ```bash
 git init
 git add .
-git commit -m "Release C-Forge 2.6.0 stable"
+git commit -m "Release C-Forge 3.2.0"
 git branch -M main
 git remote add origin https://github.com/VemorisGroup/C-Forge.git
 git push -u origin main
