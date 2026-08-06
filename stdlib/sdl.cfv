@@ -108,25 +108,25 @@ funcion sdl_delta_tiempo(ultimo_tick: numero): numero {
 
 // Dibuja un círculo aproximado con rectángulos de 2x2
 funcion sdl_circulo(ren: numero, cx: numero, cy: numero, radio: numero): nulo {
-    sea x = radio
-    sea y = 0
+    sea rx = radio
+    sea ry = 0
     sea err = 0
-    mientras (x >= y) {
-        sdl_rect(ren, cx + x - 1, cy + y - 1, 2, 2, verdadero)
-        sdl_rect(ren, cx + y - 1, cy + x - 1, 2, 2, verdadero)
-        sdl_rect(ren, cx - y - 1, cy + x - 1, 2, 2, verdadero)
-        sdl_rect(ren, cx - x - 1, cy + y - 1, 2, 2, verdadero)
-        sdl_rect(ren, cx - x - 1, cy - y - 1, 2, 2, verdadero)
-        sdl_rect(ren, cx - y - 1, cy - x - 1, 2, 2, verdadero)
-        sdl_rect(ren, cx + y - 1, cy - x - 1, 2, 2, verdadero)
-        sdl_rect(ren, cx + x - 1, cy - y - 1, 2, 2, verdadero)
-        y = y + 1
+    mientras (rx >= ry) {
+        sdl_rect(ren, cx + rx - 1, cy + ry - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx + ry - 1, cy + rx - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx - ry - 1, cy + rx - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx - rx - 1, cy + ry - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx - rx - 1, cy - ry - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx - ry - 1, cy - rx - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx + ry - 1, cy - rx - 1, 2, 2, verdadero)
+        sdl_rect(ren, cx + rx - 1, cy - ry - 1, 2, 2, verdadero)
+        ry = ry + 1
         si (err <= 0) {
-            err = err + 2 * y + 1
+            err = err + 2 * ry + 1
         }
         si (err > 0) {
-            x = x - 1
-            err = err - 2 * x + 1
+            rx = rx - 1
+            err = err - 2 * rx + 1
         }
     }
 }
