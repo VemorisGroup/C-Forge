@@ -7132,7 +7132,11 @@ const char* cfv_eval_json(const char* code) {
 }
 
 // Obtener version del interprete
+<<<<<<< Updated upstream
 const char* cfv_version() { return "3.2.0"; }
+=======
+const char* cfv_version() { return "3.6.0"; }
+>>>>>>> Stashed changes
 
 // Verificar disponibilidad de SDL2
 int cfv_has_sdl2() {
@@ -7185,6 +7189,699 @@ static int cfv_check_file(const std::filesystem::path& path) {
   return 0;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   C-FORGE COMPILER  —  AST -> C code emitter
+   uso: cforge compile archivo.cfv [-o salida] [--sdl2]
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// Forward declarations for AST list helpers (defined after cfv_compile_ast)
+static int   cfv_ast_size(const Value& ast);
+static Value cfv_ast_node(const Value& ast, int i);
+
+struct CfvEmitCtx {
+  std::string       out;          // C code buffer
+  int               indent = 0;  // current indent level
+  bool              sdl2   = false;
+  bool              in_fn  = false;
+  std::string       fn_ret_type = "CfvVal";
+  // builtins that map 1:1 to cfv_rt.h functions (no-arg or variadic)
+  std::unordered_map<std::string,std::string> builtin_map;
+  // imported modules
+  std::set<std::string> imports;
+  // functions defined (for forward decls)
+  std::vector<std::string> fn_names;
+};
+
+static std::string cfv_ind(int n) { return std::string(n * 4, ' '); }
+
+// Mangle C-Forge identifier to safe C name
+static std::string cfv_mangle(const std::string& s) {
+  std::string r = "cfv_v_";
+  for (char c : s) {
+    if (isalnum(c) || c == '_') r += c;
+    else r += '_';
+  }
+  return r;
+}
+static std::string cfv_fn_name(const std::string& s) {
+  std::string r = "cfv_f_";
+  for (char c : s) {
+    if (isalnum(c) || c == '_') r += c;
+    else r += '_';
+  }
+  return r;
+}
+
+// Forward declarations
+static std::string cfv_emit_expr(const Value& node, CfvEmitCtx& ctx);
+static void        cfv_emit_stmt(const Value& node, CfvEmitCtx& ctx);
+static std::string cfv_node_tipo(const Value& n);
+static Value       cfv_node_hijo(const Value& n, int i);
+
+static std::string cfv_node_tipo(const Value& n) {
+  auto t = indice(n, Value{std::string("tipo")});
+  if (auto p = std::get_if<std::string>(&t.data)) return *p;
+  return "";
+}
+static std::string cfv_node_valor(const Value& n) {
+  auto t = indice(n, Value{std::string("valor")});
+  if (auto p = std::get_if<std::string>(&t.data)) return *p;
+  if (auto p = std::get_if<double>(&t.data)) {
+    double d = *p;
+    if (d == (long long)d) return std::to_string((long long)d);
+    return std::to_string(d);
+  }
+  return "";
+}
+static Value cfv_node_hijos(const Value& n) {
+  return indice(n, Value{std::string("hijos")});
+}
+static Value cfv_node_hijo(const Value& n, int i) {
+  return indice(cfv_node_hijos(n), Value{(double)i});
+}
+static int cfv_node_nhijos(const Value& n) {
+  auto h = cfv_node_hijos(n);
+  if (auto p = std::get_if<std::shared_ptr<std::vector<Value>>>(&h.data))
+    return (int)(*p)->size();
+  return 0;
+}
+
+// Escape a string for C string literal
+static std::string cfv_c_str_escape(const std::string& s) {
+  std::string r = "\"";
+  for (char c : s) {
+    if      (c == '"')  r += "\\\"";
+    else if (c == '\\') r += "\\\\";
+    else if (c == '\n') r += "\\n";
+    else if (c == '\r') r += "\\t";
+    else if (c == '\t') r += "\\t";
+    else                r += c;
+  }
+  r += "\"";
+  return r;
+}
+
+// --- BUILTIN CALL EMITTER ---
+// args_list is the raw lista of argument nodes (from cfv_node_hijos of Llamada)
+static std::string cfv_emit_builtin(const std::string& name,
+                                    const Value& args_list, CfvEmitCtx& ctx) {
+  // args_list is already a lista — use cfv_ast_size/cfv_ast_node to index it
+  int na = cfv_ast_size(args_list);
+  auto arg = [&](int i) { return cfv_emit_expr(cfv_ast_node(args_list, i), ctx); };
+
+  // SDL2 game functions (only when --sdl2)
+  if (ctx.sdl2) {
+    if (name=="juego_iniciar")      return "cfv_juego_iniciar("+arg(0)+","+arg(1)+","+arg(2)+")";
+    if (name=="juego_corriendo")    return "cfv_juego_corriendo()";
+    if (name=="juego_limpiar")      return "cfv_juego_limpiar("+arg(0)+","+arg(1)+","+arg(2)+")";
+    if (name=="juego_renderizar")   return "cfv_juego_renderizar()";
+    if (name=="juego_procesar_eventos") return "cfv_juego_procesar_eventos()";
+    if (name=="juego_dibujar_rectangulo") {
+      std::string s="cfv_juego_dibujar_rectangulo(";
+      for(int i=0;i<na;i++){if(i)s+=",";s+=arg(i);}
+      return s+")";
+    }
+    if (name=="juego_dibujar_rectangulo_borde") {
+      std::string s="cfv_juego_dibujar_rectangulo_borde(";
+      for(int i=0;i<na;i++){if(i)s+=",";s+=arg(i);}
+      return s+")";
+    }
+    if (name=="juego_dibujar_linea") {
+      std::string s="cfv_juego_dibujar_linea(";
+      for(int i=0;i<na;i++){if(i)s+=",";s+=arg(i);}
+      return s+")";
+    }
+    if (name=="juego_dibujar_punto") {
+      std::string s="cfv_juego_dibujar_punto(";
+      for(int i=0;i<na;i++){if(i)s+=",";s+=arg(i);}
+      return s+")";
+    }
+    if (name=="juego_tecla_presionada") return "cfv_juego_tecla_presionada("+arg(0)+")";
+    if (name=="juego_raton_x")    return "cfv_juego_raton_x()";
+    if (name=="juego_raton_y")    return "cfv_juego_raton_y()";
+    if (name=="juego_raton_boton")return "cfv_juego_raton_boton("+arg(0)+")";
+    if (name=="juego_dt")         return "cfv_juego_dt()";
+    if (name=="juego_ancho")      return "cfv_juego_ancho()";
+    if (name=="juego_alto")       return "cfv_juego_alto()";
+    if (name=="juego_cerrar")     return "cfv_juego_cerrar()";
+    if (name=="juego_titulo")     return "cfv_juego_titulo("+arg(0)+")";
+    if (name=="juego_fps_objetivo") return "cfv_juego_fps_objetivo("+arg(0)+")";
+    if (name=="juego_terminar")   return "cfv_juego_terminar()";
+  }
+
+  // Standard builtins
+  if (name=="mostrar")       return "cfv_mostrar("+arg(0)+")";
+  if (name=="leer")          { if(na>0) return "cfv_leer("+arg(0)+")"; return "cfv_leer_linea()"; }
+  if (name=="longitud")      return "cfv_longitud("+arg(0)+")";
+  if (name=="agregar")       return "cfv_agregar("+arg(0)+","+arg(1)+")";
+  if (name=="a_texto")       return "cfv_a_texto("+arg(0)+")";
+  if (name=="a_numero")      return "cfv_a_numero("+arg(0)+")";
+  if (name=="a_booleano")    return "cfv_a_booleano("+arg(0)+")";
+  if (name=="claves")        return "cfv_claves("+arg(0)+")";
+  if (name=="tipo_de")       return "cfv_tipo_de("+arg(0)+")";
+  if (name=="es_nulo")       return "cfv_es_nulo("+arg(0)+")";
+  if (name=="es_numero")     return "cfv_es_numero("+arg(0)+")";
+  if (name=="es_texto")      return "cfv_es_texto("+arg(0)+")";
+  if (name=="es_lista")      return "cfv_es_lista("+arg(0)+")";
+  if (name=="es_mapa")       return "cfv_es_mapa("+arg(0)+")";
+  if (name=="error")         return "cfv_error("+arg(0)+")";
+  if (name=="raiz")          return "cfv_raiz("+arg(0)+")";
+  if (name=="abs")           return "cfv_abs_fn("+arg(0)+")";
+  if (name=="truncar")       return "cfv_truncar("+arg(0)+")";
+  if (name=="redondear")     return "cfv_redondear("+arg(0)+")";
+  if (name=="piso")          return "cfv_piso("+arg(0)+")";
+  if (name=="techo")         return "cfv_techo("+arg(0)+")";
+  if (name=="maximo"||name=="max") return "cfv_max_fn("+arg(0)+","+arg(1)+")";
+  if (name=="minimo"||name=="min") return "cfv_min_fn("+arg(0)+","+arg(1)+")";
+  if (name=="aleatorio")     { if(na==2) return "cfv_aleatorio_entero("+arg(0)+","+arg(1)+")"; return "cfv_aleatorio()"; }
+  if (name=="sen")           return "cfv_sen("+arg(0)+")";
+  if (name=="cos")           return "cfv_cos("+arg(0)+")";
+  if (name=="tan")           return "cfv_tan("+arg(0)+")";
+  if (name=="log")           return "cfv_log_fn("+arg(0)+")";
+  if (name=="ahora_ms")      return "cfv_ahora_ms()";
+  if (name=="dormir")        return "cfv_dormir("+arg(0)+")";
+  if (name=="mayusculas")    return "cfv_mayusculas("+arg(0)+")";
+  if (name=="minusculas")    return "cfv_minusculas("+arg(0)+")";
+  if (name=="recortar")      return "cfv_recortar("+arg(0)+")";
+  if (name=="contiene")      return "cfv_contiene("+arg(0)+","+arg(1)+")";
+  if (name=="empieza_con")   return "cfv_empieza_con("+arg(0)+","+arg(1)+")";
+  if (name=="termina_con")   return "cfv_termina_con("+arg(0)+","+arg(1)+")";
+  if (name=="subcadena")     { if(na>=2) return "cfv_subcadena("+arg(0)+","+arg(1)+",(na>2?"+arg(2)+":cfv_longitud("+arg(0)+")))"; return "cfv_subcadena("+arg(0)+",cfv_num(0),cfv_longitud("+arg(0)+"))"; }
+  if (name=="reemplazar")    return "cfv_reemplazar("+arg(0)+","+arg(1)+","+arg(2)+")";
+  if (name=="dividir")       return "cfv_dividir("+arg(0)+","+arg(1)+")";
+  if (name=="unir")          return "cfv_unir("+arg(0)+","+arg(1)+")";
+  if (name=="posicion")      return "cfv_posicion("+arg(0)+","+arg(1)+")";
+  if (name=="lista_slice")   return "cfv_lista_slice("+arg(0)+","+arg(1)+","+arg(2)+")";
+  if (name=="invertir")      return "cfv_lista_invertir("+arg(0)+")";
+  if (name=="pop")           return "cfv_lista_pop("+arg(0)+")";
+  if (name=="eliminar_indice") return "cfv_lista_pop("+arg(0)+")"; /* approx */
+
+  // User-defined function call
+  return cfv_fn_name(name) + "(" + [&](){
+    std::string s;
+    for(int i=0;i<na;i++){if(i)s+=","; s+=arg(i);}
+    return s;
+  }() + ")";
+}
+
+// --- EXPRESSION EMITTER ---
+static std::string cfv_emit_expr(const Value& node, CfvEmitCtx& ctx) {
+  std::string tipo = cfv_node_tipo(node);
+  std::string val  = cfv_node_valor(node);
+  if (tipo == "Nulo")    return "cfv_nulo()";
+  if (tipo == "Numero") {
+    double d = 0;
+    auto vv = indice(node, Value{std::string("valor")});
+    if (auto p = std::get_if<double>(&vv.data)) d = *p;
+    else if (auto p = std::get_if<std::string>(&vv.data)) d = std::stod(*p);
+    if (d == (long long)d && std::abs(d) < 1e15)
+      return "cfv_num(" + std::to_string((long long)d) + "LL)";
+    return "cfv_num(" + std::to_string(d) + ")";
+  }
+  if (tipo == "Booleano") return val=="verdadero" ? "cfv_bool(1)" : "cfv_bool(0)";
+  if (tipo == "Texto") {
+    // val is the raw lexeme including outer quotes; strip them and unescape
+    std::string raw = val;
+    if (!raw.empty() && raw.front()=='"') raw = raw.substr(1);
+    if (!raw.empty() && raw.back()=='"')  raw.pop_back();
+    // build a proper C string
+    return "cfv_texto(" + cfv_c_str_escape(raw) + ")";
+  }
+  if (tipo == "Identificador") {
+    // Special identifiers
+    if (val=="verdadero") return "cfv_bool(1)";
+    if (val=="falso")     return "cfv_bool(0)";
+    if (val=="nulo")      return "cfv_nulo()";
+    if (val=="CFV_PI")    return "cfv_num(3.14159265358979323846)";
+    return cfv_mangle(val);
+  }
+  if (tipo == "Binario") {
+    auto L = cfv_emit_expr(cfv_node_hijo(node,0), ctx);
+    auto R = cfv_emit_expr(cfv_node_hijo(node,1), ctx);
+    if (val=="+")   return "cfv_add("+L+","+R+")";
+    if (val=="-")   return "cfv_sub("+L+","+R+")";
+    if (val=="*")   return "cfv_mul("+L+","+R+")";
+    if (val=="/")   return "cfv_div("+L+","+R+")";
+    if (val=="%")   return "cfv_mod("+L+","+R+")";
+    if (val=="**")  return "cfv_pow("+L+","+R+")";
+    if (val=="==")  return "cfv_eq("+L+","+R+")";
+    if (val=="!=")  return "cfv_neq("+L+","+R+")";
+    if (val=="<")   return "cfv_lt("+L+","+R+")";
+    if (val=="<=")  return "cfv_le("+L+","+R+")";
+    if (val==">")   return "cfv_gt("+L+","+R+")";
+    if (val==">=")  return "cfv_ge("+L+","+R+")";
+    if (val=="y"||val=="&&") return "cfv_and("+L+","+R+")";
+    if (val=="o"||val=="||") return "cfv_or("+L+","+R+")";
+    if (val=="??")  return "cfv_nulo_coal("+L+","+R+")";
+    if (val=="&")   return "cfv_bw_and("+L+","+R+")";
+    if (val=="|")   return "cfv_bw_or("+L+","+R+")";
+    if (val=="^")   return "cfv_bw_xor("+L+","+R+")";
+    if (val=="<<")  return "cfv_shl("+L+","+R+")";
+    if (val==">>")  return "cfv_shr("+L+","+R+")";
+    return "cfv_add("+L+","+R+")"; // fallback
+  }
+  if (tipo == "Unario") {
+    auto E = cfv_emit_expr(cfv_node_hijo(node,0), ctx);
+    if (val=="no"||val=="!") return "cfv_not("+E+")";
+    if (val=="-")            return "cfv_neg("+E+")";
+    if (val=="~")            return "cfv_bw_not("+E+")";
+    return E;
+  }
+  if (tipo == "Ternario") {
+    auto C = cfv_emit_expr(cfv_node_hijo(node,0), ctx);
+    auto T = cfv_emit_expr(cfv_node_hijo(node,1), ctx);
+    auto F = cfv_emit_expr(cfv_node_hijo(node,2), ctx);
+    return "(cfv_truthy("+C+")?"+T+":"+F+")";
+  }
+  if (tipo == "Indice") {
+    auto O = cfv_emit_expr(cfv_node_hijo(node,0), ctx);
+    auto I = cfv_emit_expr(cfv_node_hijo(node,1), ctx);
+    return "cfv_indice_get("+O+","+I+")";
+  }
+  if (tipo == "Llamada") {
+    auto args = cfv_node_hijos(node);
+    return cfv_emit_builtin(val, args, ctx);
+  }
+  if (tipo == "Lista") {
+    // hijos of Lista is the elements lista directly
+    auto elems = cfv_node_hijos(node);
+    int n = cfv_ast_size(elems);
+    if (n == 0) return "cfv_lista_nueva()";
+    std::string s = "cfv_lista_of("+std::to_string(n);
+    for (int i=0;i<n;i++) s += "," + cfv_emit_expr(cfv_ast_node(elems,i), ctx);
+    return s+")";
+  }
+  if (tipo == "Mapa") {
+    // hijos is a flat list: [k0_node, v0_node, k1_node, v1_node, ...]
+    auto flat = cfv_node_hijos(node);
+    int total = cfv_ast_size(flat);
+    int npairs = total / 2;
+    if (npairs == 0) return "cfv_mapa_nuevo()";
+    std::string s = "cfv_mapa_of("+std::to_string(npairs);
+    for (int i=0;i<npairs;i++) {
+      auto kn = cfv_ast_node(flat, i*2);
+      auto vn = cfv_ast_node(flat, i*2+1);
+      std::string k;
+      if (cfv_node_tipo(kn)=="Texto") {
+        k = cfv_node_valor(kn);
+        if (!k.empty()&&k.front()=='"') k=k.substr(1);
+        if (!k.empty()&&k.back()=='"')  k.pop_back();
+        k = "\""+k+"\"";
+      } else {
+        k = "\"" + cfv_node_valor(kn) + "\"";
+      }
+      s += "," + k + "," + cfv_emit_expr(vn, ctx);
+    }
+    return s+")";
+  }
+  if (tipo == "Lambda") {
+    // Lambdas: emit as static local function (approx — just emit nulo for now)
+    return "cfv_nulo()"; // TODO: full lambda support
+  }
+  // Fallback: unknown node → nulo
+  return "cfv_nulo()/*?"+tipo+"*/";
+}
+
+// --- STATEMENT EMITTER ---
+static void cfv_emit_stmt(const Value& node, CfvEmitCtx& ctx) {
+  std::string tipo = cfv_node_tipo(node);
+  std::string val  = cfv_node_valor(node);
+  std::string ind  = cfv_ind(ctx.indent);
+
+  if (tipo == "Declaracion") {
+    auto init = cfv_node_hijo(node,0);
+    auto expr = cfv_emit_expr(init, ctx);
+    ctx.out += ind + "CfvVal " + cfv_mangle(val) + " = " + expr + ";\n";
+    return;
+  }
+  if (tipo == "Asignacion") {
+    auto lhs = cfv_node_hijo(node,0);
+    auto rhs = cfv_node_hijo(node,1);
+    std::string lhs_tipo = cfv_node_tipo(lhs);
+    if (lhs_tipo == "Identificador") {
+      ctx.out += ind + cfv_mangle(cfv_node_valor(lhs)) + " = " + cfv_emit_expr(rhs,ctx) + ";\n";
+    } else if (lhs_tipo == "Indice") {
+      auto O = cfv_emit_expr(cfv_node_hijo(lhs,0), ctx);
+      auto I = cfv_emit_expr(cfv_node_hijo(lhs,1), ctx);
+      ctx.out += ind + "cfv_indice_set("+O+","+I+","+cfv_emit_expr(rhs,ctx)+");\n";
+    } else {
+      ctx.out += ind + cfv_emit_expr(lhs,ctx) + " = " + cfv_emit_expr(rhs,ctx) + ";\n";
+    }
+    return;
+  }
+  if (tipo == "Bloque") {
+    int n = cfv_node_nhijos(node);
+    for (int i=0;i<n;i++) cfv_emit_stmt(cfv_node_hijo(node,i), ctx);
+    return;
+  }
+  if (tipo == "Si") {
+    int n = cfv_node_nhijos(node);
+    // children: cond, then_blk, [elif_cond, elif_blk, ...], [else_blk]
+    auto cond = cfv_emit_expr(cfv_node_hijo(node,0), ctx);
+    ctx.out += ind + "if (cfv_truthy("+cond+")) {\n";
+    ctx.indent++;
+    cfv_emit_stmt(cfv_node_hijo(node,1), ctx);
+    ctx.indent--;
+    ctx.out += ind + "}";
+    // remaining children: pairs of (cond,blk) for else-if, then optionally a final blk for else
+    int i=2;
+    while (i < n) {
+      auto next = cfv_node_hijo(node,i);
+      if (cfv_node_tipo(next)=="Bloque" && i==n-1) {
+        // else block
+        ctx.out += " else {\n";
+        ctx.indent++;
+        cfv_emit_stmt(next, ctx);
+        ctx.indent--;
+        ctx.out += ind + "}";
+        i++;
+      } else if (i+1 < n) {
+        // else-if
+        auto ec = cfv_emit_expr(next, ctx);
+        ctx.out += " else if (cfv_truthy("+ec+")) {\n";
+        ctx.indent++;
+        cfv_emit_stmt(cfv_node_hijo(node,i+1), ctx);
+        ctx.indent--;
+        ctx.out += ind + "}";
+        i+=2;
+      } else { i++; }
+    }
+    ctx.out += "\n";
+    return;
+  }
+  if (tipo == "Mientras") {
+    auto cond = cfv_emit_expr(cfv_node_hijo(node,0), ctx);
+    ctx.out += ind + "while (cfv_truthy("+cond+")) {\n";
+    ctx.indent++;
+    cfv_emit_stmt(cfv_node_hijo(node,1), ctx);
+    ctx.indent--;
+    ctx.out += ind + "}\n";
+    return;
+  }
+  if (tipo == "Para") {
+    // val = loop variable name, child[0]=collection, child[1]=body
+    std::string vname = cfv_mangle(val);
+    std::string cname = "cfv_col_" + val + "_" + std::to_string(ctx.indent);
+    std::string iname = "cfv_i_"   + val + "_" + std::to_string(ctx.indent);
+    auto col = cfv_emit_expr(cfv_node_hijo(node,0), ctx);
+    ctx.out += ind + "{\n";
+    ctx.indent++;
+    std::string ind2 = cfv_ind(ctx.indent);
+    ctx.out += ind2 + "CfvVal "+cname+" = "+col+";\n";
+    ctx.out += ind2 + "int "+iname+"_n = ("+cname+".tag==CFV_LISTA) ? "+cname+".lst->len : (int)cfv_longitud("+cname+").n;\n";
+    ctx.out += ind2 + "for (int "+iname+"=0; "+iname+" < "+iname+"_n; "+iname+"++) {\n";
+    ctx.indent++;
+    std::string ind3 = cfv_ind(ctx.indent);
+    ctx.out += ind3 + "CfvVal "+vname+" = cfv_indice_get("+cname+", cfv_num("+iname+"));\n";
+    cfv_emit_stmt(cfv_node_hijo(node,1), ctx);
+    ctx.indent--;
+    ctx.out += ind2 + "}\n";
+    ctx.indent--;
+    ctx.out += ind + "}\n";
+    return;
+  }
+  if (tipo == "Funcion") {
+    // Emit function definition
+    auto params_node = cfv_node_hijo(node,0);  // Params node
+    auto body        = cfv_node_hijo(node,1);  // Bloque
+    int np = cfv_node_nhijos(params_node);
+    std::string fname = cfv_fn_name(val);
+    // Helper: extract param name — params can be plain strings or maps
+    auto get_pname = [](const Value& p) -> std::string {
+      if (auto ps = std::get_if<std::string>(&p.data)) return *ps;
+      // map param (default/variadic) — look up "nombre" key
+      if (auto pm = std::get_if<Mapa>(&p.data)) {
+        auto it = (*pm)->find("nombre");
+        if (it != (*pm)->end()) {
+          if (auto ps2 = std::get_if<std::string>(&it->second.data)) return *ps2;
+        }
+      }
+      return "_";
+    };
+    // signature
+    ctx.out += "CfvVal " + fname + "(";
+    for (int i=0;i<np;i++) {
+      auto pnode = cfv_node_hijo(params_node,i);
+      std::string pname = get_pname(pnode);
+      if (i) ctx.out += ", ";
+      ctx.out += "CfvVal " + cfv_mangle(pname);
+    }
+    if (np==0) ctx.out += "void";
+    ctx.out += ") {\n";
+    ctx.indent++;
+    bool was_in_fn = ctx.in_fn; ctx.in_fn = true;
+    cfv_emit_stmt(body, ctx);
+    // ensure return at end
+    ctx.out += cfv_ind(ctx.indent) + "return cfv_nulo();\n";
+    ctx.in_fn = was_in_fn;
+    ctx.indent--;
+    ctx.out += "}\n\n";
+    return;
+  }
+  if (tipo == "Retornar") {
+    auto e = cfv_emit_expr(cfv_node_hijo(node,0), ctx);
+    ctx.out += ind + "return "+e+";\n";
+    return;
+  }
+  if (tipo == "Interrupcion") { ctx.out += ind + "break;\n"; return; }
+  if (tipo == "Continuar")    { ctx.out += ind + "continue;\n"; return; }
+  if (tipo == "Importar") {
+    ctx.imports.insert(val);
+    return; // handled at top-level
+  }
+  if (tipo == "Intentar") {
+    // val = error variable name
+    // child[0]=try_blk, child[1]=catch_blk, child[2]=finally_blk
+    std::string evar = cfv_mangle(val.empty() ? "cfv_err" : val);
+    ctx.out += ind + "CFV_TRY {\n";
+    ctx.indent++;
+    cfv_emit_stmt(cfv_node_hijo(node,0), ctx);
+    ctx.indent--;
+    ctx.out += ind + "} CFV_CATCH("+evar+") {\n";
+    ctx.indent++;
+    cfv_emit_stmt(cfv_node_hijo(node,1), ctx);
+    ctx.indent--;
+    ctx.out += ind + "CFV_CATCH_END\n";
+    // finally (child[2]) — emit after both branches
+    if (cfv_node_nhijos(node) > 2) {
+      cfv_emit_stmt(cfv_node_hijo(node,2), ctx);
+    }
+    return;
+  }
+  if (tipo == "Match") {
+    auto expr = cfv_emit_expr(cfv_node_hijo(node,0), ctx);
+    std::string mvar = "cfv_match_" + std::to_string(ctx.indent);
+    ctx.out += ind + "{\n";
+    ctx.indent++;
+    std::string ind2 = cfv_ind(ctx.indent);
+    ctx.out += ind2 + "CfvVal " + mvar + " = " + expr + ";\n";
+    // hijos[1] = casos — raw lista of Caso nodes
+    auto casos = cfv_node_hijo(node,1);
+    int nc = cfv_ast_size(casos);
+    for (int i=0;i<nc;i++) {
+      auto caso = cfv_ast_node(casos,i); // cada caso es un nodo mapa
+      auto patron = cfv_node_hijo(caso,0);
+      auto body   = cfv_node_hijo(caso,2); // child[1]=guard, child[2]=body
+      std::string pat_tipo = cfv_node_tipo(patron);
+      if (pat_tipo=="Identificador" && cfv_node_valor(patron)=="_") {
+        ctx.out += ind2 + (i==0?"if":"else") + " (1) {\n";
+      } else {
+        std::string pat_expr = cfv_emit_expr(patron, ctx);
+        ctx.out += ind2 + (i==0?"if":"else if") + " (cfv_truthy(cfv_eq("+mvar+","+pat_expr+"))) {\n";
+      }
+      ctx.indent++;
+      cfv_emit_stmt(body, ctx);
+      ctx.indent--;
+      ctx.out += ind2 + "}\n";
+    }
+    ctx.indent--;
+    ctx.out += ind + "}\n";
+    return;
+  }
+  if (tipo == "DestructList") {
+    // hijos = [expr, names_lista] — names_lista is a raw lista of strings
+    auto expr  = cfv_emit_expr(cfv_node_hijo(node,0), ctx);
+    auto names = cfv_node_hijo(node,1); // raw lista of name strings
+    int nn = cfv_ast_size(names);
+    std::string tmpv = "cfv_destr_" + std::to_string(ctx.indent);
+    ctx.out += ind + "{\n";
+    ctx.indent++;
+    std::string ind2=cfv_ind(ctx.indent);
+    ctx.out += ind2 + "CfvVal "+tmpv+" = "+expr+";\n";
+    for (int i=0;i<nn;i++) {
+      auto nval = cfv_ast_node(names,i);
+      std::string n2 = std::get_if<std::string>(&nval.data) ? *std::get_if<std::string>(&nval.data) : "_";
+      if (n2!="_")
+        ctx.out += ind2 + "CfvVal "+cfv_mangle(n2)+" = cfv_indice_get("+tmpv+",cfv_num("+std::to_string(i)+"));\n";
+    }
+    ctx.indent--;
+    ctx.out += ind + "}\n";
+    return;
+  }
+  if (tipo == "DestructMapa") {
+    auto expr  = cfv_emit_expr(cfv_node_hijo(node,0), ctx);
+    auto names = cfv_node_hijo(node,1); // raw lista of name strings
+    int nn = cfv_ast_size(names);
+    std::string tmpv = "cfv_destrm_" + std::to_string(ctx.indent);
+    ctx.out += ind + "{\n";
+    ctx.indent++;
+    std::string ind2=cfv_ind(ctx.indent);
+    ctx.out += ind2 + "CfvVal "+tmpv+" = "+expr+";\n";
+    for (int i=0;i<nn;i++) {
+      auto nval = cfv_ast_node(names,i);
+      std::string n2 = std::get_if<std::string>(&nval.data) ? *std::get_if<std::string>(&nval.data) : "_";
+      ctx.out += ind2 + "CfvVal "+cfv_mangle(n2)+" = cfv_indice_get("+tmpv+",cfv_texto(\""+n2+"\"));\n";
+    }
+    ctx.indent--;
+    ctx.out += ind + "}\n";
+    return;
+  }
+  if (tipo == "Mostrar") {
+    auto e = cfv_emit_expr(cfv_node_hijo(node,0), ctx);
+    ctx.out += ind + "cfv_mostrar("+e+");\n";
+    return;
+  }
+  // Expression statement (e.g. function calls)
+  {
+    std::string e = cfv_emit_expr(node, ctx);
+    if (!e.empty() && e != "cfv_nulo()/*?*/")
+      ctx.out += ind + "(void)("+e+");\n";
+  }
+}
+
+// Iterate top-level AST (returned by cfv_parsear as a flat lista of nodes)
+static int cfv_ast_size(const Value& ast) {
+  if (auto p = std::get_if<std::shared_ptr<std::vector<Value>>>(&ast.data))
+    return (int)(*p)->size();
+  return 0;
+}
+static Value cfv_ast_node(const Value& ast, int i) {
+  return indice(ast, Value{(double)i});
+}
+
+// Collect all function definitions first (for forward declarations)
+static void cfv_collect_fns(const Value& ast, std::vector<std::pair<std::string,int>>& fns) {
+  int n = cfv_ast_size(ast);
+  for (int i=0;i<n;i++) {
+    auto node = cfv_ast_node(ast,i);
+    if (cfv_node_tipo(node)!="Funcion") continue;
+    std::string fname = cfv_node_valor(node);
+    // count params — child[0] is the Params node
+    int np = 0;
+    if (cfv_node_nhijos(node) >= 1) np = cfv_node_nhijos(cfv_node_hijo(node,0));
+    fns.push_back({fname, np});
+  }
+}
+
+static std::string cfv_compile_ast(const Value& ast, bool sdl2_mode) {
+  // --- Header ---
+  std::string header = "/* Generated by C-Forge compiler v3.6.0 */\n";
+  if (sdl2_mode) header += "#define CFV_SDL2\n";
+  header += "#include \"cfv_rt.h\"\n\n";
+
+  // --- Forward declarations for user functions ---
+  std::string fwd;
+  std::vector<std::pair<std::string,int>> fn_list;
+  cfv_collect_fns(ast, fn_list);
+  for (auto& [name, np] : fn_list) {
+    fwd += "CfvVal " + cfv_fn_name(name) + "(";
+    if (np==0) fwd += "void";
+    else for (int i=0;i<np;i++) { if(i)fwd+=","; fwd+="CfvVal"; }
+    fwd += ");\n";
+  }
+  if (!fwd.empty()) fwd += "\n";
+
+  // --- Two passes: functions first, then global stmts ---
+  CfvEmitCtx fn_ctx;
+  fn_ctx.sdl2 = sdl2_mode;
+  fn_ctx.indent = 0;
+
+  CfvEmitCtx main_ctx;
+  main_ctx.sdl2 = sdl2_mode;
+  main_ctx.indent = 1;
+
+  int n = cfv_ast_size(ast);
+  for (int i=0;i<n;i++) {
+    auto node = cfv_ast_node(ast,i);
+    std::string tipo = cfv_node_tipo(node);
+    if (tipo=="Importar") {
+      main_ctx.imports.insert(cfv_node_valor(node));
+      continue;
+    }
+    if (tipo=="Funcion") {
+      cfv_emit_stmt(node, fn_ctx);
+    } else {
+      cfv_emit_stmt(node, main_ctx);
+    }
+  }
+
+  // --- main() ---
+  std::string main_fn = "int main(int argc, char** argv) {\n";
+  main_fn += "    cfv_init(argc, argv);\n";
+  main_fn += main_ctx.out;
+  if (sdl2_mode) main_fn += "    cfv_juego_terminar();\n";
+  main_fn += "    return 0;\n}\n";
+
+  return header + fwd + fn_ctx.out + main_fn;
+}
+
+static void cfv_compile_file(const std::string& src_path, const std::string& out_c,
+                              const std::string& out_bin, bool sdl2_mode) {
+  // Read source
+  std::ifstream f(src_path);
+  if (!f) throw std::runtime_error("No se pudo abrir: " + src_path);
+  std::string src((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+
+  // Parse
+  Value tokens = cfv_tokenizar(Value{src});
+  Value ast    = cfv_parsear(tokens);
+
+  // Emit C
+  std::string c_code = cfv_compile_ast(ast, sdl2_mode);
+
+  // Write .c file
+  {
+    std::ofstream of(out_c);
+    if (!of) throw std::runtime_error("No se pudo escribir: " + out_c);
+    of << c_code;
+  }
+  std::cout << "[C-Forge] C generado: " << out_c << "\n";
+
+  // Compile with gcc
+  if (!out_bin.empty()) {
+    // Find cfv_rt.h — search in common locations including next to the binary
+    std::string exe_dir = "";
+    {
+      char buf[4096] = {};
+      ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf)-1);
+      if (n > 0) exe_dir = std::filesystem::path(std::string(buf, n)).parent_path().string();
+    }
+    std::string src_dir = std::filesystem::path(src_path).parent_path().string();
+    std::vector<std::string> inc_paths = {
+      "./include",
+      "../include",
+      exe_dir + "/include",
+      exe_dir + "/../include",
+      src_dir + "/include",
+      src_dir + "/../include",
+      "/usr/local/include/cforge",
+      "/usr/local/lib/cforge/include"
+    };
+    std::string inc_flag = "";
+    for (auto& p : inc_paths) {
+      if (std::filesystem::exists(p + "/cfv_rt.h")) { inc_flag = "-I"+p; break; }
+    }
+
+    std::string cmd = "gcc -O2 " + inc_flag + " " + out_c + " -o " + out_bin + " -lm";
+    if (sdl2_mode) cmd += " -lSDL2 -lSDL2_image -lSDL2_ttf";
+    cmd += " 2>&1";
+    std::cout << "[C-Forge] Compilando: " << cmd << "\n";
+    int ret = system(cmd.c_str());
+    if (ret == 0) std::cout << "[C-Forge] Binario: " << out_bin << "\n";
+    else throw std::runtime_error("gcc fallo con codigo " + std::to_string(ret));
+  }
+}
+
 int main(int argc, char** argv){
   try {
     if (argc >= 2) {
@@ -7199,6 +7896,33 @@ int main(int argc, char** argv){
       }
       if (command == "repl") {
         argc = 1;
+      } else if (command == "compile" || command == "build") {
+        if (argc < 3) throw std::runtime_error("uso: cforge compile archivo.cfv [-o salida] [--sdl2]");
+        std::string src = argv[2];
+        std::string out_bin = "";
+        bool sdl2_mode = false;
+        for (int i=3; i<argc; i++) {
+          std::string a = argv[i];
+          if ((a=="-o"||a=="--output") && i+1<argc) { out_bin=argv[++i]; }
+          else if (a=="--sdl2"||a=="--game") sdl2_mode=true;
+          else if (out_bin.empty() && a[0]!='-') out_bin=a;
+        }
+        std::filesystem::path sp(src);
+        std::string stem = sp.stem().string();
+        std::string out_c = (sp.parent_path() / (stem + ".c")).string();
+        if (out_bin.empty()) out_bin = (sp.parent_path() / stem).string();
+        cfv_base_archivos = sp.has_parent_path() ? sp.parent_path() : std::filesystem::current_path();
+        cfv_compile_file(src, out_c, out_bin, sdl2_mode);
+        return 0;
+      } else if (command == "emit-c") {
+        if (argc < 3) throw std::runtime_error("uso: cforge emit-c archivo.cfv [--sdl2]");
+        std::string src = argv[2];
+        bool sdl2_mode = argc>3 && std::string(argv[3])=="--sdl2";
+        std::filesystem::path sp(src);
+        std::string out_c = (sp.parent_path() / (sp.stem().string() + ".c")).string();
+        cfv_base_archivos = sp.has_parent_path() ? sp.parent_path() : std::filesystem::current_path();
+        cfv_compile_file(src, out_c, "", sdl2_mode);
+        return 0;
       } else if (command == "check" || command == "fmt") {
         if (argc != 3) {
           throw std::runtime_error("uso: cforge " + command + " archivo.cfv");
