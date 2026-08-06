@@ -7132,11 +7132,7 @@ const char* cfv_eval_json(const char* code) {
 }
 
 // Obtener version del interprete
-<<<<<<< Updated upstream
-const char* cfv_version() { return "3.2.0"; }
-=======
 const char* cfv_version() { return "3.6.0"; }
->>>>>>> Stashed changes
 
 // Verificar disponibilidad de SDL2
 int cfv_has_sdl2() {
@@ -7462,6 +7458,26 @@ static std::string cfv_emit_expr(const Value& node, CfvEmitCtx& ctx) {
     auto args = cfv_node_hijos(node);
     return cfv_emit_builtin(val, args, ctx);
   }
+  if (tipo == "MetodoLlamada") {
+    // val = method name, hijos = [obj_node, arg0, arg1, ...]
+    auto hijos = cfv_node_hijos(node);
+    int nh = cfv_ast_size(hijos);
+    auto obj = cfv_emit_expr(cfv_ast_node(hijos, 0), ctx);
+    // Try to map to a known runtime function: obj.method(args)
+    // For now emit as cfv_method_val_methname(obj, args...)
+    std::string s = "cfv_f_" + cfv_mangle(val) + "("+obj;
+    for (int i=1;i<nh;i++) s += "," + cfv_emit_expr(cfv_ast_node(hijos, i), ctx);
+    return s+")";
+  }
+  if (tipo == "Campo") {
+    // val = field name, hijos[0] = object
+    auto obj = cfv_emit_expr(cfv_node_hijo(node, 0), ctx);
+    return "cfv_indice_get("+obj+",cfv_texto(\""+val+"\"))";
+  }
+  if (tipo == "Spread") {
+    // Spread element — emit inner expr
+    return cfv_emit_expr(cfv_node_hijo(node, 0), ctx);
+  }
   if (tipo == "Lista") {
     // hijos of Lista is the elements lista directly
     auto elems = cfv_node_hijos(node);
@@ -7741,6 +7757,22 @@ static void cfv_emit_stmt(const Value& node, CfvEmitCtx& ctx) {
     ctx.out += ind + "cfv_mostrar("+e+");\n";
     return;
   }
+  if (tipo == "Expresion") {
+    // Wrapper around any expression-statement (calls, assignments, etc.)
+    auto inner = cfv_node_hijo(node, 0);
+    std::string it = cfv_node_tipo(inner);
+    // If inner is a statement-like node, dispatch it
+    if (it == "Asignacion" || it == "Declaracion" || it == "Si" ||
+        it == "Mientras" || it == "Para" || it == "Retornar" ||
+        it == "Mostrar" || it == "Expresion") {
+      cfv_emit_stmt(inner, ctx);
+    } else {
+      // Expression (call, etc.) — emit as void statement
+      std::string e = cfv_emit_expr(inner, ctx);
+      if (!e.empty()) ctx.out += ind + "(void)("+e+");\n";
+    }
+    return;
+  }
   // Expression statement (e.g. function calls)
   {
     std::string e = cfv_emit_expr(node, ctx);
@@ -7773,17 +7805,106 @@ static void cfv_collect_fns(const Value& ast, std::vector<std::pair<std::string,
   }
 }
 
+// --- Multi-file module result ---
+struct CfvModuleResult {
+  std::string fns;           // function definitions
+  std::string globals;       // global inits (run in main)
+  std::string global_decls;  // file-scope static CfvVal declarations
+  std::vector<std::pair<std::string,int>> fn_list;
+};
+
+// Compile one AST (file) — recursive for imports
+static CfvModuleResult cfv_compile_module(const Value& ast, bool sdl2_mode,
+                                           std::set<std::string>& visited) {
+  CfvModuleResult res;
+  CfvEmitCtx fn_ctx;  fn_ctx.sdl2 = sdl2_mode; fn_ctx.indent = 0;
+  CfvEmitCtx gl_ctx;  gl_ctx.sdl2 = sdl2_mode; gl_ctx.indent = 1;
+
+  // Collect this file's functions for forward decls
+  cfv_collect_fns(ast, res.fn_list);
+
+  int n = cfv_ast_size(ast);
+  for (int i=0;i<n;i++) {
+    auto node = cfv_ast_node(ast,i);
+    std::string tipo = cfv_node_tipo(node);
+
+    if (tipo == "Importar") {
+      std::string imp_path = cfv_node_valor(node);
+      // Strip surrounding quotes from the string literal lexeme
+      if (!imp_path.empty() && imp_path.front()=='"') imp_path = imp_path.substr(1);
+      if (!imp_path.empty() && imp_path.back()=='"')  imp_path.pop_back();
+      // Resolve: try as-is (CWD), then relative to current base dir
+      std::string resolved = imp_path;
+      if (!std::filesystem::exists(resolved))
+        resolved = (cfv_base_archivos / imp_path).string();
+      if (!std::filesystem::exists(resolved)) continue;
+      try { resolved = std::filesystem::canonical(resolved).string(); } catch(...) {}
+      if (visited.count(resolved)) continue;
+      visited.insert(resolved);
+
+      // Read + parse the imported file
+      std::ifstream f(resolved);
+      if (!f) continue;
+      std::string src((std::istreambuf_iterator<char>(f)), {});
+      auto old_base = cfv_base_archivos;
+      cfv_base_archivos = std::filesystem::path(resolved).parent_path();
+
+      Value tokens = cfv_tokenizar(Value{src});
+      Value imp_ast = cfv_parsear(tokens);
+
+      // Recursively compile the imported module
+      auto sub = cfv_compile_module(imp_ast, sdl2_mode, visited);
+      // Prepend (imports before the file that imports them)
+      res.fns          = sub.fns          + res.fns;
+      res.globals      = sub.globals      + res.globals;
+      res.global_decls = sub.global_decls + res.global_decls;
+      for (auto& p : sub.fn_list) res.fn_list.push_back(p);
+
+      cfv_base_archivos = old_base;
+
+    } else if (tipo == "Funcion") {
+      cfv_emit_stmt(node, fn_ctx);
+    } else if (tipo == "Declaracion") {
+      // Top-level `sea`: declare at file scope, assign in main
+      std::string mname = cfv_mangle(cfv_node_valor(node));
+      res.global_decls += "static CfvVal " + mname + ";\n";
+      auto init_node = cfv_node_hijo(node, 0);
+      std::string ind(gl_ctx.indent * 2, ' ');
+      gl_ctx.out += ind + mname + " = " + cfv_emit_expr(init_node, gl_ctx) + ";\n";
+    } else {
+      // Other global statements — emit in main
+      cfv_emit_stmt(node, gl_ctx);
+    }
+  }
+  res.fns    += fn_ctx.out;
+  res.globals += gl_ctx.out;
+  return res;
+}
+
 static std::string cfv_compile_ast(const Value& ast, bool sdl2_mode) {
   // --- Header ---
   std::string header = "/* Generated by C-Forge compiler v3.6.0 */\n";
   if (sdl2_mode) header += "#define CFV_SDL2\n";
   header += "#include \"cfv_rt.h\"\n\n";
 
-  // --- Forward declarations for user functions ---
+  // --- Compile all modules (main + imports) ---
+  std::set<std::string> visited;
+  // Mark the main file itself so it can't import itself
+  try {
+    std::string self = std::filesystem::canonical(
+      std::filesystem::current_path() / "__main__").string();
+    visited.insert(self);
+  } catch(...) {}
+
+  auto mod = cfv_compile_module(ast, sdl2_mode, visited);
+
+  // --- Forward declarations (all functions across all modules) ---
   std::string fwd;
-  std::vector<std::pair<std::string,int>> fn_list;
-  cfv_collect_fns(ast, fn_list);
-  for (auto& [name, np] : fn_list) {
+  // Deduplicate fn names
+  std::set<std::string> seen_fns;
+  for (auto& [name, np] : mod.fn_list) {
+    if (seen_fns.count(name)) continue;
+    seen_fns.insert(name);
     fwd += "CfvVal " + cfv_fn_name(name) + "(";
     if (np==0) fwd += "void";
     else for (int i=0;i<np;i++) { if(i)fwd+=","; fwd+="CfvVal"; }
@@ -7791,38 +7912,18 @@ static std::string cfv_compile_ast(const Value& ast, bool sdl2_mode) {
   }
   if (!fwd.empty()) fwd += "\n";
 
-  // --- Two passes: functions first, then global stmts ---
-  CfvEmitCtx fn_ctx;
-  fn_ctx.sdl2 = sdl2_mode;
-  fn_ctx.indent = 0;
-
-  CfvEmitCtx main_ctx;
-  main_ctx.sdl2 = sdl2_mode;
-  main_ctx.indent = 1;
-
-  int n = cfv_ast_size(ast);
-  for (int i=0;i<n;i++) {
-    auto node = cfv_ast_node(ast,i);
-    std::string tipo = cfv_node_tipo(node);
-    if (tipo=="Importar") {
-      main_ctx.imports.insert(cfv_node_valor(node));
-      continue;
-    }
-    if (tipo=="Funcion") {
-      cfv_emit_stmt(node, fn_ctx);
-    } else {
-      cfv_emit_stmt(node, main_ctx);
-    }
-  }
-
   // --- main() ---
   std::string main_fn = "int main(int argc, char** argv) {\n";
   main_fn += "    cfv_init(argc, argv);\n";
-  main_fn += main_ctx.out;
+  main_fn += mod.globals;
   if (sdl2_mode) main_fn += "    cfv_juego_terminar();\n";
   main_fn += "    return 0;\n}\n";
 
-  return header + fwd + fn_ctx.out + main_fn;
+  // Global file-scope declarations (from top-level `sea`)
+  std::string gdecls;
+  if (!mod.global_decls.empty()) gdecls = mod.global_decls + "\n";
+
+  return header + gdecls + fwd + mod.fns + main_fn;
 }
 
 static void cfv_compile_file(const std::string& src_path, const std::string& out_c,
@@ -7872,7 +7973,16 @@ static void cfv_compile_file(const std::string& src_path, const std::string& out
       if (std::filesystem::exists(p + "/cfv_rt.h")) { inc_flag = "-I"+p; break; }
     }
 
-    std::string cmd = "gcc -O2 " + inc_flag + " " + out_c + " -o " + out_bin + " -lm";
+    // Detect extra include/lib paths (Homebrew on macOS, /usr/local on Linux)
+    std::string extra_inc, extra_lib;
+    for (auto& d : std::vector<std::string>{"/opt/homebrew/include","/usr/local/include"}) {
+      if (std::filesystem::exists(d)) { extra_inc = " -I"+d; break; }
+    }
+    for (auto& d : std::vector<std::string>{"/opt/homebrew/lib","/usr/local/lib"}) {
+      if (std::filesystem::exists(d)) { extra_lib = " -L"+d; break; }
+    }
+
+    std::string cmd = "gcc -O2 " + inc_flag + extra_inc + extra_lib + " " + out_c + " -o " + out_bin + " -lm";
     if (sdl2_mode) cmd += " -lSDL2 -lSDL2_image -lSDL2_ttf";
     cmd += " 2>&1";
     std::cout << "[C-Forge] Compilando: " << cmd << "\n";

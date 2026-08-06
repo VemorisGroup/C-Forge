@@ -533,11 +533,13 @@ static void cfv_init(int argc, char** argv) {
 /* ── SDL2 game backend (incluye solo si CFV_SDL2) ───────────────────────── */
 #ifdef CFV_SDL2
 #include <SDL2/SDL.h>
-#ifdef CFV_SDL2_TTF
+#include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
+#ifdef CFV_SDL2_TTF
+/* ya incluido */
 #endif
 #ifdef CFV_SDL2_IMG
-#include <SDL2/SDL_image.h>
+/* ya incluido */
 #endif
 
 static SDL_Window*   cfv_sdl_win  = NULL;
@@ -639,13 +641,111 @@ static CfvVal cfv_juego_titulo(CfvVal t) { SDL_SetWindowTitle(cfv_sdl_win,cfv_as
 static CfvVal cfv_juego_terminar(void) {
     if(cfv_sdl_ren) SDL_DestroyRenderer(cfv_sdl_ren);
     if(cfv_sdl_win) SDL_DestroyWindow(cfv_sdl_win);
-#ifdef CFV_SDL2_TTF
-    TTF_Quit();
-#endif
-#ifdef CFV_SDL2_IMG
-    IMG_Quit();
-#endif
-    SDL_Quit();
+    TTF_Quit(); IMG_Quit(); SDL_Quit();
+    return cfv_nulo();
+}
+
+/* ── Builtins SDL2 para código compilado (cfv_f_sdl_*) ─────────────────── */
+#define _CFV_SDL_MAX 512
+static SDL_Window*   _cfv_wins[_CFV_SDL_MAX];
+static SDL_Renderer* _cfv_rens[_CFV_SDL_MAX];
+static SDL_Texture*  _cfv_texs[_CFV_SDL_MAX];
+static int           _cfv_obj_next = 0;
+
+static CfvVal cfv_f_sdl_init(CfvVal flags) {
+    SDL_Init((Uint32)cfv_a_numero(flags).n);
+    TTF_Init(); IMG_Init(IMG_INIT_PNG|IMG_INIT_JPG);
+    return cfv_nulo();
+}
+static CfvVal cfv_f_sdl_ventana(CfvVal titulo, CfvVal ancho, CfvVal alto, CfvVal flags) {
+    int id = _cfv_obj_next++;
+    _cfv_wins[id] = SDL_CreateWindow(cfv_as_cstr(titulo),
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        (int)cfv_a_numero(ancho).n, (int)cfv_a_numero(alto).n,
+        (Uint32)cfv_a_numero(flags).n);
+    return cfv_num(id);
+}
+static CfvVal cfv_f_sdl_renderer(CfvVal vid) {
+    int wid = (int)cfv_a_numero(vid).n;
+    int id  = _cfv_obj_next++;
+    _cfv_rens[id] = SDL_CreateRenderer(_cfv_wins[wid], -1,
+        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    return cfv_num(id);
+}
+static CfvVal cfv_f_sdl_color(CfvVal rid, CfvVal r, CfvVal g, CfvVal b, CfvVal a) {
+    SDL_SetRenderDrawColor(_cfv_rens[(int)cfv_a_numero(rid).n],
+        (Uint8)cfv_a_numero(r).n,(Uint8)cfv_a_numero(g).n,
+        (Uint8)cfv_a_numero(b).n,(Uint8)cfv_a_numero(a).n);
+    return cfv_nulo();
+}
+static CfvVal cfv_f_sdl_limpiar(CfvVal rid) {
+    SDL_RenderClear(_cfv_rens[(int)cfv_a_numero(rid).n]);
+    return cfv_nulo();
+}
+static CfvVal cfv_f_sdl_presentar(CfvVal rid) {
+    SDL_RenderPresent(_cfv_rens[(int)cfv_a_numero(rid).n]);
+    return cfv_nulo();
+}
+static CfvVal cfv_f_sdl_rect(CfvVal rid, CfvVal x, CfvVal y, CfvVal w, CfvVal h, CfvVal relleno) {
+    SDL_Rect rc = {(int)cfv_a_numero(x).n,(int)cfv_a_numero(y).n,
+                   (int)cfv_a_numero(w).n,(int)cfv_a_numero(h).n};
+    SDL_Renderer* ren = _cfv_rens[(int)cfv_a_numero(rid).n];
+    if (cfv_truthy(relleno)) SDL_RenderFillRect(ren,&rc);
+    else                      SDL_RenderDrawRect(ren,&rc);
+    return cfv_nulo();
+}
+static CfvVal cfv_f_sdl_linea(CfvVal rid, CfvVal x1, CfvVal y1, CfvVal x2, CfvVal y2) {
+    SDL_RenderDrawLine(_cfv_rens[(int)cfv_a_numero(rid).n],
+        (int)cfv_a_numero(x1).n,(int)cfv_a_numero(y1).n,
+        (int)cfv_a_numero(x2).n,(int)cfv_a_numero(y2).n);
+    return cfv_nulo();
+}
+static CfvVal cfv_f_sdl_ticks(void)         { return cfv_num((double)SDL_GetTicks()); }
+static CfvVal cfv_f_sdl_esperar(CfvVal ms)  { SDL_Delay((Uint32)cfv_a_numero(ms).n); return cfv_nulo(); }
+static CfvVal cfv_f_sdl_cerrar(void)        { IMG_Quit(); TTF_Quit(); SDL_Quit(); return cfv_nulo(); }
+
+static CfvVal cfv_f_sdl_eventos(void) {
+    CfvVal lista = cfv_lista_nueva();
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+        CfvVal ev = cfv_mapa_nuevo();
+        cfv_map_set(ev.map,"tipo",cfv_num(e.type));
+        if (e.type==SDL_KEYDOWN||e.type==SDL_KEYUP) {
+            cfv_map_set(ev.map,"tecla",cfv_num(e.key.keysym.scancode));
+            cfv_map_set(ev.map,"presionada",cfv_bool(e.type==SDL_KEYDOWN));
+        } else if (e.type==SDL_MOUSEMOTION) {
+            cfv_map_set(ev.map,"x",cfv_num(e.motion.x));
+            cfv_map_set(ev.map,"y",cfv_num(e.motion.y));
+        } else if (e.type==SDL_MOUSEBUTTONDOWN||e.type==SDL_MOUSEBUTTONUP) {
+            cfv_map_set(ev.map,"x",cfv_num(e.button.x));
+            cfv_map_set(ev.map,"y",cfv_num(e.button.y));
+            cfv_map_set(ev.map,"boton",cfv_num(e.button.button));
+        } else if (e.type==SDL_QUIT) {
+            cfv_map_set(ev.map,"salir",cfv_bool(1));
+        }
+        cfv_lst_push(lista.lst,ev);
+    }
+    return lista;
+}
+static CfvVal cfv_f_sdl_cargar_textura(CfvVal rid, CfvVal ruta) {
+    int id = _cfv_obj_next++;
+    _cfv_texs[id] = IMG_LoadTexture(_cfv_rens[(int)cfv_a_numero(rid).n], cfv_as_cstr(ruta));
+    return cfv_num(id);
+}
+static CfvVal cfv_f_sdl_dibujar_textura(CfvVal rid, CfvVal tid,
+    CfvVal dx, CfvVal dy, CfvVal dw, CfvVal dh, CfvVal ang) {
+    SDL_Rect dst={(int)cfv_a_numero(dx).n,(int)cfv_a_numero(dy).n,
+                  (int)cfv_a_numero(dw).n,(int)cfv_a_numero(dh).n};
+    double a=cfv_a_numero(ang).n;
+    SDL_Renderer* ren=_cfv_rens[(int)cfv_a_numero(rid).n];
+    SDL_Texture*  tex=_cfv_texs[(int)cfv_a_numero(tid).n];
+    if (a!=0.0) SDL_RenderCopyEx(ren,tex,NULL,&dst,a,NULL,SDL_FLIP_NONE);
+    else        SDL_RenderCopy(ren,tex,NULL,&dst);
+    return cfv_nulo();
+}
+static CfvVal cfv_f_sdl_destruir_textura(CfvVal tid) {
+    int id=(int)cfv_a_numero(tid).n;
+    if(_cfv_texs[id]){SDL_DestroyTexture(_cfv_texs[id]);_cfv_texs[id]=NULL;}
     return cfv_nulo();
 }
 
