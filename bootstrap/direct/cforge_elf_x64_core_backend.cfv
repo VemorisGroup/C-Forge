@@ -993,8 +993,13 @@ funcion empaquetar_core_elf(codigo: lista, datos: lista): lista {
 }
 
 funcion compilar_programa_core_elf(programa_original: cualquiera): lista {
+    sea errores_ownership: lista = verificar_ownership_core(programa_original)
+    afirmar(
+        longitud(errores_ownership) == 0,
+        si_error_ownership_core(errores_ownership)
+    )
     sea programa: cualquiera = bajar_excepciones_core(
-        bajar_mapas_core(bajar_objetos_core(programa_original))
+        bajar_mapas_core(bajar_objetos_core(bajar_ownership_core(programa_original)))
     )
     sea contexto: cualquiera =
         ContextoELFCore([], [], [], 0, [], "", [], [], 0)

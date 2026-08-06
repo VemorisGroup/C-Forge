@@ -26,7 +26,7 @@ Hay tres emisores escritos en C-Forge:
 - `bootstrap/direct/cforge_elf_x64.cfv`
 - `bootstrap/direct/cforge_pe_x64.cfv`
 
-Además, los tres formatos tienen variantes Core B6.20:
+Además, los tres formatos tienen variantes Core B6.21:
 
 - `bootstrap/direct/cforge_macho_arm64_core.cfv`
 - `bootstrap/direct/cforge_elf_x64_core.cfv`
@@ -37,7 +37,7 @@ cuya forma es `mostrar("texto")`. `make backend-check` genera los artefactos,
 verifica sus cabeceras con `file` y ejecuta únicamente el formato soportado por
 el anfitrión.
 
-`make backend-core-check` construye los compiladores Core B6.20 una vez con
+`make backend-core-check` construye los compiladores Core B6.21 una vez con
 Stage 0 y después ejecuta la emisión con un `PATH` aislado. Las variantes Core
 generan directamente Mach-O, ELF y PE deterministas para variables, aritmética,
 condiciones, ciclos, funciones, listas y texto dinámico. En macOS ARM64 se
@@ -45,11 +45,10 @@ ejecuta Mach-O; en Linux x64 se ejecuta ELF. PE se verifica estructuralmente
 hasta que el mismo gate se ejecute en Windows con el compilador Core habilitado.
 
 Esto demuestra emisión sin enlazador para el alcance probado. El alcance ya
-incluye objetos, clases, métodos, ciclo de vida superior, interfaces, módulos
-fuente, mapas literales con claves de texto y excepciones locales. Las claves
-dinámicas, la propagación de excepciones entre funciones, ownership completo,
-destrucción de ámbitos anidados, depuración, async y biblioteca estándar
-permanecen en progreso.
+incluye objetos, clases, métodos, interfaces, módulos, mapas literales,
+excepciones, ownership Core y destrucción de ámbitos anidados. Las claves
+dinámicas, los préstamos que escapan, regiones, depuración, async y biblioteca
+estándar completa permanecen en progreso.
 
 ## Core IR 1 — base de B6.9
 
@@ -93,6 +92,14 @@ función que ejecuta `lanzar` abandona inmediatamente su cuerpo y el bloque
 `intentar` llamador captura el mensaje sin soporte de excepciones del sistema.
 Las llamadas dentro de expresiones compuestas todavía requieren lowering
 adicional y permanecen en progreso.
+B6.21 incorpora `bootstrap/core_ownership.cfv` al frontend autoalojado y a los
+tres compiladores directos. El pase registra dueño, estado movido, préstamos
+compartidos, préstamo mutable y alias de préstamo. Rechaza uso después de
+mover, movimiento o modificación durante un préstamo y alias mutable
+simultáneo. `bootstrap/core_object_lowering.cfv` baja además destructores en
+orden LIFO para ámbitos anidados y antes de `retornar` o `lanzar`. El gate
+incluye programas válidos, tres programas que deben rechazarse y limpieza
+durante una excepción. Regiones y préstamos que escapan siguen pendientes.
 
 ## Criterio para declarar autonomía completa
 

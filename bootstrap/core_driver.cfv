@@ -10,6 +10,10 @@ estructura ResultadoCompilacionCore {
 funcion compilar_fuente_stage1(fuente: texto): cualquiera {
     sea tokens: lista = tokenizar_core(fuente)
     sea programa: cualquiera = parsear_tokens_core(tokens)
+    sea errores_ownership: lista = verificar_ownership_core(programa)
+    si (longitud(errores_ownership) > 0) {
+        retornar ResultadoCompilacionCore(falso, "", errores_ownership)
+    }
     sea semantica: cualquiera = analizar_semantica_core(programa)
     si (no semantica.valido) {
         retornar ResultadoCompilacionCore(falso, "", semantica.errores)

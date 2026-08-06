@@ -1,0 +1,3 @@
+sea recurso: numero = 42
+sea escritura: numero = prestar_mut(recurso)
+sea segunda: numero = prestar_mut(recurso)

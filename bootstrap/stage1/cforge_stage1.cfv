@@ -353,6 +353,33 @@ funcion primaria_parser_core(estado: cualquiera): cualquiera {
                     "Mover", "mover", token.linea, argumentos
                 )
             }
+            si (token.lexema == "prestar") {
+                afirmar(
+                    longitud(argumentos) == 1,
+                    "prestar requiere un argumento en línea " + a_texto(token.linea)
+                )
+                retornar nodo_ast_core_con_hijos(
+                    "PrestamoCompartido", "prestar", token.linea, argumentos
+                )
+            }
+            si (token.lexema == "prestar_mut") {
+                afirmar(
+                    longitud(argumentos) == 1,
+                    "prestar_mut requiere un argumento en línea " + a_texto(token.linea)
+                )
+                retornar nodo_ast_core_con_hijos(
+                    "PrestamoMutable", "prestar_mut", token.linea, argumentos
+                )
+            }
+            si (token.lexema == "soltar_prestamo") {
+                afirmar(
+                    longitud(argumentos) == 1,
+                    "soltar_prestamo requiere un argumento en línea " + a_texto(token.linea)
+                )
+                retornar nodo_ast_core_con_hijos(
+                    "SoltarPrestamo", "soltar_prestamo", token.linea, argumentos
+                )
+            }
             retornar nodo_ast_core_con_hijos(
                 "Llamada", token.lexema, token.linea, argumentos
             )
@@ -1073,6 +1100,16 @@ funcion tipo_expresion_core(
         }
         retornar tipo_objetivo
     }
+    si (
+        nodo.tipo == "PrestamoCompartido" o
+        nodo.tipo == "PrestamoMutable"
+    ) {
+        retornar tipo_expresion_core(nodo.hijos[0], simbolos, errores)
+    }
+    si (nodo.tipo == "SoltarPrestamo") {
+        tipo_expresion_core(nodo.hijos[0], simbolos, errores)
+        retornar "nulo"
+    }
     si (nodo.tipo == "Indice") {
         sea partes_indice: lista = nodo.hijos
         sea tipo_base: texto =
@@ -1252,6 +1289,408 @@ funcion diagnosticos_semanticos_core(resultado: cualquiera): texto {
         indice = indice + 1
     }
     retornar salida
+}
+
+// ===== bootstrap/core_ownership.cfv =====
+// C-Forge Core Ownership B6.21.
+// Verificación independiente del backend para movimientos y préstamos.
+
+estructura PropiedadCore {
+    nombre: texto
+    movido: booleano
+    prestamos: numero
+    prestamo_mutable: booleano
+    prestado_de: texto
+    alias_mutable: booleano
+    profundidad: numero
+}
+
+estructura ContextoPropiedadCore {
+    valores: lista
+    errores: lista
+    profundidad: numero
+}
+
+funcion nombre_propiedad_core(valor: texto): texto {
+    sea salida: texto = ""
+    sea indice: numero = 0
+    mientras (indice < longitud(valor) y valor[indice] != ":") {
+        salida = salida + valor[indice]
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion indice_propiedad_core(contexto: cualquiera, nombre: texto): numero {
+    sea indice: numero = longitud(contexto.valores) - 1
+    mientras (indice >= 0) {
+        si (contexto.valores[indice].nombre == nombre) { retornar indice }
+        indice = indice - 1
+    }
+    retornar -1
+}
+
+funcion error_propiedad_core(
+    contexto: cualquiera,
+    codigo: texto,
+    linea: numero,
+    mensaje: texto
+) {
+    agregar(
+        contexto.errores,
+        codigo + " línea " + a_texto(linea) + ": " + mensaje
+    )
+}
+
+funcion propiedad_activa_core(
+    contexto: cualquiera,
+    nombre: texto,
+    linea: numero
+): numero {
+    sea indice: numero = indice_propiedad_core(contexto, nombre)
+    si (indice < 0) {
+        error_propiedad_core(
+            contexto, "CFOWN2101", linea,
+            "variable no declarada '" + nombre + "'"
+        )
+        retornar -1
+    }
+    si (contexto.valores[indice].movido) {
+        error_propiedad_core(
+            contexto, "CFOWN2102", linea,
+            "uso después de mover o liberar '" + nombre + "'"
+        )
+        retornar -1
+    }
+    retornar indice
+}
+
+funcion objetivo_identificable_core(
+    nodo: cualquiera,
+    contexto: cualquiera,
+    operacion: texto
+): numero {
+    si (nodo.tipo != "Identificador") {
+        error_propiedad_core(
+            contexto, "CFOWN2103", nodo.linea,
+            operacion + " requiere una variable identificable"
+        )
+        retornar -1
+    }
+    retornar propiedad_activa_core(contexto, nodo.valor, nodo.linea)
+}
+
+funcion analizar_expresion_propiedad_core(
+    nodo: cualquiera,
+    contexto: cualquiera
+) {
+    si (nodo.tipo == "Identificador") {
+        propiedad_activa_core(contexto, nodo.valor, nodo.linea)
+        retornar 0
+    }
+    si (nodo.tipo == "Mover") {
+        sea indice: numero = objetivo_identificable_core(
+            nodo.hijos[0], contexto, "mover"
+        )
+        si (indice >= 0) {
+            sea valor: cualquiera = contexto.valores[indice]
+            si (valor.prestamos > 0 o valor.prestamo_mutable) {
+                error_propiedad_core(
+                    contexto, "CFOWN2104", nodo.linea,
+                    "no se puede mover '" + valor.nombre + "' mientras está prestado"
+                )
+            } sino {
+                valor.movido = verdadero
+            }
+        }
+        retornar 0
+    }
+    si (nodo.tipo == "PrestamoCompartido") {
+        sea indice_compartido: numero = objetivo_identificable_core(
+            nodo.hijos[0], contexto, "prestar"
+        )
+        si (indice_compartido >= 0) {
+            sea propietario: cualquiera = contexto.valores[indice_compartido]
+            si (propietario.prestamo_mutable) {
+                error_propiedad_core(
+                    contexto, "CFOWN2105", nodo.linea,
+                    "'" + propietario.nombre + "' ya tiene un préstamo mutable"
+                )
+            } sino {
+                propietario.prestamos = propietario.prestamos + 1
+            }
+        }
+        retornar 0
+    }
+    si (nodo.tipo == "PrestamoMutable") {
+        sea indice_mutable: numero = objetivo_identificable_core(
+            nodo.hijos[0], contexto, "prestar_mut"
+        )
+        si (indice_mutable >= 0) {
+            sea propietario_mutable: cualquiera = contexto.valores[indice_mutable]
+            si (
+                propietario_mutable.prestamos > 0 o
+                propietario_mutable.prestamo_mutable
+            ) {
+                error_propiedad_core(
+                    contexto, "CFOWN2106", nodo.linea,
+                    "'" + propietario_mutable.nombre + "' ya está prestado"
+                )
+            } sino {
+                propietario_mutable.prestamo_mutable = verdadero
+            }
+        }
+        retornar 0
+    }
+    si (nodo.tipo == "SoltarPrestamo") {
+        sea indice_alias: numero = objetivo_identificable_core(
+            nodo.hijos[0], contexto, "soltar_prestamo"
+        )
+        si (indice_alias >= 0) {
+            sea alias: cualquiera = contexto.valores[indice_alias]
+            si (alias.prestado_de == "") {
+                error_propiedad_core(
+                    contexto, "CFOWN2107", nodo.linea,
+                    "'" + alias.nombre + "' no es un préstamo"
+                )
+            } sino {
+                sea indice_dueno: numero = indice_propiedad_core(
+                    contexto, alias.prestado_de
+                )
+                si (indice_dueno >= 0) {
+                    sea dueno: cualquiera = contexto.valores[indice_dueno]
+                    si (alias.alias_mutable) {
+                        dueno.prestamo_mutable = falso
+                    } sino {
+                        dueno.prestamos = dueno.prestamos - 1
+                    }
+                }
+                alias.movido = verdadero
+            }
+        }
+        retornar 0
+    }
+    sea indice_hijo: numero = 0
+    mientras (indice_hijo < longitud(nodo.hijos)) {
+        analizar_expresion_propiedad_core(nodo.hijos[indice_hijo], contexto)
+        indice_hijo = indice_hijo + 1
+    }
+}
+
+funcion liberar_ambito_propiedad_core(
+    contexto: cualquiera,
+    profundidad: numero
+) {
+    sea indice: numero = longitud(contexto.valores) - 1
+    mientras (indice >= 0) {
+        sea valor: cualquiera = contexto.valores[indice]
+        si (valor.profundidad == profundidad y valor.prestado_de != "" y no valor.movido) {
+            sea indice_dueno: numero = indice_propiedad_core(
+                contexto, valor.prestado_de
+            )
+            si (indice_dueno >= 0) {
+                sea dueno: cualquiera = contexto.valores[indice_dueno]
+                si (valor.alias_mutable) {
+                    dueno.prestamo_mutable = falso
+                } sino {
+                    dueno.prestamos = dueno.prestamos - 1
+                }
+            }
+            valor.movido = verdadero
+        }
+        indice = indice - 1
+    }
+    sea conservados: lista = []
+    indice = 0
+    mientras (indice < longitud(contexto.valores)) {
+        si (contexto.valores[indice].profundidad < profundidad) {
+            agregar(conservados, contexto.valores[indice])
+        }
+        indice = indice + 1
+    }
+    contexto.valores = conservados
+}
+
+funcion analizar_bloque_propiedad_core(
+    bloque: cualquiera,
+    contexto: cualquiera
+) {
+    contexto.profundidad = contexto.profundidad + 1
+    sea profundidad_actual: numero = contexto.profundidad
+    sea indice: numero = 0
+    mientras (indice < longitud(bloque.hijos)) {
+        analizar_sentencia_propiedad_core(bloque.hijos[indice], contexto)
+        indice = indice + 1
+    }
+    liberar_ambito_propiedad_core(contexto, profundidad_actual)
+    contexto.profundidad = contexto.profundidad - 1
+}
+
+funcion analizar_declaracion_propiedad_core(
+    nodo: cualquiera,
+    contexto: cualquiera
+) {
+    sea nombre: texto = nombre_propiedad_core(nodo.valor)
+    si (indice_propiedad_core(contexto, nombre) >= 0) {
+        error_propiedad_core(
+            contexto, "CFOWN2108", nodo.linea,
+            "variable duplicada '" + nombre + "'"
+        )
+        retornar 0
+    }
+    sea inicializador: cualquiera = nodo.hijos[0]
+    analizar_expresion_propiedad_core(inicializador, contexto)
+    sea prestado_de: texto = ""
+    sea mutable: booleano = falso
+    si (
+        inicializador.tipo == "PrestamoCompartido" o
+        inicializador.tipo == "PrestamoMutable"
+    ) {
+        si (inicializador.hijos[0].tipo == "Identificador") {
+            prestado_de = inicializador.hijos[0].valor
+            mutable = inicializador.tipo == "PrestamoMutable"
+        }
+    }
+    agregar(
+        contexto.valores,
+        PropiedadCore(
+            nombre, falso, 0, falso,
+            prestado_de, mutable, contexto.profundidad
+        )
+    )
+}
+
+funcion analizar_sentencia_propiedad_core(
+    nodo: cualquiera,
+    contexto: cualquiera
+) {
+    si (nodo.tipo == "Declaracion") {
+        analizar_declaracion_propiedad_core(nodo, contexto)
+        retornar 0
+    }
+    si (nodo.tipo == "Asignacion") {
+        si (nodo.hijos[0].tipo == "Identificador") {
+            sea indice: numero = propiedad_activa_core(
+                contexto, nodo.hijos[0].valor, nodo.linea
+            )
+            si (indice >= 0) {
+                sea destino: cualquiera = contexto.valores[indice]
+                si (destino.prestamos > 0 o destino.prestamo_mutable) {
+                    error_propiedad_core(
+                        contexto, "CFOWN2109", nodo.linea,
+                        "no se puede modificar '" + destino.nombre + "' mientras está prestado"
+                    )
+                }
+            }
+        } sino {
+            analizar_expresion_propiedad_core(nodo.hijos[0], contexto)
+        }
+        analizar_expresion_propiedad_core(nodo.hijos[1], contexto)
+        retornar 0
+    }
+    si (nodo.tipo == "Si") {
+        analizar_expresion_propiedad_core(nodo.hijos[0], contexto)
+        analizar_bloque_propiedad_core(nodo.hijos[1], contexto)
+        si (longitud(nodo.hijos) > 2) {
+            analizar_bloque_propiedad_core(nodo.hijos[2], contexto)
+        }
+        retornar 0
+    }
+    si (nodo.tipo == "Mientras") {
+        analizar_expresion_propiedad_core(nodo.hijos[0], contexto)
+        analizar_bloque_propiedad_core(nodo.hijos[1], contexto)
+        retornar 0
+    }
+    si (nodo.tipo == "Intentar") {
+        analizar_bloque_propiedad_core(nodo.hijos[0], contexto)
+        contexto.profundidad = contexto.profundidad + 1
+        agregar(
+            contexto.valores,
+            PropiedadCore(nodo.valor, falso, 0, falso, "", falso, contexto.profundidad)
+        )
+        sea indice_captura: numero = 0
+        mientras (indice_captura < longitud(nodo.hijos[1].hijos)) {
+            analizar_sentencia_propiedad_core(
+                nodo.hijos[1].hijos[indice_captura], contexto
+            )
+            indice_captura = indice_captura + 1
+        }
+        contexto.profundidad = contexto.profundidad - 1
+        retornar 0
+    }
+    si (nodo.tipo == "Funcion") {
+        sea valores_anteriores: lista = contexto.valores
+        contexto.valores = []
+        contexto.profundidad = 0
+        sea parametro: numero = 0
+        mientras (parametro + 1 < longitud(nodo.hijos)) {
+            agregar(
+                contexto.valores,
+                PropiedadCore(
+                    nombre_propiedad_core(nodo.hijos[parametro].valor),
+                    falso, 0, falso, "", falso, 0
+                )
+            )
+            parametro = parametro + 1
+        }
+        analizar_bloque_propiedad_core(nodo.hijos[parametro], contexto)
+        contexto.valores = valores_anteriores
+        contexto.profundidad = 0
+        retornar 0
+    }
+    si (
+        nodo.tipo == "Clase" o nodo.tipo == "Estructura" o
+        nodo.tipo == "Interfaz" o nodo.tipo == "Importar"
+    ) { retornar 0 }
+    sea indice_hijo: numero = 0
+    mientras (indice_hijo < longitud(nodo.hijos)) {
+        analizar_expresion_propiedad_core(nodo.hijos[indice_hijo], contexto)
+        indice_hijo = indice_hijo + 1
+    }
+}
+
+funcion verificar_ownership_core(programa: cualquiera): cualquiera {
+    sea contexto: cualquiera = ContextoPropiedadCore([], [], 0)
+    sea indice: numero = 0
+    mientras (indice < longitud(programa.hijos)) {
+        analizar_sentencia_propiedad_core(programa.hijos[indice], contexto)
+        indice = indice + 1
+    }
+    retornar contexto.errores
+}
+
+funcion si_error_ownership_core(errores: lista): texto {
+    si (longitud(errores) == 0) { retornar "" }
+    sea salida: texto = errores[0]
+    sea indice: numero = 1
+    mientras (indice < longitud(errores)) {
+        salida = salida + "\n" + errores[indice]
+        indice = indice + 1
+    }
+    retornar salida
+}
+
+funcion bajar_expresion_ownership_core(nodo: cualquiera): cualquiera {
+    si (
+        nodo.tipo == "Mover" o nodo.tipo == "PrestamoCompartido" o
+        nodo.tipo == "PrestamoMutable"
+    ) {
+        retornar bajar_expresion_ownership_core(nodo.hijos[0])
+    }
+    si (nodo.tipo == "SoltarPrestamo") {
+        retornar nodo_ast_core("Numero", "0", nodo.linea)
+    }
+    sea hijos: lista = []
+    sea indice: numero = 0
+    mientras (indice < longitud(nodo.hijos)) {
+        agregar(hijos, bajar_expresion_ownership_core(nodo.hijos[indice]))
+        indice = indice + 1
+    }
+    retornar nodo_ast_core_con_hijos(nodo.tipo, nodo.valor, nodo.linea, hijos)
+}
+
+funcion bajar_ownership_core(programa: cualquiera): cualquiera {
+    retornar bajar_expresion_ownership_core(programa)
 }
 
 // ===== bootstrap/core_runtime.cfv =====
@@ -1528,6 +1967,15 @@ funcion emitir_expresion_core(
     sea hijos: lista = nodo.hijos
     si (nodo.tipo == "Mover") {
         retornar emitir_expresion_core(hijos[0], contexto)
+    }
+    si (
+        nodo.tipo == "PrestamoCompartido" o
+        nodo.tipo == "PrestamoMutable"
+    ) {
+        retornar emitir_expresion_core(hijos[0], contexto)
+    }
+    si (nodo.tipo == "SoltarPrestamo") {
+        retornar "Value()"
     }
     si (nodo.tipo == "Lista") {
         retornar "cfv_list(" + emitir_argumentos_core(hijos, 0, contexto) + ")"
@@ -1834,6 +2282,10 @@ estructura ResultadoCompilacionCore {
 funcion compilar_fuente_stage1(fuente: texto): cualquiera {
     sea tokens: lista = tokenizar_core(fuente)
     sea programa: cualquiera = parsear_tokens_core(tokens)
+    sea errores_ownership: lista = verificar_ownership_core(programa)
+    si (longitud(errores_ownership) > 0) {
+        retornar ResultadoCompilacionCore(falso, "", errores_ownership)
+    }
     sea semantica: cualquiera = analizar_semantica_core(programa)
     si (no semantica.valido) {
         retornar ResultadoCompilacionCore(falso, "", semantica.errores)

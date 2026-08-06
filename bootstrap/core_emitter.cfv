@@ -258,6 +258,15 @@ funcion emitir_expresion_core(
     si (nodo.tipo == "Mover") {
         retornar emitir_expresion_core(hijos[0], contexto)
     }
+    si (
+        nodo.tipo == "PrestamoCompartido" o
+        nodo.tipo == "PrestamoMutable"
+    ) {
+        retornar emitir_expresion_core(hijos[0], contexto)
+    }
+    si (nodo.tipo == "SoltarPrestamo") {
+        retornar "Value()"
+    }
     si (nodo.tipo == "Lista") {
         retornar "cfv_list(" + emitir_argumentos_core(hijos, 0, contexto) + ")"
     }

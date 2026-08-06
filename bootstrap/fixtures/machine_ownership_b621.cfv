@@ -1,0 +1,7 @@
+sea recurso: numero = 42
+sea lectura: numero = prestar(recurso)
+soltar_prestamo(lectura)
+sea escritura: numero = prestar_mut(recurso)
+soltar_prestamo(escritura)
+sea destino: numero = mover(recurso)
+mostrar("C-FORGE-B6.21-OWNERSHIP-OK")

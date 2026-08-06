@@ -46,6 +46,7 @@ bootstrap-bundle:
 		echo '// Archivo generado únicamente a partir de componentes escritos en .cfv.'; \
 		for source in bootstrap/core_lexer.cfv bootstrap/core_ast.cfv \
 			bootstrap/core_parser.cfv bootstrap/core_semantics.cfv \
+			bootstrap/core_ownership.cfv \
 			bootstrap/core_runtime.cfv bootstrap/core_emitter.cfv \
 			bootstrap/core_driver.cfv; do \
 			echo; echo "// ===== $$source ====="; cat "$$source"; \
@@ -66,6 +67,7 @@ backend-core-bundle:
 				bootstrap/core_parser.cfv bootstrap/core_ir.cfv \
 				bootstrap/core_object_lowering.cfv bootstrap/core_map_lowering.cfv \
 				bootstrap/core_exception_lowering.cfv \
+				bootstrap/core_ownership.cfv \
 				bootstrap/core_modules.cfv; do cat "$$source"; echo; done; \
 			awk '/^sea argumentos[^:]*: lista = argumentos_programa\(\)/ { exit } { print }' "$$base"; \
 			cat "$$backend"; \
@@ -329,6 +331,33 @@ backend-core-check: backend-core-bundle
 		bootstrap/fixtures/machine_exception_calls_b620.cfv -o "$$dir/excepciones-funcion.exe" >/dev/null; \
 	env PATH=/nonexistent "$$dir/elf-core" \
 		bootstrap/fixtures/machine_exception_calls_b620.cfv -o "$$dir/excepciones-funcion-elf" >/dev/null; \
+	env PATH=/nonexistent "$$dir/macho-core" \
+		bootstrap/fixtures/machine_ownership_b621.cfv -o "$$dir/ownership-macho" >/dev/null; \
+	env PATH=/nonexistent "$$dir/pe-core" \
+		bootstrap/fixtures/machine_ownership_b621.cfv -o "$$dir/ownership.exe" >/dev/null; \
+	env PATH=/nonexistent "$$dir/elf-core" \
+		bootstrap/fixtures/machine_ownership_b621.cfv -o "$$dir/ownership-elf" >/dev/null; \
+	env PATH=/nonexistent "$$dir/macho-core" \
+		bootstrap/fixtures/machine_nested_lifecycle_b621.cfv -o "$$dir/ambitos-macho" >/dev/null; \
+	env PATH=/nonexistent "$$dir/pe-core" \
+		bootstrap/fixtures/machine_nested_lifecycle_b621.cfv -o "$$dir/ambitos.exe" >/dev/null; \
+	env PATH=/nonexistent "$$dir/elf-core" \
+		bootstrap/fixtures/machine_nested_lifecycle_b621.cfv -o "$$dir/ambitos-elf" >/dev/null; \
+	env PATH=/nonexistent "$$dir/macho-core" \
+		bootstrap/fixtures/machine_exception_cleanup_b621.cfv -o "$$dir/limpieza-error-macho" >/dev/null; \
+	env PATH=/nonexistent "$$dir/pe-core" \
+		bootstrap/fixtures/machine_exception_cleanup_b621.cfv -o "$$dir/limpieza-error.exe" >/dev/null; \
+	env PATH=/nonexistent "$$dir/elf-core" \
+		bootstrap/fixtures/machine_exception_cleanup_b621.cfv -o "$$dir/limpieza-error-elf" >/dev/null; \
+	for invalido in \
+		bootstrap/fixtures/machine_ownership_use_after_move_b621.cfv \
+		bootstrap/fixtures/machine_ownership_move_borrowed_b621.cfv \
+		bootstrap/fixtures/machine_ownership_alias_b621.cfv; do \
+		if env PATH=/nonexistent "$$dir/macho-core" "$$invalido" \
+			-o "$$dir/ownership-invalido" >/dev/null 2>&1; then \
+			echo "ownership inválido aceptado: $$invalido" >&2; exit 1; \
+		fi; \
+	done; \
 	if env PATH=/nonexistent "$$dir/macho-core" \
 		bootstrap/fixtures/machine_interfaces_invalid_b615.cfv \
 		-o "$$dir/interfaz-invalida" >/dev/null 2>&1; then \
@@ -372,6 +401,15 @@ backend-core-check: backend-core-bundle
 	file "$$dir/excepciones-funcion-macho" | grep -q "Mach-O 64-bit executable arm64"; \
 	file "$$dir/excepciones-funcion.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/excepciones-funcion-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
+	file "$$dir/ownership-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/ownership.exe" | grep -q "PE32+ executable.*x86-64"; \
+	file "$$dir/ownership-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
+	file "$$dir/ambitos-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/ambitos.exe" | grep -q "PE32+ executable.*x86-64"; \
+	file "$$dir/ambitos-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
+	file "$$dir/limpieza-error-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/limpieza-error.exe" | grep -q "PE32+ executable.*x86-64"; \
+	file "$$dir/limpieza-error-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
 	if [ "$(UNAME)" = "Darwin" ] && [ "$(ARCH)" = "arm64" ]; then \
 		test "$$($$dir/uno-macho)" = "C-FORGE-B6.7-OK"; \
 		test "$$($$dir/objetos-macho)" = "C-FORGE-B6.11-OBJECT-OK"; \
@@ -383,6 +421,9 @@ backend-core-check: backend-core-bundle
 		test "$$($$dir/mapas-macho)" = "C-FORGE-B6.17-MAPS-OK"; \
 		test "$$($$dir/excepciones-macho)" = "$$(printf 'saldo insuficiente\ncaptura completada')"; \
 		test "$$($$dir/excepciones-funcion-macho)" = "$$(printf 'saldo insuficiente desde funcion\npropagacion capturada')"; \
+		test "$$($$dir/ownership-macho)" = "C-FORGE-B6.21-OWNERSHIP-OK"; \
+		test "$$($$dir/ambitos-macho)" = "$$(printf 'dentro\ndestruir interior\nfuera\ndestruir exterior')"; \
+		test "$$($$dir/limpieza-error-macho)" = "$$(printf 'limpieza antes del error\nerror controlado')"; \
 	fi; \
 	if [ "$(UNAME)" = "Linux" ] && [ "$(ARCH)" = "x86_64" ]; then \
 		test "$$($$dir/uno-elf)" = "C-FORGE-B6.7-OK"; \
@@ -395,8 +436,11 @@ backend-core-check: backend-core-bundle
 		test "$$($$dir/mapas-elf)" = "C-FORGE-B6.17-MAPS-OK"; \
 		test "$$($$dir/excepciones-elf)" = "$$(printf 'saldo insuficiente\ncaptura completada')"; \
 		test "$$($$dir/excepciones-funcion-elf)" = "$$(printf 'saldo insuficiente desde funcion\npropagacion capturada')"; \
+		test "$$($$dir/ownership-elf)" = "C-FORGE-B6.21-OWNERSHIP-OK"; \
+		test "$$($$dir/ambitos-elf)" = "$$(printf 'dentro\ndestruir interior\nfuera\ndestruir exterior')"; \
+		test "$$($$dir/limpieza-error-elf)" = "$$(printf 'limpieza antes del error\nerror controlado')"; \
 	fi; \
-	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.20 con ABI de excepciones"
+	echo "  ✓ Mach-O ARM64, ELF x64 y PE x64 Core B6.21 con ownership y RAII"
 
 ## Verificar el IR común de objetos que consumirán los tres backends.
 ir-core-check:

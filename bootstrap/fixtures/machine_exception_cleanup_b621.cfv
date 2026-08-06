@@ -1,0 +1,13 @@
+clase RecursoTemporal {
+    campo valor: numero
+    metodo destruir() {
+        mostrar("limpieza antes del error")
+    }
+}
+
+intentar {
+    sea temporal: RecursoTemporal = RecursoTemporal(1)
+    lanzar "error controlado"
+} capturar (error) {
+    mostrar(error)
+}

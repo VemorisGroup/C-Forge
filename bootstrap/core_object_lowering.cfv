@@ -378,6 +378,49 @@ funcion bajar_sentencia_objetos_core(nodo: cualquiera, contexto: cualquiera): li
         nodo.hijos[0].tipo == "LlamadaMetodo") {
         retornar expandir_invocacion_mutable_core(nodo.hijos[0], contexto)
     }
+    si (nodo.tipo == "Si") {
+        sea hijos_si: lista = [
+            bajar_expresion_objetos_core(nodo.hijos[0], contexto),
+            bajar_bloque_objetos_core(nodo.hijos[1], contexto)
+        ]
+        si (longitud(nodo.hijos) > 2) {
+            agregar(hijos_si, bajar_bloque_objetos_core(nodo.hijos[2], contexto))
+        }
+        retornar [nodo_ast_core_con_hijos("Si", nodo.valor, nodo.linea, hijos_si)]
+    }
+    si (nodo.tipo == "Mientras") {
+        retornar [nodo_ast_core_con_hijos(
+            "Mientras", nodo.valor, nodo.linea,
+            [
+                bajar_expresion_objetos_core(nodo.hijos[0], contexto),
+                bajar_bloque_objetos_core(nodo.hijos[1], contexto)
+            ]
+        )]
+    }
+    si (nodo.tipo == "Intentar") {
+        retornar [nodo_ast_core_con_hijos(
+            "Intentar", nodo.valor, nodo.linea,
+            [
+                bajar_bloque_objetos_core(nodo.hijos[0], contexto),
+                bajar_bloque_objetos_core(nodo.hijos[1], contexto)
+            ]
+        )]
+    }
+    si (nodo.tipo == "Funcion") {
+        sea hijos_funcion: lista = []
+        sea indice_funcion: numero = 0
+        mientras (indice_funcion + 1 < longitud(nodo.hijos)) {
+            agregar(hijos_funcion, nodo.hijos[indice_funcion])
+            indice_funcion = indice_funcion + 1
+        }
+        agregar(
+            hijos_funcion,
+            bajar_bloque_objetos_core(nodo.hijos[indice_funcion], contexto)
+        )
+        retornar [nodo_ast_core_con_hijos(
+            "Funcion", nodo.valor, nodo.linea, hijos_funcion
+        )]
+    }
     sea hijos: lista = []
     sea indice: numero = 0
     mientras (indice < longitud(nodo.hijos)) {
@@ -385,6 +428,86 @@ funcion bajar_sentencia_objetos_core(nodo: cualquiera, contexto: cualquiera): li
         indice = indice + 1
     }
     retornar [nodo_ast_core_con_hijos(nodo.tipo, nodo.valor, nodo.linea, hijos)]
+}
+
+funcion destrucciones_objetos_core(
+    contexto: cualquiera,
+    inicio: numero
+): lista {
+    sea salida: lista = []
+    sea instancia: numero = longitud(contexto.instancias) - 1
+    mientras (instancia >= inicio) {
+        sea registro: cualquiera = contexto.instancias[instancia]
+        sea tipo_ast: cualquiera = nodo_tipo_ast_core(contexto, registro.tipo)
+        si (indice_metodo_ast_tipo_core(tipo_ast, "destruir") >= 0) {
+            sea llamada: cualquiera = nodo_ast_core_con_hijos(
+                "LlamadaMetodo", "destruir", 0,
+                [nodo_ast_core("Identificador", registro.nombre, 0)]
+            )
+            sea pasos: lista = expandir_invocacion_mutable_core(llamada, contexto)
+            sea paso: numero = 0
+            mientras (paso < longitud(pasos)) {
+                agregar(salida, pasos[paso])
+                paso = paso + 1
+            }
+        }
+        instancia = instancia - 1
+    }
+    retornar salida
+}
+
+funcion retirar_instancias_objetos_core(
+    contexto: cualquiera,
+    inicio: numero
+) {
+    sea conservadas: lista = []
+    sea indice: numero = 0
+    mientras (indice < inicio) {
+        agregar(conservadas, contexto.instancias[indice])
+        indice = indice + 1
+    }
+    contexto.instancias = conservadas
+}
+
+funcion bajar_bloque_objetos_core(
+    bloque: cualquiera,
+    contexto: cualquiera
+): cualquiera {
+    sea inicio: numero = longitud(contexto.instancias)
+    sea salida: lista = []
+    sea termino: booleano = falso
+    sea indice: numero = 0
+    mientras (indice < longitud(bloque.hijos)) {
+        sea sentencia: cualquiera = bloque.hijos[indice]
+        sea bajadas: lista = bajar_sentencia_objetos_core(sentencia, contexto)
+        si (
+            sentencia.tipo == "Retornar" o sentencia.tipo == "Lanzar"
+        ) {
+            sea limpiezas: lista = destrucciones_objetos_core(contexto, inicio)
+            sea limpieza: numero = 0
+            mientras (limpieza < longitud(limpiezas)) {
+                agregar(salida, limpiezas[limpieza])
+                limpieza = limpieza + 1
+            }
+            termino = verdadero
+        }
+        sea posicion: numero = 0
+        mientras (posicion < longitud(bajadas)) {
+            agregar(salida, bajadas[posicion])
+            posicion = posicion + 1
+        }
+        indice = indice + 1
+    }
+    si (no termino) {
+        sea finales: lista = destrucciones_objetos_core(contexto, inicio)
+        sea final: numero = 0
+        mientras (final < longitud(finales)) {
+            agregar(salida, finales[final])
+            final = final + 1
+        }
+    }
+    retirar_instancias_objetos_core(contexto, inicio)
+    retornar nodo_ast_core_con_hijos("Bloque", "{}", bloque.linea, salida)
 }
 
 funcion bajar_objetos_core(programa: cualquiera): cualquiera {
@@ -404,39 +527,24 @@ funcion bajar_objetos_core(programa: cualquiera): cualquiera {
         }
         indice = indice + 1
     }
+    sea sentencias_programa: lista = []
     indice = 0
     mientras (indice < longitud(programa.hijos)) {
         sea nodo: cualquiera = programa.hijos[indice]
         si (nodo.tipo != "Estructura" y nodo.tipo != "Clase" y
             nodo.tipo != "Interfaz") {
-            sea bajadas: lista = bajar_sentencia_objetos_core(nodo, contexto)
-            sea posicion: numero = 0
-            mientras (posicion < longitud(bajadas)) {
-                agregar(salida, bajadas[posicion])
-                posicion = posicion + 1
-            }
+            agregar(sentencias_programa, nodo)
         }
         indice = indice + 1
     }
-    sea instancia: numero = longitud(contexto.instancias) - 1
-    mientras (instancia >= 0) {
-        sea registro: cualquiera = contexto.instancias[instancia]
-        sea tipo_ast: cualquiera = nodo_tipo_ast_core(contexto, registro.tipo)
-        si (indice_metodo_ast_tipo_core(tipo_ast, "destruir") >= 0) {
-            sea llamada_destructor: cualquiera = nodo_ast_core_con_hijos(
-                "LlamadaMetodo", "destruir", 0,
-                [nodo_ast_core("Identificador", registro.nombre, 0)]
-            )
-            sea destruccion: lista = expandir_invocacion_mutable_core(
-                llamada_destructor, contexto
-            )
-            sea paso: numero = 0
-            mientras (paso < longitud(destruccion)) {
-                agregar(salida, destruccion[paso])
-                paso = paso + 1
-            }
-        }
-        instancia = instancia - 1
+    sea bloque_programa: cualquiera = bajar_bloque_objetos_core(
+        nodo_ast_core_con_hijos("Bloque", "{}", 1, sentencias_programa),
+        contexto
+    )
+    sea posicion_programa: numero = 0
+    mientras (posicion_programa < longitud(bloque_programa.hijos)) {
+        agregar(salida, bloque_programa.hijos[posicion_programa])
+        posicion_programa = posicion_programa + 1
     }
     retornar nodo_ast_core_con_hijos("Programa", "", 1, salida)
 }

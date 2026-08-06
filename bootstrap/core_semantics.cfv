@@ -185,6 +185,16 @@ funcion tipo_expresion_core(
         }
         retornar tipo_objetivo
     }
+    si (
+        nodo.tipo == "PrestamoCompartido" o
+        nodo.tipo == "PrestamoMutable"
+    ) {
+        retornar tipo_expresion_core(nodo.hijos[0], simbolos, errores)
+    }
+    si (nodo.tipo == "SoltarPrestamo") {
+        tipo_expresion_core(nodo.hijos[0], simbolos, errores)
+        retornar "nulo"
+    }
     si (nodo.tipo == "Indice") {
         sea partes_indice: lista = nodo.hijos
         sea tipo_base: texto =

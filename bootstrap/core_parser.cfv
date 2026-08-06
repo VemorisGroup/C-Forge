@@ -156,6 +156,33 @@ funcion primaria_parser_core(estado: cualquiera): cualquiera {
                     "Mover", "mover", token.linea, argumentos
                 )
             }
+            si (token.lexema == "prestar") {
+                afirmar(
+                    longitud(argumentos) == 1,
+                    "prestar requiere un argumento en línea " + a_texto(token.linea)
+                )
+                retornar nodo_ast_core_con_hijos(
+                    "PrestamoCompartido", "prestar", token.linea, argumentos
+                )
+            }
+            si (token.lexema == "prestar_mut") {
+                afirmar(
+                    longitud(argumentos) == 1,
+                    "prestar_mut requiere un argumento en línea " + a_texto(token.linea)
+                )
+                retornar nodo_ast_core_con_hijos(
+                    "PrestamoMutable", "prestar_mut", token.linea, argumentos
+                )
+            }
+            si (token.lexema == "soltar_prestamo") {
+                afirmar(
+                    longitud(argumentos) == 1,
+                    "soltar_prestamo requiere un argumento en línea " + a_texto(token.linea)
+                )
+                retornar nodo_ast_core_con_hijos(
+                    "SoltarPrestamo", "soltar_prestamo", token.linea, argumentos
+                )
+            }
             retornar nodo_ast_core_con_hijos(
                 "Llamada", token.lexema, token.linea, argumentos
             )

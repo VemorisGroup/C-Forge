@@ -174,6 +174,9 @@ B6.19 reduce excepciones locales `intentar`/`capturar`/`lanzar` a un control de
 flujo común y las genera sin toolchain externa para Mach-O, ELF y PE. La
 ABI B6.20 propaga errores de llamadas directas entre funciones mediante
 registros propios de C-Forge y permite capturarlos sin excepciones C++.
+B6.21 añade un verificador de ownership escrito en C-Forge para `mover`,
+`prestar`, `prestar_mut` y `soltar_prestamo`, más destrucción LIFO al salir de
+ámbitos anidados, retornar o lanzar. Los tres backends comparten el mismo pase.
 
 No se anunciará compatibilidad total con una plataforma hasta que instalación,
 ejecución, pruebas y desinstalación estén verificadas en ella.

@@ -1,0 +1,20 @@
+clase RecursoExterior {
+    campo valor: numero
+    metodo destruir() {
+        mostrar("destruir exterior")
+    }
+}
+
+clase RecursoInterior {
+    campo valor: numero
+    metodo destruir() {
+        mostrar("destruir interior")
+    }
+}
+
+sea exterior: RecursoExterior = RecursoExterior(1)
+si (verdadero) {
+    sea interior: RecursoInterior = RecursoInterior(2)
+    mostrar("dentro")
+}
+mostrar("fuera")
