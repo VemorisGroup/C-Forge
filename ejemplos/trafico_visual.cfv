@@ -1,0 +1,401 @@
+// trafico_visual.cfv — Simulador de tráfico urbano con interfaz SDL2
+// C-Forge v3.6.2 · Requiere: ./cforgev trafico_visual.cfv
+importar "stdlib/sdl.cfv"
+
+// ── Configuración ─────────────────────────────────────────────────────────────
+sea W = 900
+sea H = 600
+sea PANEL_X = 640  // panel derecho desde aquí
+
+// Posiciones de nodos en pantalla (zona izquierda 640x600)
+sea POS = {
+    "A": {"x": 80,  "y": 80},
+    "B": {"x": 320, "y": 80},
+    "C": {"x": 80,  "y": 300},
+    "D": {"x": 320, "y": 300},
+    "E": {"x": 560, "y": 80},
+    "F": {"x": 80,  "y": 520},
+    "G": {"x": 320, "y": 520},
+    "H": {"x": 560, "y": 300}
+}
+
+// Colores de vehículos
+sea COLORES = [
+    {"r":255,"g":80, "b":80 },
+    {"r":80, "g":255,"b":80 },
+    {"r":80, "g":150,"b":255},
+    {"r":255,"g":220,"b":0  },
+    {"r":0,  "g":220,"b":220},
+    {"r":220,"g":80, "b":220},
+    {"r":255,"g":140,"b":0  },
+    {"r":200,"g":200,"b":200},
+    {"r":255,"g":150,"b":200}
+]
+
+// ── Grafo ─────────────────────────────────────────────────────────────────────
+funcion crear_ciudad(): mapa {
+    sea aristas = {
+        "A": [{"dest":"B","w":4},{"dest":"C","w":2}],
+        "B": [{"dest":"A","w":4},{"dest":"D","w":5},{"dest":"E","w":1}],
+        "C": [{"dest":"A","w":2},{"dest":"F","w":8},{"dest":"D","w":3}],
+        "D": [{"dest":"B","w":5},{"dest":"C","w":3},{"dest":"G","w":2}],
+        "E": [{"dest":"B","w":1},{"dest":"H","w":6}],
+        "F": [{"dest":"C","w":8},{"dest":"G","w":4}],
+        "G": [{"dest":"D","w":2},{"dest":"F","w":4},{"dest":"H","w":1}],
+        "H": [{"dest":"E","w":6},{"dest":"G","w":1}]
+    }
+    sea nodos = ["A","B","C","D","E","F","G","H"]
+    retornar {"nodos": nodos, "aristas": aristas}
+}
+
+// ── Dijkstra ──────────────────────────────────────────────────────────────────
+funcion min_libre(nodos: lista, dist: mapa, vis: mapa): texto {
+    sea mejor = nulo
+    sea md = 999999
+    para n en nodos {
+        si (no vis[n] y dist[n] < md) {
+            md = dist[n]
+            mejor = n
+        }
+    }
+    retornar mejor
+}
+
+funcion invertir(lst: lista): lista {
+    sea r = []
+    sea i = longitud(lst) - 1
+    mientras (i >= 0) { agregar(r, lst[i]); i = i - 1 }
+    retornar r
+}
+
+funcion dijkstra(ciudad: mapa, origen: texto, destino: texto): lista {
+    sea nodos = ciudad["nodos"]
+    sea ar    = ciudad["aristas"]
+    sea dist  = {}
+    sea prev  = {}
+    sea vis   = {}
+    para n en nodos { dist[n]=999999; prev[n]="?"; vis[n]=falso }
+    dist[origen] = 0
+    sea lim = longitud(nodos)
+    sea p   = 0
+    mientras (p < lim) {
+        sea u = min_libre(nodos, dist, vis)
+        si (u == nulo) { p = lim }
+        sino {
+            vis[u] = verdadero
+            si (u == destino) { p = lim }
+            sino {
+                para vec en ar[u] {
+                    sea nd = vec["dest"]
+                    sea nd2 = dist[u] + vec["w"]
+                    si (nd2 < dist[nd]) { dist[nd]=nd2; prev[nd]=u }
+                }
+                p = p + 1
+            }
+        }
+    }
+    sea ruta = []
+    sea cur  = destino
+    sea cont = verdadero
+    mientras (cont) {
+        agregar(ruta, cur)
+        si (cur == origen o cur == "?") { cont = falso }
+        sino { cur = prev[cur] }
+    }
+    retornar invertir(ruta)
+}
+
+// ── Semáforos ─────────────────────────────────────────────────────────────────
+funcion crear_sem(cv: numero, cr: numero): mapa {
+    retornar {"tick":0,"cv":cv,"cr":cr,"verde":verdadero}
+}
+funcion tick_sem(s: mapa): mapa {
+    s["tick"] = s["tick"] + 1
+    si (s["verde"]) {
+        si (s["tick"] >= s["cv"]) { s["tick"]=0; s["verde"]=falso }
+    } sino {
+        si (s["tick"] >= s["cr"]) { s["tick"]=0; s["verde"]=verdadero }
+    }
+    retornar s
+}
+funcion es_verde(sems: mapa, nodo: texto): booleano {
+    intentar {
+        sea s = sems[nodo]
+        si (s == nulo) { retornar verdadero }
+        retornar s["verde"]
+    } capturar(e) { retornar verdadero }
+}
+
+// ── Vehículos ─────────────────────────────────────────────────────────────────
+sea _vid = 0
+funcion crear_v(orig: texto, dest: texto, ciudad: mapa): mapa {
+    _vid = _vid + 1
+    sea ruta = dijkstra(ciudad, orig, dest)
+    retornar {"id":_vid,"orig":orig,"dest":dest,"ruta":ruta,
+              "paso":0,"espera":0,"tiempo":0,"llegado":falso}
+}
+funcion avanzar_v(v: mapa, sems: mapa): mapa {
+    si (v["llegado"]) { retornar v }
+    sea ruta = v["ruta"]
+    sea paso = v["paso"]
+    si (paso >= longitud(ruta) - 1) { v["llegado"]=verdadero; retornar v }
+    sea nodo = ruta[paso]
+    si (no es_verde(sems, nodo)) {
+        v["espera"] = v["espera"] + 1
+        v["tiempo"] = v["tiempo"] + 1
+        retornar v
+    }
+    v["paso"]   = paso + 1
+    v["tiempo"] = v["tiempo"] + 1
+    retornar v
+}
+
+// ── Dibujo ────────────────────────────────────────────────────────────────────
+funcion dibujar_aristas(ren: numero): nulo {
+    sea aristas_lista = [
+        ["A","B"],["A","C"],["B","D"],["B","E"],
+        ["C","F"],["C","D"],["D","G"],["E","H"],
+        ["F","G"],["G","H"]
+    ]
+    sdl_color(ren, 60, 60, 80, 255)
+    para ar en aristas_lista {
+        sea pa = POS[ar[0]]
+        sea pb = POS[ar[1]]
+        sdl_linea(ren, pa["x"], pa["y"], pb["x"], pb["y"])
+    }
+}
+
+funcion dibujar_nodo(ren: numero, fuente: numero, nombre: texto, sems: mapa): nulo {
+    sea p = POS[nombre]
+    sea px = p["x"]
+    sea py = p["y"]
+
+    // Semáforo: anillo de color
+    sea verde = es_verde(sems, nombre)
+    si (verde) {
+        sdl_color(ren, 0, 200, 0, 255)
+    } sino {
+        sdl_color(ren, 200, 0, 0, 255)
+    }
+    sdl_circulo(ren, px, py, 22)
+
+    // Relleno del nodo
+    sdl_color(ren, 30, 40, 70, 255)
+    sdl_circulo(ren, px, py, 18)
+
+    // Borde blanco
+    sdl_color(ren, 180, 190, 220, 255)
+    sdl_circulo(ren, px, py, 16)
+
+    sdl_color(ren, 20, 30, 60, 255)
+    sdl_circulo(ren, px, py, 14)
+
+    // Etiqueta
+    sdl_texto(ren, fuente, nombre, px - 5, py - 8, 220, 230, 255)
+}
+
+funcion dibujar_vehiculos(ren: numero, vehiculos: lista): nulo {
+    sea i = 0
+    para v en vehiculos {
+        si (no v["llegado"]) {
+            sea ruta = v["ruta"]
+            sea paso = v["paso"]
+            sea nodo = ruta[paso]
+            sea p    = POS[nodo]
+            sea col  = COLORES[i % longitud(COLORES)]
+            // Sombra
+            sdl_color(ren, 0, 0, 0, 180)
+            sdl_circulo(ren, p["x"]+2, p["y"]+2, 8)
+            // Vehículo
+            sdl_color(ren, col["r"], col["g"], col["b"], 255)
+            sdl_circulo(ren, p["x"], p["y"], 8)
+        }
+        i = i + 1
+    }
+}
+
+funcion dibujar_panel(ren: numero, fuente: numero, vehiculos: lista, tick: numero): nulo {
+    // Fondo panel
+    sdl_color(ren, 15, 20, 35, 255)
+    sdl_rect(ren, PANEL_X, 0, W - PANEL_X, H, verdadero)
+
+    sdl_color(ren, 40, 50, 80, 255)
+    sdl_rect(ren, PANEL_X, 0, W - PANEL_X, H, falso)
+
+    // Título
+    sdl_texto(ren, fuente, "TRAFICO v3.6", PANEL_X + 20, 14, 100, 180, 255)
+    sdl_texto(ren, fuente, "C-Forge",      PANEL_X + 20, 32, 60, 120, 200)
+
+    // Tick
+    sdl_texto(ren, fuente, "tick: " + tick, PANEL_X + 20, 58, 150, 160, 180)
+
+    // Separador
+    sdl_color(ren, 40, 50, 80, 255)
+    sdl_linea(ren, PANEL_X + 10, 78, W - 10, 78)
+
+    // Vehículos: barra de progreso
+    sea ny = 90
+    sea i  = 0
+    para v en vehiculos {
+        sea col   = COLORES[i % longitud(COLORES)]
+        sea ruta  = v["ruta"]
+        sea total = longitud(ruta) - 1
+        sea paso  = v["paso"]
+        si (v["llegado"]) { paso = total }
+
+        sea bar_w = 200
+        sea prog  = 0
+        si (total > 0) { prog = (paso * bar_w) / total }
+
+        // Fondo barra
+        sdl_color(ren, 30, 35, 55, 255)
+        sdl_rect(ren, PANEL_X + 10, ny + 2, bar_w, 14, verdadero)
+
+        // Progreso
+        si (v["llegado"]) {
+            sdl_color(ren, 0, 200, 80, 255)
+        } sino {
+            sdl_color(ren, col["r"], col["g"], col["b"], 255)
+        }
+        si (prog > 0) {
+            sdl_rect(ren, PANEL_X + 10, ny + 2, prog, 14, verdadero)
+        }
+
+        // Etiqueta
+        sea label = "V" + v["id"] + " " + v["orig"] + "→" + v["dest"]
+        sdl_texto(ren, fuente, label, PANEL_X + 10, ny - 12, col["r"], col["g"], col["b"])
+
+        ny = ny + 36
+        i  = i + 1
+    }
+
+    // Estadísticas finales
+    sea llegados = 0
+    sea espera_t = 0
+    para v en vehiculos {
+        si (v["llegado"]) { llegados = llegados + 1 }
+        espera_t = espera_t + v["espera"]
+    }
+    sea n = longitud(vehiculos)
+    sea espera_m = 0
+    si (n > 0) { espera_m = espera_t / n }
+
+    sdl_color(ren, 40, 50, 80, 255)
+    sdl_linea(ren, PANEL_X + 10, H - 80, W - 10, H - 80)
+
+    sdl_texto(ren, fuente, "Llegados: " + llegados + "/" + n,  PANEL_X+10, H-72, 100,220,100)
+    sdl_texto(ren, fuente, "Espera media: " + espera_m,        PANEL_X+10, H-54, 220,180,80)
+    sdl_texto(ren, fuente, "ESC para salir",                   PANEL_X+10, H-30, 100,100,140)
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+funcion main(): nulo {
+    sdl_init(SDL_INIT_VIDEO)
+    sea win  = sdl_ventana("C-Forge · Simulador de Tráfico", W, H, SDL_VENTANA_NORMAL)
+    sea ren  = sdl_renderer(win)
+
+    // Intentar cargar fuente del sistema
+    sea fuente = -1
+    sea rutas_fuente = [
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/Arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf"
+    ]
+    para rf en rutas_fuente {
+        si (fuente == -1) {
+            intentar {
+                fuente = sdl_cargar_fuente(rf, 13)
+            } capturar(e) { }
+        }
+    }
+
+    sea ciudad   = crear_ciudad()
+    sea sems     = {}
+    sems["B"] = crear_sem(4, 2)
+    sems["D"] = crear_sem(3, 3)
+    sems["G"] = crear_sem(2, 4)
+    sems["E"] = crear_sem(5, 2)
+
+    sea pares = [
+        ["A","H"],["C","H"],["A","G"],
+        ["B","F"],["E","F"],["H","A"],
+        ["F","B"],["D","E"],["G","C"]
+    ]
+    sea vehiculos = []
+    para par en pares {
+        intentar {
+            agregar(vehiculos, crear_v(par[0], par[1], ciudad))
+        } capturar(e) { }
+    }
+
+    sea corriendo = verdadero
+    sea tick = 0
+    sea ultimo_update = sdl_ticks()
+    sea MS_POR_TICK = 300  // velocidad de simulación
+
+    mientras (corriendo) {
+        // Eventos
+        para e en sdl_eventos() {
+            si (e["salir"] == verdadero) { corriendo = falso }
+            intentar {
+                si (e["tecla"] == SDL_TECLA_ESC) { corriendo = falso }
+            } capturar(ex) { }
+        }
+
+        // Actualizar simulación cada MS_POR_TICK ms
+        sea ahora = sdl_ticks()
+        si (ahora - ultimo_update >= MS_POR_TICK) {
+            ultimo_update = ahora
+            tick = tick + 1
+
+            // Tick semáforos
+            sems["B"] = tick_sem(sems["B"])
+            sems["D"] = tick_sem(sems["D"])
+            sems["G"] = tick_sem(sems["G"])
+            sems["E"] = tick_sem(sems["E"])
+
+            // Tick vehículos
+            sea i = 0
+            mientras (i < longitud(vehiculos)) {
+                vehiculos[i] = avanzar_v(vehiculos[i], sems)
+                i = i + 1
+            }
+
+            // Si todos llegaron → reiniciar
+            sea todos = verdadero
+            para v en vehiculos { si (no v["llegado"]) { todos = falso } }
+            si (todos) {
+                _vid = 0
+                vehiculos = []
+                para par en pares {
+                    intentar {
+                        agregar(vehiculos, crear_v(par[0], par[1], ciudad))
+                    } capturar(e) { }
+                }
+                tick = 0
+            }
+        }
+
+        // Dibujar
+        sdl_color(ren, 18, 22, 40, 255)
+        sdl_limpiar(ren)
+
+        dibujar_aristas(ren)
+
+        // Nodos
+        para nombre en ciudad["nodos"] {
+            dibujar_nodo(ren, fuente, nombre, sems)
+        }
+
+        dibujar_vehiculos(ren, vehiculos)
+        dibujar_panel(ren, fuente, vehiculos, tick)
+
+        sdl_presentar(ren)
+        sdl_esperar(16)
+    }
+
+    sdl_cerrar()
+}
+
+main()

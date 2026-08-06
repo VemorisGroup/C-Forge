@@ -3809,6 +3809,45 @@ static Value cfv_sdl_cerrar_fn(){
 
 static Value cfv_sdl_disponible_fn(){return Value{cfv_sdl2_cargar()};}
 
+// ── TTF texto ────────────────────────────────────────────────────────────────
+static std::map<int,void*> cfv_sdl_fuentes;
+
+static Value cfv_sdl_cargar_fuente_fn(const Value&ruta_v, const Value&tam_v){
+  if(!cfv_sdl2.TTF_OpenFont) throw std::runtime_error("sdl_cargar_fuente: SDL2_ttf no disponible");
+  std::string ruta = ruta_v.index()==2 ? std::get<std::string>(ruta_v.data) : "";
+  int tam = tam_v.index()==1 ? (int)std::get<double>(tam_v.data) : 16;
+  void* font = cfv_sdl2.TTF_OpenFont(ruta.c_str(), tam);
+  if (!font) throw std::runtime_error("sdl_cargar_fuente: no se pudo abrir '"+ruta+"'");
+  int id = cfv_sdl_next_id++;
+  cfv_sdl_fuentes[id] = font;
+  return Value{(double)id};
+}
+
+static Value cfv_sdl_texto_fn(const Value&rid, const Value&fid,
+                               const Value&txt, const Value&x_v, const Value&y_v,
+                               const Value&r_v, const Value&g_v, const Value&b_v){
+  auto rit = cfv_sdl_renderers.find((int)std::get<double>(rid.data));
+  auto fit = cfv_sdl_fuentes.find((int)std::get<double>(fid.data));
+  if(rit==cfv_sdl_renderers.end()||fit==cfv_sdl_fuentes.end()) return Value{};
+  if(!cfv_sdl2.TTF_RenderText_Blended||!cfv_sdl2.CreateTextureFromSurface) return Value{};
+  std::string s = txt.index()==2 ? std::get<std::string>(txt.data) : cfv_to_string(txt);
+  unsigned color = (255u<<24)
+    | ((unsigned)(r_v.index()==1?std::get<double>(r_v.data):255)<<16)
+    | ((unsigned)(g_v.index()==1?std::get<double>(g_v.data):255)<<8)
+    |  (unsigned)(b_v.index()==1?std::get<double>(b_v.data):255);
+  void* surf = cfv_sdl2.TTF_RenderText_Blended(fit->second, s.c_str(), color);
+  if (!surf) return Value{};
+  void* tex  = cfv_sdl2.CreateTextureFromSurface(rit->second, surf);
+  if(cfv_sdl2.FreeSurface) cfv_sdl2.FreeSurface(surf);
+  if (!tex) return Value{};
+  int w=0,h=0;
+  if(cfv_sdl2.QueryTexture) cfv_sdl2.QueryTexture(tex,nullptr,nullptr,&w,&h);
+  int dst[4]={(int)std::get<double>(x_v.data),(int)std::get<double>(y_v.data),w,h};
+  if(cfv_sdl2.RenderCopy) cfv_sdl2.RenderCopy(rit->second,tex,nullptr,dst);
+  if(cfv_sdl2.DestroyTexture) cfv_sdl2.DestroyTexture(tex);
+  return Value{};
+}
+
 // ── UDP Sockets ──────────────────────────────────────────────────────────────
 #ifndef _WIN32
 #include <sys/socket.h>
@@ -5599,6 +5638,14 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
   }
   if (verdad(compara(cfv_nombre, Value{std::string("sdl_cerrar")}, "=="))) {
     return cfv_sdl_cerrar_fn();
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_cargar_fuente")}, "=="))) {
+    return cfv_sdl_cargar_fuente_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}));
+  }
+  if (verdad(compara(cfv_nombre, Value{std::string("sdl_texto")}, "=="))) {
+    return cfv_sdl_texto_fn(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),
+      indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}),indice(cfv_args,Value{4.0}),
+      indice(cfv_args,Value{5.0}),indice(cfv_args,Value{6.0}),indice(cfv_args,Value{7.0}));
   }
   // ── UDP ────────────────────────────────────────────────────────────────────
   if (verdad(compara(cfv_nombre, Value{std::string("udp_crear")}, "=="))) {
