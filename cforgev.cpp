@@ -3607,7 +3607,11 @@ static CfvSdl2 cfv_sdl2;
 static bool cfv_sdl2_cargar(){
   if(cfv_sdl2.loaded)return true;
 #ifndef _WIN32
-  const char* libs[]={"libSDL2-2.0.so.0","libSDL2.so","libSDL2-2.0.dylib","libSDL2.dylib",nullptr};
+  const char* libs[]={
+    "/opt/homebrew/lib/libSDL2.dylib",
+    "/opt/homebrew/lib/libSDL2-2.0.0.dylib",
+    "/usr/local/lib/libSDL2.dylib",
+    "libSDL2-2.0.so.0","libSDL2.so","libSDL2-2.0.dylib","libSDL2.dylib",nullptr};
   for(int i=0;libs[i];i++){cfv_sdl2.lib=dlopen(libs[i],RTLD_LAZY|RTLD_GLOBAL);if(cfv_sdl2.lib)break;}
   if(!cfv_sdl2.lib)return false;
   #define SDLSYM(fn) cfv_sdl2.fn=(decltype(cfv_sdl2.fn))dlsym(cfv_sdl2.lib,"SDL_"#fn)
@@ -3621,7 +3625,11 @@ static bool cfv_sdl2_cargar(){
   SDLSYM(SetRenderDrawBlendMode);
   #undef SDLSYM
   // SDL_image
-  const char* imglibs[]={"libSDL2_image-2.0.so.0","libSDL2_image.so","libSDL2_image-2.0.dylib",nullptr};
+  const char* imglibs[]={
+    "/opt/homebrew/lib/libSDL2_image.dylib",
+    "/opt/homebrew/lib/libSDL2_image-2.0.0.dylib",
+    "/usr/local/lib/libSDL2_image.dylib",
+    "libSDL2_image-2.0.so.0","libSDL2_image.so","libSDL2_image-2.0.dylib",nullptr};
   for(int i=0;imglibs[i];i++){cfv_sdl2.lib_img=dlopen(imglibs[i],RTLD_LAZY);if(cfv_sdl2.lib_img)break;}
   if(cfv_sdl2.lib_img){
     cfv_sdl2.IMG_Load=(decltype(cfv_sdl2.IMG_Load))dlsym(cfv_sdl2.lib_img,"IMG_Load");
@@ -3638,7 +3646,11 @@ static bool cfv_sdl2_cargar(){
     #undef MIXSYM
   }
   // SDL_ttf
-  const char* ttflibs[]={"libSDL2_ttf-2.0.so.0","libSDL2_ttf.so","libSDL2_ttf-2.0.dylib",nullptr};
+  const char* ttflibs[]={
+    "/opt/homebrew/lib/libSDL2_ttf.dylib",
+    "/opt/homebrew/lib/libSDL2_ttf-2.0.0.dylib",
+    "/usr/local/lib/libSDL2_ttf.dylib",
+    "libSDL2_ttf-2.0.so.0","libSDL2_ttf.so","libSDL2_ttf-2.0.dylib",nullptr};
   for(int i=0;ttflibs[i];i++){cfv_sdl2.lib_ttf=dlopen(ttflibs[i],RTLD_LAZY);if(cfv_sdl2.lib_ttf)break;}
   if(cfv_sdl2.lib_ttf){
     cfv_sdl2.TTF_Init=(decltype(cfv_sdl2.TTF_Init))dlsym(cfv_sdl2.lib_ttf,"TTF_Init");
