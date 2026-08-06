@@ -337,9 +337,13 @@ funcion main(): nulo {
     mientras (corriendo) {
         // Eventos
         para e en sdl_eventos() {
-            si (e["salir"] == verdadero) { corriendo = falso }
             intentar {
-                si (e["tecla"] == SDL_TECLA_ESC) { corriendo = falso }
+                si (e["salir"] == verdadero) { corriendo = falso }
+            } capturar(ex) { }
+            intentar {
+                si (e["tipo"] == SDL_TIPO_TECLA_DOWN y e["tecla"] == SDL_TECLA_ESC) {
+                    corriendo = falso
+                }
             } capturar(ex) { }
         }
 

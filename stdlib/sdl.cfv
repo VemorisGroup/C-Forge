@@ -80,10 +80,14 @@ funcion sdl_tecla_soltada(eventos: lista, scancode: numero): booleano {
 
 funcion sdl_quiere_salir(eventos: lista): booleano {
     para e en eventos {
-        si (e["salir"] == verdadero) { retornar verdadero }
-        si (e["tipo"] == SDL_TIPO_TECLA_DOWN y e["tecla"] == SDL_TECLA_ESC) {
-            retornar verdadero
-        }
+        intentar {
+            si (e["salir"] == verdadero) { retornar verdadero }
+        } capturar(ex) { }
+        intentar {
+            si (e["tipo"] == SDL_TIPO_TECLA_DOWN y e["tecla"] == SDL_TECLA_ESC) {
+                retornar verdadero
+            }
+        } capturar(ex) { }
     }
     retornar falso
 }

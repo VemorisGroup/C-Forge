@@ -5337,9 +5337,7 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
   if (verdad(compara(cfv_nombre, Value{std::string("sdl_iniciar")}, "=="))) {
     return cfv_sdl_iniciar(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}));
   }
-  if (verdad(compara(cfv_nombre, Value{std::string("sdl_limpiar")}, "=="))) {
-    return cfv_sdl_limpiar(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}));
-  }
+  // sdl_limpiar: handled by new dlopen dispatch below (cfv_sdl_limpiar_fn)
   if (verdad(compara(cfv_nombre, Value{std::string("sdl_dibujar_rect")}, "=="))) {
     Value a = verdad(compara(cfv_longitud(cfv_args),Value{9.0},">=")) ? indice(cfv_args,Value{8.0}) : Value{255.0};
     return cfv_sdl_dibujar_rect(indice(cfv_args,Value{0.0}),indice(cfv_args,Value{1.0}),indice(cfv_args,Value{2.0}),indice(cfv_args,Value{3.0}),indice(cfv_args,Value{4.0}),indice(cfv_args,Value{5.0}),indice(cfv_args,Value{6.0}),indice(cfv_args,Value{7.0}),a);
@@ -5356,9 +5354,7 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
   if (verdad(compara(cfv_nombre, Value{std::string("sdl_mostrar")}, "=="))) {
     return cfv_sdl_mostrar(indice(cfv_args,Value{0.0}));
   }
-  if (verdad(compara(cfv_nombre, Value{std::string("sdl_eventos")}, "=="))) {
-    return cfv_sdl_eventos(indice(cfv_args,Value{0.0}));
-  }
+  // sdl_eventos: handled by new dlopen dispatch below (cfv_sdl_eventos_fn)
   if (verdad(compara(cfv_nombre, Value{std::string("sdl_tecla_presionada")}, "=="))) {
     return cfv_sdl_tecla_presionada(indice(cfv_args,Value{0.0}));
   }
@@ -5380,12 +5376,7 @@ Value cfv_eval_builtin(Value cfv_nombre, Value cfv_args, Value cfv_env, Value cf
   if (verdad(compara(cfv_nombre, Value{std::string("sdl_abierto")}, "=="))) {
     return cfv_sdl_abierto(indice(cfv_args,Value{0.0}));
   }
-  if (verdad(compara(cfv_nombre, Value{std::string("sdl_cerrar")}, "=="))) {
-    return cfv_sdl_cerrar(indice(cfv_args,Value{0.0}));
-  }
-  if (verdad(compara(cfv_nombre, Value{std::string("sdl_terminar")}, "=="))) {
-    return cfv_sdl_terminar(Value{});
-  }
+  // sdl_cerrar / sdl_terminar: handled by new dlopen dispatch below (cfv_sdl_cerrar_fn)
 #ifdef CFV_WITH_SDL2_MIXER
   if (verdad(compara(cfv_nombre, Value{std::string("sdl_cargar_sonido")}, "=="))) {
     return cfv_sdl_cargar_sonido(indice(cfv_args,Value{0.0}));
