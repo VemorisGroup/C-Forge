@@ -3810,8 +3810,6 @@ static Value cfv_sdl_cerrar_fn(){
 static Value cfv_sdl_disponible_fn(){return Value{cfv_sdl2_cargar()};}
 
 // ── TTF texto ────────────────────────────────────────────────────────────────
-static std::map<int,void*> cfv_sdl_fuentes;
-
 static Value cfv_sdl_cargar_fuente_fn(const Value&ruta_v, const Value&tam_v){
   if(!cfv_sdl2.TTF_OpenFont) throw std::runtime_error("sdl_cargar_fuente: SDL2_ttf no disponible");
   std::string ruta = ruta_v.index()==2 ? std::get<std::string>(ruta_v.data) : "";
@@ -3830,7 +3828,7 @@ static Value cfv_sdl_texto_fn(const Value&rid, const Value&fid,
   auto fit = cfv_sdl_fuentes.find((int)std::get<double>(fid.data));
   if(rit==cfv_sdl_renderers.end()||fit==cfv_sdl_fuentes.end()) return Value{};
   if(!cfv_sdl2.TTF_RenderText_Blended||!cfv_sdl2.CreateTextureFromSurface) return Value{};
-  std::string s = txt.index()==2 ? std::get<std::string>(txt.data) : cfv_to_string(txt);
+  std::string s = txt.index()==2 ? std::get<std::string>(txt.data) : (txt.index()==1 ? std::to_string(std::get<double>(txt.data)) : "");
   unsigned color = (255u<<24)
     | ((unsigned)(r_v.index()==1?std::get<double>(r_v.data):255)<<16)
     | ((unsigned)(g_v.index()==1?std::get<double>(g_v.data):255)<<8)
