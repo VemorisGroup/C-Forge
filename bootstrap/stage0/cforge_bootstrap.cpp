@@ -1164,8 +1164,15 @@ static Value cfv_compile_cpp(const Value& source_value, const Value& output_valu
         cfv_required_text(source_value, "compilar_cpp_nativo");
     const std::string output =
         cfv_required_text(output_value, "compilar_cpp_nativo");
+    // Honour $CXX; default to g++ on Linux, clang++ elsewhere.
+    const char* cxx_env = std::getenv("CXX");
+#if defined(__linux__)
+    const std::string cfv_cxx = (cxx_env && *cxx_env) ? std::string(cxx_env) : "g++";
+#else
+    const std::string cfv_cxx = (cxx_env && *cxx_env) ? std::string(cxx_env) : "clang++";
+#endif
     std::string command =
-        "clang++ -std=c++17 -O2 " + cfv_shell_quote(source) +
+        cfv_cxx + " -std=c++17 -O2 " + cfv_shell_quote(source) +
         " -o " + cfv_shell_quote(output);
 #if defined(__linux__)
     command += " -Wl,--build-id=none";
@@ -1229,12 +1236,21 @@ int main(int argc, char** argv) {
             if (!stream) throw CompileError("no se pudo crear fuente temporal");
             stream << generated;
         }
+        // Detect available C++ compiler: honour $CXX, else prefer g++ on Linux
+        // and clang++ on macOS (where g++ is just an alias for clang++ anyway).
+        const char* cxx_env = std::getenv("CXX");
+#if defined(__linux__)
+        const std::string default_cxx = "g++";
+#else
+        const std::string default_cxx = "clang++";
+#endif
+        const std::string cxx = (cxx_env && *cxx_env) ? std::string(cxx_env) : default_cxx;
         const std::string command =
-            "clang++ -std=c++17 -O2 " + shell_quote(temporary) + " -o " + shell_quote(output);
+            cxx + " -std=c++17 -O2 " + shell_quote(temporary) + " -o " + shell_quote(output);
         const int status = std::system(command.c_str());
         std::error_code ignored;
         fs::remove(temporary, ignored);
-        if (status != 0) throw CompileError("clang++ no pudo producir el ejecutable Stage 0");
+        if (status != 0) throw CompileError(cxx + " no pudo producir el ejecutable Stage 0");
         std::cout << "C-Forge Stage 0 creó: " << output << "\n";
         return 0;
     } catch (const CompileError& error) {

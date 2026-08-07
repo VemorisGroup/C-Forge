@@ -136,7 +136,7 @@ jobs:
 
       - name: Compilar con MSVC
         shell: cmd
-        run: cl /std:c++20 /EHsc /O2 /I"include" /Fe:cforge.exe cforgev.cpp ws2_32.lib
+        run: cl /std:c++20 /EHsc /O2 /bigobj /I"include" /Fe:cforge.exe cforgev.cpp ws2_32.lib
 
       - name: Tests Windows
         shell: pwsh
