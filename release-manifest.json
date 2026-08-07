@@ -1,14 +1,52 @@
 {
-  "version": "3.3.0",
-  "date": "2026-08-06T00:00:00Z",
+  "schema": 1,
+  "version": "3.7.0",
   "channel": "stable",
-  "artifacts": {
-    "macos-arm64":  "https://github.com/VemorisGroup/C-Forge/releases/download/v3.3.0/cforge-3.3.0-cforge-macos-arm64.tar.gz",
-    "linux-x64":   "https://github.com/VemorisGroup/C-Forge/releases/download/v3.3.0/cforge-3.3.0-cforge-linux-x64.tar.gz",
-    "windows-x64": "https://github.com/VemorisGroup/C-Forge/releases/download/v3.3.0/cforge-3.3.0-cforge-windows-x64.zip",
-    "debian-amd64": "https://github.com/VemorisGroup/C-Forge/releases/download/v3.3.0/cforge_3.3.0_amd64.deb"
-  },
-  "sha256sums": "https://github.com/VemorisGroup/C-Forge/releases/download/v3.3.0/SHA256SUMS",
+  "released_at": "2026-08-07T00:00:00Z",
   "install_script": "https://raw.githubusercontent.com/VemorisGroup/C-Forge/main/install.sh",
-  "changelog": "https://github.com/VemorisGroup/C-Forge/blob/main/CHANGELOG.md"
+  "changelog": "https://github.com/VemorisGroup/C-Forge/blob/main/CHANGELOG.md",
+  "downloads": {
+    "macos": {
+      "arm64": {
+        "archive": {
+          "type": "tar.gz",
+          "filename": "cforge-3.7.0-macos-arm64.tar.gz",
+          "url": "https://github.com/VemorisGroup/C-Forge/releases/download/v3.7.0/cforge-3.7.0-macos-arm64.tar.gz"
+        }
+      }
+    },
+    "linux": {
+      "x64": {
+        "archive": {
+          "type": "tar.gz",
+          "filename": "cforge-3.7.0-linux-x64.tar.gz",
+          "url": "https://github.com/VemorisGroup/C-Forge/releases/download/v3.7.0/cforge-3.7.0-linux-x64.tar.gz"
+        },
+        "package": {
+          "type": "deb",
+          "filename": "cforge_3.7.0_amd64.deb",
+          "url": "https://github.com/VemorisGroup/C-Forge/releases/download/v3.7.0/cforge_3.7.0_amd64.deb"
+        }
+      }
+    },
+    "windows": {
+      "x64": {
+        "portable": {
+          "type": "zip",
+          "filename": "cforge-3.7.0-windows-x64.zip",
+          "url": "https://github.com/VemorisGroup/C-Forge/releases/download/v3.7.0/cforge-3.7.0-windows-x64.zip"
+        }
+      }
+    }
+  },
+  "editor": {
+    "vscode": {
+      "vsix": {
+        "filename": "c-forge-3.7.0.vsix",
+        "url": "https://github.com/VemorisGroup/C-Forge/releases/download/v3.7.0/c-forge-3.7.0.vsix"
+      },
+      "marketplace": null
+    }
+  },
+  "sha256sums": "https://github.com/VemorisGroup/C-Forge/releases/download/v3.7.0/SHA256SUMS"
 }

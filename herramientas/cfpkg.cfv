@@ -1,4 +1,4 @@
-// herramientas/cfpkg.cfv -Package manager CLI para C-Forge v3.3.0
+// herramientas/cfpkg.cfv -Package manager CLI para C-Forge v3.7.0
 // Uso: cforgev herramientas/cfpkg.cfv <comando> [args]
 //
 //   cfpkg install <paquete>         Instala un paquete

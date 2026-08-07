@@ -2,7 +2,7 @@
 
 Sitio oficial: [c-forge.org](https://c-forge.org)
 
-## 3.3.0 — CLI completo + versión centralizada + SDL2 estable + release automatizado
+## 3.7.0 — CLI completo + versión centralizada + SDL2 estable + release automatizado
 
 - **Versión centralizada**: Makefile es la única fuente de verdad para VERSION.
   `cfv_version()` lee la constante compilada; `--version` y el REPL son siempre
@@ -17,15 +17,15 @@ Sitio oficial: [c-forge.org](https://c-forge.org)
   Todos los eventos pasan ahora por el despacho dlopen unificado.
   `sdl_quiere_salir` y el bucle de evento de trafico_visual.cfv usan try/catch
   para claves ausentes en eventos de teclado.
-- **release.yml**: artefactos versionados (`cforge-3.3.0-linux-x64.tar.gz`, etc.),
+- **release.yml**: artefactos versionados (`cforge-3.7.0-linux-x64.tar.gz`, etc.),
   validación de que el tag coincide con Makefile VERSION, generación de
   `release-manifest.json` para c-forge.org.
 - **install.sh**: auto-detecta la versión más reciente desde la GitHub Releases API;
-  fallback a 3.3.0 si la red no está disponible. Añadidos `new`, `init` y `doctor`
+  fallback a 3.7.0 si la red no está disponible. Añadidos `new`, `init` y `doctor`
   al texto de ayuda post-instalación.
-- **capabilities.json**: actualizado a 3.3.0; scope de `native-cli` refleja los
+- **capabilities.json**: actualizado a 3.7.0; scope de `native-cli` refleja los
   comandos reales implementados.
-- **Extensión VS Code 3.3.0**: CHANGELOG reescrito con información real; eliminadas
+- **Extensión VS Code 3.7.0**: CHANGELOG reescrito con información real; eliminadas
   referencias a puentes Java/Python/JS que no existen en esta versión.
 - Herramientas de tipo y compilación escritas en C-Forge (`cftype.cfv`, `cfpkg.cfv`);
   los archivos Python anteriores (`cftype.py`, `cf2c.py`) no forman parte del

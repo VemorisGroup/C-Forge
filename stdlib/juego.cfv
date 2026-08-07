@@ -1,4 +1,4 @@
-// stdlib/juego.cfv — Motor de juego 2D completo para C-Forge v3.3.0
+// stdlib/juego.cfv — Motor de juego 2D completo para C-Forge v3.7.0
 // Proporciona: ventana, renderer, game loop, ECS, física, colisiones,
 //              cámara, tilemap, partículas, HUD, escenas.
 //

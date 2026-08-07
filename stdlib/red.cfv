@@ -1,4 +1,4 @@
-// stdlib/red.cfv — Cliente HTTP/HTTPS + UDP para C-Forge v3.3.0
+// stdlib/red.cfv — Cliente HTTP/HTTPS + UDP para C-Forge v3.7.0
 // Usa los builtins nativos: http_get, http_post, http_put, http_delete, http_solicitud
 // y los nuevos builtins UDP: udp_crear, udp_enviar, udp_recibir, udp_cerrar
 //

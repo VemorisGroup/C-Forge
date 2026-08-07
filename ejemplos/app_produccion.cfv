@@ -1,4 +1,4 @@
-// ejemplos/app_produccion.cfv — App de producción completa en C-Forge v3.3.0
+// ejemplos/app_produccion.cfv — App de producción completa en C-Forge v3.7.0
 // Demuestra: HTTP real, JSON, mutex, hilos, manejo de errores, auth JWT-like
 //
 // Es una API REST para una app de tareas (TODO app) con:
@@ -17,7 +17,7 @@
 importar "stdlib/json.cfv"
 
 mostrar("══════════════════════════════════════════════")
-mostrar("  C-Forge TODO API  v3.3.0 — Puerto 4000")
+mostrar("  C-Forge TODO API  v3.7.0 — Puerto 4000")
 mostrar("══════════════════════════════════════════════")
 
 // ── Base de datos en memoria ───────────────────────────────────────────────
@@ -89,7 +89,7 @@ funcion incrementar_metrica(clave: texto): nulo {
 funcion manejar_salud(req: mapa): nulo {
     respuesta_json(req, 200, {
         "estado": "ok",
-        "version": "3.3.0",
+        "version": "3.7.0",
         "lenguaje": "C-Forge",
         "metricas": metricas
     })

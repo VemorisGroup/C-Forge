@@ -15,7 +15,7 @@ VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
     | head -1 \
     | sed 's/.*"v\?\([^"]*\)".*/\1/')
 if [ -z "$VERSION" ]; then
-    VERSION="3.3.0"
+    VERSION="3.7.0"
     echo "  (no se pudo consultar GitHub — usando versión por defecto: ${VERSION})"
 else
     echo "  Versión: ${VERSION}"

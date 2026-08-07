@@ -1,4 +1,4 @@
-// stdlib/sdl.cfv — Bindings SDL2 para C-Forge v3.3.0
+// stdlib/sdl.cfv — Bindings SDL2 para C-Forge v3.7.0
 // API de bajo nivel sobre los builtins sdl_* del intérprete.
 // Para un motor de juego de alto nivel usa stdlib/juego.cfv
 //

@@ -1,8 +1,8 @@
 # Changelog — C-Forge Language Support (VS Code)
 
-## 3.3.0
+## 3.7.0
 
-- Versión sincronizada con C-Forge 3.3.0.
+- Versión sincronizada con C-Forge 3.7.0.
 - Resaltado de sintaxis actualizado: `funcion`, `retornar`, `importar`, `exportar`,
   `clase`, `nuevo`, `intentar`, `capturar`, `lanzar`, `para`, `mientras`, `si`, `sino`,
   `sea`, `nulo`, `verdadero`, `falso`, `y`, `o`, `no`.

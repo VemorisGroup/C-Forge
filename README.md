@@ -6,7 +6,7 @@
 
 C-Forge es un lenguaje de programación creado por Vemoris Group. Su objetivo es ofrecer una sintaxis clara, ejecución nativa y una biblioteca estándar escrita en el propio lenguaje.
 
-> **C-Forge 3.3.0** — El núcleo, CLI y biblioteca estándar superan el gate reproducible `make release-check` en macOS ARM64, Linux x64 y Windows x64. Las capacidades marcadas como experimentales no forman parte del contrato estable.
+> **C-Forge 3.7.0** — El núcleo, CLI y biblioteca estándar superan el gate reproducible `make release-check` en macOS ARM64, Linux x64 y Windows x64. Las capacidades marcadas como experimentales no forman parte del contrato estable.
 
 ---
 
@@ -28,14 +28,14 @@ export CFORGE_STDLIB="/usr/local/lib/cforge/stdlib"
 
 ### macOS (desde archivo)
 
-1. Descarga `cforge-3.3.0-macos-arm64.tar.gz` desde [Releases](https://github.com/VemorisGroup/C-Forge/releases/tag/v3.3.0).
+1. Descarga `cforge-3.7.0-macos-arm64.tar.gz` desde [Releases](https://github.com/VemorisGroup/C-Forge/releases/tag/v3.7.0).
 2. Extrae e instala:
 
 ```sh
-tar xzf cforge-3.3.0-macos-arm64.tar.gz
-sudo cp cforge-3.3.0-macos-arm64/cforge /usr/local/bin/
+tar xzf cforge-3.7.0-macos-arm64.tar.gz
+sudo cp cforge-3.7.0-macos-arm64/cforge /usr/local/bin/
 sudo mkdir -p /usr/local/lib/cforge
-sudo cp -r cforge-3.3.0-macos-arm64/stdlib /usr/local/lib/cforge/
+sudo cp -r cforge-3.7.0-macos-arm64/stdlib /usr/local/lib/cforge/
 echo 'export CFORGE_STDLIB="/usr/local/lib/cforge/stdlib"' >> ~/.zshrc
 source ~/.zshrc
 ```
@@ -45,8 +45,8 @@ source ~/.zshrc
 ### Linux x64 (desde .deb)
 
 ```sh
-wget https://github.com/VemorisGroup/C-Forge/releases/download/v3.3.0/cforge_3.3.0_amd64.deb
-sudo dpkg -i cforge_3.3.0_amd64.deb
+wget https://github.com/VemorisGroup/C-Forge/releases/download/v3.7.0/cforge_3.7.0_amd64.deb
+sudo dpkg -i cforge_3.7.0_amd64.deb
 echo 'export CFORGE_STDLIB="/usr/lib/cforge/stdlib"' >> ~/.bashrc
 source ~/.bashrc
 ```
@@ -54,17 +54,17 @@ source ~/.bashrc
 ### Linux x64 (desde .tar.gz)
 
 ```sh
-tar xzf cforge-3.3.0-linux-x64.tar.gz
-sudo cp cforge-3.3.0-linux-x64/cforge /usr/local/bin/
+tar xzf cforge-3.7.0-linux-x64.tar.gz
+sudo cp cforge-3.7.0-linux-x64/cforge /usr/local/bin/
 sudo mkdir -p /usr/local/lib/cforge
-sudo cp -r cforge-3.3.0-linux-x64/stdlib /usr/local/lib/cforge/
+sudo cp -r cforge-3.7.0-linux-x64/stdlib /usr/local/lib/cforge/
 echo 'export CFORGE_STDLIB="/usr/local/lib/cforge/stdlib"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
 ### Windows x64
 
-1. Descarga `cforge-3.3.0-windows-x64.zip` desde [Releases](https://github.com/VemorisGroup/C-Forge/releases/tag/v3.3.0).
+1. Descarga `cforge-3.7.0-windows-x64.zip` desde [Releases](https://github.com/VemorisGroup/C-Forge/releases/tag/v3.7.0).
 2. Extrae el archivo ZIP.
 3. Añade la carpeta extraída al `PATH` del sistema (Panel de control → Variables de entorno).
 4. Define la variable de entorno `CFORGE_STDLIB` apuntando a la carpeta `stdlib` dentro del ZIP extraído.
@@ -93,7 +93,7 @@ sudo dpkg -r cforge
 
 ```sh
 cforge --version
-# → C-Forge 3.3.0
+# → C-Forge 3.7.0
 
 cforge --help
 # → muestra todos los comandos disponibles
@@ -172,7 +172,7 @@ s.decir()                     // Hola desde C-Forge
 
 ## Extensión de Visual Studio Code
 
-1. Descarga `c-forge-3.3.0.vsix` desde [Releases](https://github.com/VemorisGroup/C-Forge/releases/tag/v3.3.0).
+1. Descarga `c-forge-3.7.0.vsix` desde [Releases](https://github.com/VemorisGroup/C-Forge/releases/tag/v3.7.0).
 2. En VS Code: **Extensions** (⇧⌘X) → **···** → **Install from VSIX…** → selecciona el archivo.
 3. Los archivos `.cfv` tendrán resaltado de sintaxis, snippets y diagnósticos automáticos al guardar.
 
@@ -227,7 +227,7 @@ make release-check   # gate completo
 
 ---
 
-## Plataformas verificadas en 3.3.0
+## Plataformas verificadas en 3.7.0
 
 | Plataforma | Build CI | Tests | Distribuible |
 |-----------|----------|-------|-------------|

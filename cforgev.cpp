@@ -7180,9 +7180,9 @@ const char* cfv_eval_json(const char* code) {
 }
 
 // Obtener version del interprete
-// FUENTE DE VERDAD: Makefile VERSION := 3.3.0
-// Actualizar ambos a la vez con: sed -i 's/3\.3\.0/NUEVA/g' Makefile cforgev.cpp
-const char* cfv_version() { return "3.3.0"; }
+// FUENTE DE VERDAD: Makefile VERSION := 3.7.0
+// Actualizar ambos a la vez con: sed -i 's/3\.7\.0/NUEVA/g' Makefile cforgev.cpp
+const char* cfv_version() { return "3.7.0"; }
 
 // Verificar disponibilidad de SDL2
 int cfv_has_sdl2() {

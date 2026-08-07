@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "language_version": "3.3.0",
+  "language_version": "3.7.0",
   "overall_status": "stable",
   "product_direction": "C-Forge autónomo: programas, biblioteca estándar y pruebas en .cfv; C++ reservado al bootstrap nativo.",
   "quality_gate": {

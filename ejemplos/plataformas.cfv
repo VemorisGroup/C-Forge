@@ -1,4 +1,4 @@
-// ejemplos/plataformas.cfv — Juego de plataformas completo en C-Forge v3.3.0
+// ejemplos/plataformas.cfv — Juego de plataformas completo en C-Forge v3.7.0
 // Demuestra: SDL2, física, tilemap, partículas, HUD, escenas, sonido, cámara
 //
 // Para ejecutar necesitas SDL2 instalado:
