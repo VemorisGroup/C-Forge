@@ -8,20 +8,46 @@ permissions:
   contents: write
 
 jobs:
+  validate-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verificar que el tag coincide con VERSION del Makefile
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          MAKEFILE_VERSION=$(grep '^VERSION' Makefile | head -1 | sed 's/VERSION[[:space:]]*:=[[:space:]]*//')
+          echo "Tag: $TAG"
+          echo "Makefile VERSION: $MAKEFILE_VERSION"
+          if [ "$TAG" != "$MAKEFILE_VERSION" ]; then
+            echo "ERROR: el tag '$TAG' no coincide con VERSION '$MAKEFILE_VERSION' en Makefile."
+            echo "Actualiza Makefile y cforgev.cpp antes de publicar."
+            exit 1
+          fi
+          echo "OK: versión validada -> $TAG"
+
   native:
+    needs: validate-version
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: macos-latest
-            artifact: cforge-macos-native
+            artifact_stem: cforge-macos-arm64
+            ext: ""
           - os: ubuntu-latest
-            artifact: cforge-linux-x64
+            artifact_stem: cforge-linux-x64
+            ext: ""
           - os: windows-latest
-            artifact: cforge-windows-x64.exe
+            artifact_stem: cforge-windows-x64
+            ext: ".exe"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Obtener versión
+        id: ver
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Construir en Unix
         if: runner.os != 'Windows'
@@ -29,7 +55,10 @@ jobs:
           make clean
           make build
           make release-check
-          cp cforge "${{ matrix.artifact }}"
+          TARBALL="cforge-${{ steps.ver.outputs.version }}-${{ matrix.artifact_stem }}.tar.gz"
+          tar czf "$TARBALL" cforge stdlib/
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+        id: build_unix
 
       - name: Construir en Windows
         if: runner.os == 'Windows'
@@ -38,39 +67,85 @@ jobs:
           cl /std:c++20 /EHsc /O2 /Fe:cforge.exe cforgev.cpp ws2_32.lib
           $env:CFORGE_STDLIB = "$PWD\stdlib"
           .\cforge.exe --version
-          Get-ChildItem tests\cfv\*.cfv | ForEach-Object { & .\cforge.exe test $_.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
-          Copy-Item cforge.exe "${{ matrix.artifact }}"
+          Get-ChildItem tests\cfv\*.cfv | ForEach-Object {
+            & .\cforge.exe test $_.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $version = "${{ steps.ver.outputs.version }}"
+          $zip = "cforge-$version-${{ matrix.artifact_stem }}.zip"
+          Compress-Archive -Path cforge.exe,stdlib -DestinationPath $zip
+          echo "zipname=$zip" >> $env:GITHUB_OUTPUT
+        id: build_win
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
-          if-no-files-found: error
+          name: ${{ matrix.artifact_stem }}-${{ steps.ver.outputs.version }}
+          path: |
+            cforge-${{ steps.ver.outputs.version }}-${{ matrix.artifact_stem }}.tar.gz
+            cforge-${{ steps.ver.outputs.version }}-${{ matrix.artifact_stem }}.zip
+          if-no-files-found: warn
 
   debian:
+    needs: validate-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Obtener versión
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - name: Construir paquete Debian nativo
-        run: packaging/debian/build-deb.sh "${GITHUB_REF_NAME#v}" amd64
+        run: packaging/debian/build-deb.sh "${{ steps.ver.outputs.version }}" amd64
       - uses: actions/upload-artifact@v4
         with:
-          name: cforge-debian
+          name: cforge-debian-${{ steps.ver.outputs.version }}
           path: dist/*.deb
 
   release:
     needs: [native, debian]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Obtener versión
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
           merge-multiple: true
+
       - name: Generar sumas SHA-256
         run: |
           cd release-assets
           sha256sum * > SHA256SUMS
+
+      - name: Generar release-manifest.json
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          BASE="https://github.com/VemorisGroup/C-Forge/releases/download/v${VERSION}"
+          cat > release-assets/release-manifest.json <<EOF
+          {
+            "version": "${VERSION}",
+            "date": "${DATE}",
+            "channel": "stable",
+            "artifacts": {
+              "macos-arm64": "${BASE}/cforge-${VERSION}-cforge-macos-arm64.tar.gz",
+              "linux-x64":   "${BASE}/cforge-${VERSION}-cforge-linux-x64.tar.gz",
+              "windows-x64": "${BASE}/cforge-${VERSION}-cforge-windows-x64.zip",
+              "debian-amd64": "${BASE}/cforge_${VERSION}_amd64.deb"
+            },
+            "sha256sums": "${BASE}/SHA256SUMS",
+            "install_script": "https://raw.githubusercontent.com/VemorisGroup/C-Forge/main/install.sh",
+            "changelog": "https://github.com/VemorisGroup/C-Forge/blob/main/CHANGELOG.md"
+          }
+          EOF
+
       - name: Publicar artefactos verificados
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release-assets/* --generate-notes --title "C-Forge $GITHUB_REF_NAME"
+        run: |
+          gh release create "$GITHUB_REF_NAME" release-assets/* \
+            --generate-notes \
+            --title "C-Forge $GITHUB_REF_NAME"

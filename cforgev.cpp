@@ -7180,7 +7180,9 @@ const char* cfv_eval_json(const char* code) {
 }
 
 // Obtener version del interprete
-const char* cfv_version() { return "3.6.0"; }
+// FUENTE DE VERDAD: Makefile VERSION := 3.3.0
+// Actualizar ambos a la vez con: sed -i 's/3\.3\.0/NUEVA/g' Makefile cforgev.cpp
+const char* cfv_version() { return "3.3.0"; }
 
 // Verificar disponibilidad de SDL2
 int cfv_has_sdl2() {
@@ -7204,16 +7206,22 @@ int cfv_has_openssl() {
 
 [[maybe_unused]] static void cfv_print_cli_help() {
   std::cout
-    << "C-Forge 3.2.0\n"
-    << "Uso:\n"
+    << "C-Forge " << cfv_version() << "\n"
+    << "Sitio:   https://c-forge.org\n"
+    << "\nUso:\n"
     << "  cforge archivo.cfv              Ejecutar un programa\n"
     << "  cforge run archivo.cfv          Ejecutar un programa\n"
-    << "  cforge check archivo.cfv        Verificar sintaxis\n"
+    << "  cforge check archivo.cfv        Verificar sintaxis sin ejecutar\n"
     << "  cforge test archivo.cfv         Ejecutar pruebas C-Forge\n"
-    << "  cforge fmt archivo.cfv          Verificar formato y sintaxis\n"
+    << "  cforge fmt archivo.cfv          Verificar formato (sin modificar)\n"
     << "  cforge repl                     Abrir consola interactiva\n"
+    << "  cforge new <nombre>             Crear nuevo proyecto\n"
+    << "  cforge init                     Inicializar proyecto en directorio actual\n"
+    << "  cforge build archivo.cfv [-o salida] [--sdl2]  Compilar a binario nativo\n"
+    << "  cforge doctor                   Diagnosticar entorno de C-Forge\n"
     << "  cforge --version                Mostrar versión\n"
-    << "  cforge --help                   Mostrar esta ayuda\n";
+    << "  cforge --help                   Mostrar esta ayuda\n"
+    << "\nMás información: cforge --help <comando>\n";
 }
 
 [[maybe_unused]] static std::string cfv_read_source_or_throw(const std::filesystem::path& path) {
@@ -8103,6 +8111,124 @@ int main(int argc, char** argv){
           argv[i] = argv[i + 1];
         }
         --argc;
+      } else if (command == "new") {
+        // cforge new <nombre-proyecto>
+        if (argc < 3) throw std::runtime_error("uso: cforge new <nombre>");
+        std::string nombre = argv[2];
+        // Validar nombre
+        for (char c : nombre) {
+          if (!std::isalnum(c) && c != '-' && c != '_') {
+            throw std::runtime_error("nombre de proyecto inválido: solo letras, números, guiones y guiones bajos");
+          }
+        }
+        namespace fs = std::filesystem;
+        fs::path dir(nombre);
+        if (fs::exists(dir)) throw std::runtime_error("el directorio '" + nombre + "' ya existe");
+        fs::create_directories(dir);
+        // main.cfv
+        {
+          std::ofstream f(dir / "main.cfv");
+          f << "// " << nombre << " — programa C-Forge\n"
+            << "// Creado con cforge new " << nombre << "\n\n"
+            << "funcion principal(): nulo {\n"
+            << "    mostrar(\"Hola desde " << nombre << "\")\n"
+            << "}\n\n"
+            << "principal()\n";
+        }
+        // cforge.json — manifest del proyecto
+        {
+          std::ofstream f(dir / "cforge.json");
+          f << "{\n"
+            << "  \"nombre\": \"" << nombre << "\",\n"
+            << "  \"version\": \"0.1.0\",\n"
+            << "  \"descripcion\": \"\",\n"
+            << "  \"autor\": \"\",\n"
+            << "  \"licencia\": \"MIT\",\n"
+            << "  \"dependencias\": {},\n"
+            << "  \"entrada\": \"main.cfv\"\n"
+            << "}\n";
+        }
+        // .gitignore
+        {
+          std::ofstream f(dir / ".gitignore");
+          f << "*.o\nbuild/\ndist/\n";
+        }
+        std::cout << "[C-Forge] Proyecto '" << nombre << "' creado.\n"
+                  << "  cd " << nombre << "\n"
+                  << "  cforge main.cfv\n";
+        return 0;
+      } else if (command == "init") {
+        // cforge init — inicializar proyecto en directorio actual
+        namespace fs = std::filesystem;
+        std::string nombre = fs::current_path().filename().string();
+        fs::path manifest("cforge.json");
+        if (fs::exists(manifest)) {
+          std::cout << "[C-Forge] cforge.json ya existe.\n";
+          return 0;
+        }
+        {
+          std::ofstream f(manifest);
+          f << "{\n"
+            << "  \"nombre\": \"" << nombre << "\",\n"
+            << "  \"version\": \"0.1.0\",\n"
+            << "  \"descripcion\": \"\",\n"
+            << "  \"autor\": \"\",\n"
+            << "  \"licencia\": \"MIT\",\n"
+            << "  \"dependencias\": {},\n"
+            << "  \"entrada\": \"main.cfv\"\n"
+            << "}\n";
+        }
+        if (!fs::exists("main.cfv")) {
+          std::ofstream f("main.cfv");
+          f << "mostrar(\"Hola C-Forge\")\n";
+        }
+        std::cout << "[C-Forge] Proyecto inicializado en directorio actual.\n";
+        return 0;
+      } else if (command == "doctor") {
+        // cforge doctor — diagnosticar entorno
+        std::cout << "C-Forge " << cfv_version() << " — Diagnóstico de entorno\n\n";
+        // Versión
+        std::cout << "  [OK] cforge " << cfv_version() << "\n";
+        // CFORGE_STDLIB
+        const char* stdlib_env = std::getenv("CFORGE_STDLIB");
+        if (stdlib_env && std::filesystem::exists(stdlib_env)) {
+          std::cout << "  [OK] CFORGE_STDLIB = " << stdlib_env << "\n";
+        } else if (stdlib_env) {
+          std::cout << "  [WARN] CFORGE_STDLIB apunta a una ruta que no existe: " << stdlib_env << "\n";
+        } else {
+          // buscar stdlib en rutas estándar
+          bool found_stdlib = false;
+          for (const auto& p : {"/usr/local/lib/cforge/stdlib", "/usr/lib/cforge/stdlib", "./stdlib"}) {
+            if (std::filesystem::exists(p)) {
+              std::cout << "  [OK] stdlib encontrada en " << p << " (define CFORGE_STDLIB para fijarla)\n";
+              found_stdlib = true;
+              break;
+            }
+          }
+          if (!found_stdlib) std::cout << "  [WARN] CFORGE_STDLIB no definida y no se encontró stdlib en rutas estándar\n";
+        }
+        // Compilador C++ (para cforge build/compile)
+        for (const auto& cxx : {"clang++", "g++"}) {
+          if (std::system(("command -v " + std::string(cxx) + " >/dev/null 2>&1").c_str()) == 0) {
+            std::cout << "  [OK] " << cxx << " disponible para compilación nativa\n";
+            break;
+          }
+        }
+        // OpenSSL
+#ifdef CFV_WITH_OPENSSL
+        std::cout << "  [OK] OpenSSL: crypto activo\n";
+#else
+        std::cout << "  [INFO] OpenSSL no compilado — criptografía AES no disponible\n";
+#endif
+        // SQLite
+#ifdef CFV_WITH_SQLITE
+        std::cout << "  [OK] SQLite: base de datos activa\n";
+#else
+        std::cout << "  [INFO] SQLite no compilado — stdlib/db.cfv en modo experimental\n";
+#endif
+        std::cout << "\nDocumentación: https://c-forge.org\n";
+        std::cout << "Problemas:     https://github.com/VemorisGroup/C-Forge/issues\n";
+        return 0;
       } else if (!command.empty() && command.front() == '-') {
         throw std::runtime_error("opción desconocida '" + command + "'");
       }

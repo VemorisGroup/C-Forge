@@ -289,11 +289,11 @@ funcion enrutar(req: mapa): nulo {
             respuesta_error(req, 404, "Ruta no encontrada: " + metodo + " " + ruta)
         }
         incrementar_metrica("peticiones_ok")
-    } atrapar (err) {
+    } capturar (err) {
         incrementar_metrica("peticiones_error")
         intentar {
             respuesta_error(req, 500, "Error interno: " + err)
-        } atrapar (e2) {
+        } capturar (e2) {
             // Ignorar error al responder
         }
     }

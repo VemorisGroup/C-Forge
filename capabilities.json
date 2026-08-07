@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "language_version": "2.6.0",
+  "language_version": "3.3.0",
   "overall_status": "stable",
   "product_direction": "C-Forge autónomo: programas, biblioteca estándar y pruebas en .cfv; C++ reservado al bootstrap nativo.",
   "quality_gate": {
@@ -35,7 +35,7 @@
       "id": "native-cli",
       "name": "CLI autónomo",
       "status": "verified-stable",
-      "scope": "Ejecución, REPL, versión, ayuda, check, test y validación no destructiva de formato sin Python.",
+      "scope": "Ejecución, REPL, versión, ayuda, check, test, fmt, new, init y doctor implementados en el motor nativo. Sin dependencias externas ni Python.",
       "evidence": [
         "cforgev.cpp",
         "Makefile",

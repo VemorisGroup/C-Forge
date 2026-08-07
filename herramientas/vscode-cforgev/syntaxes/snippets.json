@@ -1,0 +1,125 @@
+{
+  "Función": {
+    "prefix": "fun",
+    "body": [
+      "funcion ${1:nombre}(${2:parametros}): ${3:nulo} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Declaración de función C-Forge"
+  },
+  "Función con retorno": {
+    "prefix": "funr",
+    "body": [
+      "funcion ${1:nombre}(${2:parametros}): ${3:texto} {",
+      "\tretornar $0",
+      "}"
+    ],
+    "description": "Función que retorna un valor"
+  },
+  "Variable": {
+    "prefix": "sea",
+    "body": ["sea ${1:nombre} = $0"],
+    "description": "Declaración de variable"
+  },
+  "Si/Sino": {
+    "prefix": "si",
+    "body": [
+      "si (${1:condicion}) {",
+      "\t$2",
+      "} sino {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Condicional si/sino"
+  },
+  "Mientras": {
+    "prefix": "mientras",
+    "body": [
+      "mientras (${1:condicion}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Bucle mientras"
+  },
+  "Para en": {
+    "prefix": "para",
+    "body": [
+      "para ${1:elem} en ${2:coleccion} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Bucle para...en"
+  },
+  "Intentar/Capturar": {
+    "prefix": "intentar",
+    "body": [
+      "intentar {",
+      "\t$1",
+      "} capturar(${2:ex}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Manejo de errores intentar/capturar"
+  },
+  "Clase": {
+    "prefix": "clase",
+    "body": [
+      "clase ${1:Nombre} {",
+      "\tfuncion constructor(${2:params}): nulo {",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "Declaración de clase"
+  },
+  "Importar": {
+    "prefix": "imp",
+    "body": ["importar \"${1:stdlib/matematica.cfv}\""],
+    "description": "Importar módulo"
+  },
+  "Mostrar": {
+    "prefix": "mostrar",
+    "body": ["mostrar($0)"],
+    "description": "Imprimir en consola"
+  },
+  "Bucle SDL principal": {
+    "prefix": "sdlloop",
+    "body": [
+      "sea corriendo = verdadero",
+      "mientras (corriendo) {",
+      "\tpara e en sdl_eventos() {",
+      "\t\tintentar {",
+      "\t\t\tsi (e[\"salir\"] == verdadero) { corriendo = falso }",
+      "\t\t} capturar(ex) { }",
+      "\t\tintentar {",
+      "\t\t\tsi (e[\"tipo\"] == SDL_TIPO_TECLA_DOWN y e[\"tecla\"] == SDL_TECLA_ESC) {",
+      "\t\t\t\tcorriendo = falso",
+      "\t\t\t}",
+      "\t\t} capturar(ex) { }",
+      "\t}",
+      "\tsdl_color(ren, 0, 0, 0, 255)",
+      "\tsdl_limpiar(ren)",
+      "\t$0",
+      "\tsdl_presentar(ren)",
+      "\tsdl_esperar(16)",
+      "}"
+    ],
+    "description": "Bucle de juego SDL2 estándar"
+  },
+  "Proyecto nuevo (cforge.json)": {
+    "prefix": "cforge-json",
+    "body": [
+      "{",
+      "  \"nombre\": \"${1:mi-proyecto}\",",
+      "  \"version\": \"0.1.0\",",
+      "  \"descripcion\": \"${2}\",",
+      "  \"autor\": \"${3}\",",
+      "  \"licencia\": \"MIT\",",
+      "  \"dependencias\": {},",
+      "  \"entrada\": \"main.cfv\"",
+      "}"
+    ],
+    "description": "Manifiesto de proyecto C-Forge"
+  }
+}

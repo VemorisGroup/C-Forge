@@ -5,8 +5,21 @@
 set -e
 
 REPO="VemorisGroup/C-Forge"
-VERSION="2.6.0"
 INSTALL_DIR="/usr/local/bin"
+
+# Auto-detectar la versión más reciente desde GitHub Releases API
+echo ""
+echo "  Detectando última versión disponible..."
+VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+    | grep '"tag_name"' \
+    | head -1 \
+    | sed 's/.*"v\?\([^"]*\)".*/\1/')
+if [ -z "$VERSION" ]; then
+    VERSION="3.3.0"
+    echo "  (no se pudo consultar GitHub — usando versión por defecto: ${VERSION})"
+else
+    echo "  Versión: ${VERSION}"
+fi
 BINARY_NAME="cforge"
 STDLIB_DIR="/usr/local/lib/cforge/stdlib"
 
@@ -193,11 +206,14 @@ echo -e "  Añade al .bashrc / .zshrc:"
 echo -e "    export CFORGE_STDLIB=\"${STDLIB_DIR}\""
 echo ""
 echo -e "  Comandos disponibles:"
-echo -e "    cforge run archivo.cfv  -- ejecutar un programa"
-echo -e "    cforge repl             -- REPL interactivo"
+echo -e "    cforge run archivo.cfv   -- ejecutar un programa"
+echo -e "    cforge repl              -- REPL interactivo"
+echo -e "    cforge new <nombre>      -- crear nuevo proyecto"
+echo -e "    cforge init              -- inicializar proyecto en directorio actual"
+echo -e "    cforge doctor            -- diagnosticar entorno"
 echo -e "    cforge check archivo.cfv -- verificar sintaxis"
-echo -e "    cforge test archivo.cfv -- ejecutar pruebas"
-echo -e "    cforge fmt archivo.cfv  -- verificar formato"
+echo -e "    cforge test archivo.cfv  -- ejecutar pruebas"
+echo -e "    cforge fmt archivo.cfv   -- verificar formato"
 echo ""
 echo -e "  Documentacion: https://github.com/${REPO}"
 echo ""

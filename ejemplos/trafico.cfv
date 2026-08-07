@@ -1,0 +1,377 @@
+// ══════════════════════════════════════════════════════════════════════════════
+// simulador_trafico.cfv — Simulador de tráfico urbano · C-Forge v3.6.2
+// Prueba: structs/mapas, Dijkstra recursivo, event-loop, errores, métricas
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── 1. GRAFO DE LA CIUDAD ────────────────────────────────────────────────────
+// [AUDIT] Mapas anidados, listas de mapas, literales complejos
+
+funcion crear_ciudad(): mapa {
+    sea aristas = {
+        "A": [{"dest":"B","w":4},{"dest":"C","w":2}],
+        "B": [{"dest":"A","w":4},{"dest":"D","w":5},{"dest":"E","w":1}],
+        "C": [{"dest":"A","w":2},{"dest":"F","w":8},{"dest":"D","w":3}],
+        "D": [{"dest":"B","w":5},{"dest":"C","w":3},{"dest":"G","w":2}],
+        "E": [{"dest":"B","w":1},{"dest":"H","w":6}],
+        "F": [{"dest":"C","w":8},{"dest":"G","w":4}],
+        "G": [{"dest":"D","w":2},{"dest":"F","w":4},{"dest":"H","w":1}],
+        "H": [{"dest":"E","w":6},{"dest":"G","w":1}]
+    }
+    sea nodos = ["A","B","C","D","E","F","G","H"]
+    retornar {"nodos": nodos, "aristas": aristas}
+}
+
+// ── 2. HELPERS ────────────────────────────────────────────────────────────────
+// [AUDIT] Funciones puras, recursión (invertir), manipulación de listas
+
+funcion invertir(lst: lista): lista {
+    sea r = []
+    sea i = longitud(lst) - 1
+    mientras (i >= 0) {
+        agregar(r, lst[i])
+        i = i - 1
+    }
+    retornar r
+}
+
+funcion lista_a_texto(lst: lista): texto {
+    sea r = ""
+    sea primero = verdadero
+    para x en lst {
+        si (no primero) { r = r + "→" }
+        r = r + x
+        primero = falso
+    }
+    retornar r
+}
+
+funcion min_no_visitado(nodos: lista, dist: mapa, visitado: mapa): texto {
+    sea mejor = nulo
+    sea mejor_d = 999999
+    para n en nodos {
+        si (no visitado[n]) {
+            si (dist[n] < mejor_d) {
+                mejor_d = dist[n]
+                mejor   = n
+            }
+        }
+    }
+    retornar mejor
+}
+
+// ── 3. DIJKSTRA ───────────────────────────────────────────────────────────────
+// [AUDIT] Algoritmo de grafos, mapas como tablas hash, bucles anidados, comparación nulo
+
+funcion dijkstra(ciudad: mapa, origen: texto, destino: texto): mapa {
+    sea nodos   = ciudad["nodos"]
+    sea aristas = ciudad["aristas"]
+
+    sea dist     = {}
+    sea prev     = {}
+    sea visitado = {}
+
+    para n en nodos {
+        dist[n]     = 999999
+        prev[n]     = "?"
+        visitado[n] = falso
+    }
+    dist[origen] = 0
+
+    sea pasos = longitud(nodos)
+    sea paso  = 0
+    mientras (paso < pasos) {
+        sea actual = min_no_visitado(nodos, dist, visitado)
+        si (actual == nulo) {
+            paso = pasos  // salir
+        } sino {
+            visitado[actual] = verdadero
+            si (actual == destino) {
+                paso = pasos  // encontrado, salir
+            } sino {
+                para vecino en aristas[actual] {
+                    sea nd    = vecino["dest"]
+                    sea nueva = dist[actual] + vecino["w"]
+                    si (nueva < dist[nd]) {
+                        dist[nd] = nueva
+                        prev[nd] = actual
+                    }
+                }
+                paso = paso + 1
+            }
+        }
+    }
+
+    // Reconstruir ruta (iterativo)
+    sea ruta = []
+    sea cur  = destino
+    sea continuar_rec = verdadero
+    mientras (continuar_rec) {
+        agregar(ruta, cur)
+        si (cur == origen o cur == "?") {
+            continuar_rec = falso
+        } sino {
+            cur = prev[cur]
+        }
+    }
+
+    ruta = invertir(ruta)
+    retornar {"ruta": ruta, "costo": dist[destino]}
+}
+
+// ── 4. VALIDACIÓN CON MANEJO DE ERRORES ──────────────────────────────────────
+// [AUDIT] intentar/capturar, lanzar, validación de estados inválidos
+
+funcion validar_ruta(ruta: lista, origen: texto, destino: texto): nulo {
+    si (longitud(ruta) == 0) {
+        lanzar("Ruta vacía entre " + origen + " y " + destino)
+    }
+    si (ruta[0] != origen) {
+        lanzar("La ruta no comienza en " + origen)
+    }
+    si (ruta[longitud(ruta) - 1] != destino) {
+        lanzar("La ruta no termina en " + destino + " (posible nodo desconectado)")
+    }
+}
+
+// ── 5. SEMÁFOROS ──────────────────────────────────────────────────────────────
+// [AUDIT] Estado mutable en mapas, ciclos de tiempo, lógica booleana
+
+funcion crear_semaforo(ciclo_verde: numero, ciclo_rojo: numero): mapa {
+    retornar {
+        "tick":        0,
+        "ciclo_verde": ciclo_verde,
+        "ciclo_rojo":  ciclo_rojo,
+        "verde":       verdadero
+    }
+}
+
+funcion tick_semaforo(sem: mapa): mapa {
+    sem["tick"] = sem["tick"] + 1
+    si (sem["verde"]) {
+        si (sem["tick"] >= sem["ciclo_verde"]) {
+            sem["tick"]  = 0
+            sem["verde"] = falso
+        }
+    } sino {
+        si (sem["tick"] >= sem["ciclo_rojo"]) {
+            sem["tick"]  = 0
+            sem["verde"] = verdadero
+        }
+    }
+    retornar sem
+}
+
+funcion semaforo_verde_en(semaforos: mapa, nodo: texto): booleano {
+    intentar {
+        sea sem = semaforos[nodo]
+        si (sem == nulo) { retornar verdadero }
+        retornar sem["verde"]
+    } capturar(e) {
+        retornar verdadero  // nodo sin semáforo = paso libre
+    }
+}
+
+// ── 6. VEHÍCULOS ─────────────────────────────────────────────────────────────
+// [AUDIT] Tipos compuestos como registros, referencias a colecciones, ID global
+
+sea _siguiente_id = 0
+
+funcion crear_vehiculo(origen: texto, destino: texto, ciudad: mapa): mapa {
+    _siguiente_id = _siguiente_id + 1
+    sea res = dijkstra(ciudad, origen, destino)
+    retornar {
+        "id":       _siguiente_id,
+        "origen":   origen,
+        "destino":  destino,
+        "ruta":     res["ruta"],
+        "costo":    res["costo"],
+        "paso":     0,
+        "espera":   0,
+        "tiempo":   0,
+        "llegado":  falso,
+        "bloqueado":falso
+    }
+}
+
+funcion avanzar_vehiculo(v: mapa, semaforos: mapa): mapa {
+    si (v["llegado"]) { retornar v }
+
+    sea ruta  = v["ruta"]
+    sea paso  = v["paso"]
+    sea total = longitud(ruta)
+
+    si (paso >= total - 1) {
+        v["llegado"] = verdadero
+        retornar v
+    }
+
+    sea nodo_actual = ruta[paso]
+
+    si (no semaforo_verde_en(semaforos, nodo_actual)) {
+        // Semáforo en rojo — esperar
+        v["espera"]    = v["espera"] + 1
+        v["tiempo"]    = v["tiempo"] + 1
+        v["bloqueado"] = verdadero
+        retornar v
+    }
+
+    v["bloqueado"] = falso
+    v["paso"]      = paso + 1
+    v["tiempo"]    = v["tiempo"] + 1
+    retornar v
+}
+
+// ── 7. MÉTRICAS ───────────────────────────────────────────────────────────────
+// [AUDIT] Agregación, división segura, formateo de salida
+
+funcion calcular_metricas(vehiculos: lista, ticks: numero): mapa {
+    sea n_total   = longitud(vehiculos)
+    sea n_llegado = 0
+    sea sum_espera = 0
+    sea sum_tiempo = 0
+
+    para v en vehiculos {
+        sum_espera = sum_espera + v["espera"]
+        sum_tiempo = sum_tiempo + v["tiempo"]
+        si (v["llegado"]) { n_llegado = n_llegado + 1 }
+    }
+
+    sea espera_media = 0
+    sea eficiencia   = 0
+    si (n_total > 0) {
+        espera_media = redondear(sum_espera / n_total)
+        eficiencia   = redondear((n_llegado * 100) / n_total)
+    }
+
+    sea densidad = 0
+    si (ticks > 0) {
+        densidad = redondear(sum_tiempo / ticks)
+    }
+
+    retornar {
+        "total":       n_total,
+        "llegados":    n_llegado,
+        "espera_media":espera_media,
+        "eficiencia":  eficiencia,
+        "densidad":    densidad,
+        "ticks":       ticks
+    }
+}
+
+funcion imprimir_metricas(m: mapa): nulo {
+    mostrar("╔══════════════════════════════════════╗")
+    mostrar("║     MÉTRICAS DE TRÁFICO URBANO       ║")
+    mostrar("╠══════════════════════════════════════╣")
+    mostrar("║  Vehículos simulados : " + m["total"])
+    mostrar("║  Llegaron a destino  : " + m["llegados"])
+    mostrar("║  Espera media (ticks): " + m["espera_media"])
+    mostrar("║  Eficiencia          : " + m["eficiencia"] + "%")
+    mostrar("║  Densidad media      : " + m["densidad"] + " veh/tick")
+    mostrar("║  Ticks simulados     : " + m["ticks"])
+    mostrar("╚══════════════════════════════════════╝")
+}
+
+// ── 8. EVENT-LOOP PRINCIPAL ───────────────────────────────────────────────────
+// [AUDIT] Ciclo de eventos, actualización de estado múltiple, log periódico
+
+funcion simular(n_ticks: numero): nulo {
+    mostrar("╔══════════════════════════════════════╗")
+    mostrar("║  SIMULADOR DE TRÁFICO · C-Forge      ║")
+    mostrar("╚══════════════════════════════════════╝")
+
+    sea ciudad = crear_ciudad()
+
+    // Semáforos (nodo → configuración)
+    sea semaforos = {}
+    semaforos["B"] = crear_semaforo(3, 2)   // verde 3 ticks, rojo 2
+    semaforos["D"] = crear_semaforo(4, 3)
+    semaforos["G"] = crear_semaforo(2, 4)
+    semaforos["E"] = crear_semaforo(5, 2)
+
+    // Pares origen→destino
+    sea pares = [
+        ["A","H"], ["C","H"], ["A","G"],
+        ["B","F"], ["E","F"], ["H","A"],
+        ["F","B"], ["D","E"], ["G","C"]
+    ]
+
+    mostrar("\n[FASE 1] Calculando rutas (Dijkstra)...")
+    sea vehiculos = []
+
+    para par en pares {
+        intentar {
+            sea v = crear_vehiculo(par[0], par[1], ciudad)
+            validar_ruta(v["ruta"], par[0], par[1])
+            mostrar("  V" + v["id"] + " | " + par[0] + "→" + par[1] +
+                    " | ruta: " + lista_a_texto(v["ruta"]) +
+                    " | costo: " + v["costo"])
+            agregar(vehiculos, v)
+        } capturar(err) {
+            mostrar("  [ERROR] " + par[0] + "→" + par[1] + ": " + err)
+        }
+    }
+
+    mostrar("\n[FASE 2] Simulando " + n_ticks + " ticks...\n")
+
+    sea tick = 0
+    mientras (tick < n_ticks) {
+
+        // Actualizar semáforos
+        semaforos["B"] = tick_semaforo(semaforos["B"])
+        semaforos["D"] = tick_semaforo(semaforos["D"])
+        semaforos["G"] = tick_semaforo(semaforos["G"])
+        semaforos["E"] = tick_semaforo(semaforos["E"])
+
+        // Avanzar todos los vehículos
+        sea i = 0
+        mientras (i < longitud(vehiculos)) {
+            vehiculos[i] = avanzar_vehiculo(vehiculos[i], semaforos)
+            i = i + 1
+        }
+
+        // Log cada 5 ticks
+        si (tick % 5 == 0) {
+            sea llegados = 0
+            sea bloqueados = 0
+            para v en vehiculos {
+                si (v["llegado"])   { llegados   = llegados + 1 }
+                si (v["bloqueado"]) { bloqueados = bloqueados + 1 }
+            }
+            mostrar("  tick " + tick +
+                    " | llegados: " + llegados + "/" + longitud(vehiculos) +
+                    " | bloqueados: " + bloqueados)
+        }
+
+        tick = tick + 1
+    }
+
+    // Métricas finales
+    mostrar("")
+    sea m = calcular_metricas(vehiculos, n_ticks)
+    imprimir_metricas(m)
+
+    // Detalle por vehículo
+    mostrar("\n[DETALLE POR VEHÍCULO]")
+    para v en vehiculos {
+        sea estado = "en ruta"
+        si (v["llegado"]) { estado = "llegó ✓" }
+        mostrar("  V" + v["id"] + " " + v["origen"] + "→" + v["destino"] +
+                " | tiempo: " + v["tiempo"] +
+                " | espera: " + v["espera"] +
+                " | " + estado)
+    }
+}
+
+// ── AUDITORÍA ─────────────────────────────────────────────────────────────────
+// Bloque         | Característica evaluada
+// crear_ciudad   | Mapas anidados, listas de mapas, literales complejos
+// invertir       | Recursión iterativa, manipulación índices negativos
+// dijkstra       | Algoritmo O(V²), mapas como tablas, bucles anidados, nulo
+// validar_ruta   | intentar/capturar/lanzar, estados inválidos
+// semáforos      | Estado mutable, lógica temporal, booleanos
+// crear_vehiculo | ID global mutable, composición de tipos
+// avanzar_vehiculo| Acceso a colección por índice, guardas, retorno precoz
+// calcular_metricas| Agregación numérica, división segura, formateo
+// simular        | Event-loop, actualización paralela de agentes, log
+
+simular(25)
