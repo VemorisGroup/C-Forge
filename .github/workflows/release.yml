@@ -23,8 +23,11 @@ jobs:
         id: ver
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Instalar dependencias mínimas
+        run: sudo apt-get update -qq && sudo apt-get install -y g++
+
       - name: Compilar cforge para verificar versión en binario
-        run: make clean && make build
+        run: g++ -std=c++20 -O0 -I./include -o cforge cforgev.cpp -lpthread -ldl
 
       - name: Verificar versión en Makefile, binario y cforgev.cpp
         run: |
@@ -32,187 +35,137 @@ jobs:
           MF=$(grep '^VERSION' Makefile | head -1 | sed 's/VERSION[[:space:]]*:=[[:space:]]*//')
           BIN=$(./cforge --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
           CPP=$(grep 'return "' cforgev.cpp | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-          echo "Tag:        $TAG"
-          echo "Makefile:   $MF"
-          echo "Binario:    $BIN"
-          echo "cforgev.cpp:$CPP"
+          echo "Tag:         $TAG"
+          echo "Makefile:    $MF"
+          echo "Binario:     $BIN"
+          echo "cforgev.cpp: $CPP"
           FAIL=0
-          [ "$TAG" != "$MF"  ] && echo "ERROR: tag != Makefile"  && FAIL=1
-          [ "$TAG" != "$BIN" ] && echo "ERROR: tag != binario"   && FAIL=1
+          [ "$TAG" != "$MF"  ] && echo "ERROR: tag != Makefile"   && FAIL=1
+          [ "$TAG" != "$BIN" ] && echo "ERROR: tag != binario"    && FAIL=1
           [ "$TAG" != "$CPP" ] && echo "ERROR: tag != cforgev.cpp" && FAIL=1
           [ $FAIL -eq 1 ] && exit 1
-          echo "OK — versión $TAG consistente en todas las fuentes"
+          echo "OK — versión $TAG consistente"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# JOB 1 — Gate completo Linux (release-check + sanitizers)
-# ─────────────────────────────────────────────────────────────────────────────
-  gate-linux:
-    name: Gate Linux (release-check)
-    needs: validate-version
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Instalar dependencias
-        run: sudo apt-get update -qq && sudo apt-get install -y libssl-dev libsqlite3-dev
-      - name: Gate completo
-        run: make release-check
-
-# ─────────────────────────────────────────────────────────────────────────────
-# JOB 2 — Gate macOS
-# ─────────────────────────────────────────────────────────────────────────────
-  gate-macos:
-    name: Gate macOS (release-check)
-    needs: validate-version
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Instalar dependencias
-        run: brew install openssl sqlite
-      - name: Gate completo
-        run: make release-check CXX=clang++
-
-# ─────────────────────────────────────────────────────────────────────────────
-# JOB 3 — Gate Windows (build + tests)
-# ─────────────────────────────────────────────────────────────────────────────
-  gate-windows:
-    name: Gate Windows (build + tests)
-    needs: validate-version
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Compilar con MSVC
-        shell: cmd
-        run: cl /std:c++20 /EHsc /O2 /I"include" /Fe:cforge.exe cforgev.cpp ws2_32.lib
-      - name: Gate Windows
-        shell: pwsh
-        run: |
-          $env:CFORGE_STDLIB = "$PWD\stdlib"
-          .\cforge.exe --version
-          .\cforge.exe --help | Out-Null
-          Get-ChildItem tests\cfv\*.cfv | ForEach-Object {
-            & .\cforge.exe test $_.FullName
-            if ($LASTEXITCODE -ne 0) { Write-Error "FAIL: $($_.Name)"; exit 1 }
-          }
-          Write-Host "OK — todos los tests pasan en Windows"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# JOB 4a — Build Linux x64 + .tar.gz
+# JOB 1 — Build Linux x64 + gate + .tar.gz + .deb
 # ─────────────────────────────────────────────────────────────────────────────
   build-linux:
     name: Build Linux x64
-    needs: [gate-linux, gate-macos, gate-windows]
+    needs: validate-version
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.validate-version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Instalar dependencias
-        run: sudo apt-get update -qq && sudo apt-get install -y libssl-dev libsqlite3-dev
-      - name: Compilar release
-        run: |
-          make clean
-          make build CXXFLAGS="-std=c++20 -O2 -DNDEBUG"
-          ./cforge --version
-      - name: Smoke test post-build
-        run: |
-          CFORGE_STDLIB=./stdlib ./cforge tests/install-smoke/hello.cfv
+        run: sudo apt-get update -qq && sudo apt-get install -y libssl-dev libsqlite3-dev dpkg-dev
+
+      - name: Gate completo (release-check)
+        run: make release-check
+
       - name: Empaquetar tar.gz
         run: |
           mkdir -p pkg/cforge-${VERSION}-linux-x64
           cp cforge pkg/cforge-${VERSION}-linux-x64/
           cp -r stdlib pkg/cforge-${VERSION}-linux-x64/
-          cp install.sh pkg/cforge-${VERSION}-linux-x64/
-          cp README.md pkg/cforge-${VERSION}-linux-x64/
+          cp install.sh README.md pkg/cforge-${VERSION}-linux-x64/
           cd pkg
           tar czf cforge-${VERSION}-linux-x64.tar.gz cforge-${VERSION}-linux-x64/
-          echo "TARBALL=pkg/cforge-${VERSION}-linux-x64.tar.gz" >> $GITHUB_ENV
+
       - name: Empaquetar .deb
         run: packaging/debian/build-deb.sh "${VERSION}" amd64
+
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-x64-${{ env.VERSION }}
+          name: linux-x64
           path: |
             pkg/cforge-${{ env.VERSION }}-linux-x64.tar.gz
             dist/cforge_${{ env.VERSION }}_amd64.deb
           if-no-files-found: error
 
 # ─────────────────────────────────────────────────────────────────────────────
-# JOB 4b — Build macOS ARM64 + .tar.gz
+# JOB 2 — Build macOS ARM64 + gate + .tar.gz
 # ─────────────────────────────────────────────────────────────────────────────
   build-macos:
     name: Build macOS ARM64
-    needs: [gate-linux, gate-macos, gate-windows]
+    needs: validate-version
     runs-on: macos-latest
     env:
       VERSION: ${{ needs.validate-version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Instalar dependencias
         run: brew install openssl sqlite
-      - name: Compilar release
-        run: |
-          make clean
-          make build CXX=clang++ CXXFLAGS="-std=c++20 -O2 -DNDEBUG"
-          ./cforge --version
-          file ./cforge
-      - name: Smoke test post-build
-        run: |
-          CFORGE_STDLIB=./stdlib ./cforge tests/install-smoke/hello.cfv
+
+      - name: Gate completo (release-check)
+        run: make release-check CXX=clang++
+
       - name: Empaquetar tar.gz
         run: |
           mkdir -p pkg/cforge-${VERSION}-macos-arm64
           cp cforge pkg/cforge-${VERSION}-macos-arm64/
           cp -r stdlib pkg/cforge-${VERSION}-macos-arm64/
-          cp install.sh pkg/cforge-${VERSION}-macos-arm64/
-          cp README.md pkg/cforge-${VERSION}-macos-arm64/
+          cp install.sh README.md pkg/cforge-${VERSION}-macos-arm64/
           cd pkg
           tar czf cforge-${VERSION}-macos-arm64.tar.gz cforge-${VERSION}-macos-arm64/
+
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-arm64-${{ env.VERSION }}
+          name: macos-arm64
           path: pkg/cforge-${{ env.VERSION }}-macos-arm64.tar.gz
           if-no-files-found: error
 
 # ─────────────────────────────────────────────────────────────────────────────
-# JOB 4c — Build Windows x64 + .zip
+# JOB 3 — Build Windows x64 + tests + .zip
 # ─────────────────────────────────────────────────────────────────────────────
   build-windows:
     name: Build Windows x64
-    needs: [gate-linux, gate-macos, gate-windows]
+    needs: validate-version
     runs-on: windows-latest
     env:
       VERSION: ${{ needs.validate-version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - name: Compilar release
+
+      - name: Compilar con MSVC
         shell: cmd
         run: cl /std:c++20 /EHsc /O2 /I"include" /Fe:cforge.exe cforgev.cpp ws2_32.lib
-      - name: Smoke test
+
+      - name: Tests Windows
         shell: pwsh
         run: |
           $env:CFORGE_STDLIB = "$PWD\stdlib"
           .\cforge.exe --version
           .\cforge.exe tests\install-smoke\hello.cfv
+          Get-ChildItem tests\cfv\*.cfv | ForEach-Object {
+            & .\cforge.exe test $_.FullName
+            if ($LASTEXITCODE -ne 0) { Write-Error "FAIL: $($_.Name)"; exit 1 }
+          }
+          Write-Host "OK — todos los tests pasan en Windows"
+
       - name: Empaquetar .zip
         shell: pwsh
         run: |
-          $v = "$env:VERSION"
+          $v = $env:VERSION
           New-Item -ItemType Directory -Force -Path "pkg\cforge-$v-windows-x64" | Out-Null
           Copy-Item cforge.exe "pkg\cforge-$v-windows-x64\"
           Copy-Item -Recurse stdlib "pkg\cforge-$v-windows-x64\"
           Copy-Item README.md "pkg\cforge-$v-windows-x64\"
           Compress-Archive -Path "pkg\cforge-$v-windows-x64" -DestinationPath "pkg\cforge-$v-windows-x64.zip"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-x64-${{ env.VERSION }}
+          name: windows-x64
           path: pkg/cforge-${{ env.VERSION }}-windows-x64.zip
           if-no-files-found: error
 
 # ─────────────────────────────────────────────────────────────────────────────
-# JOB 5 — Build extensión VS Code (.vsix)
+# JOB 4 — Build extensión VS Code (.vsix)
 # ─────────────────────────────────────────────────────────────────────────────
   build-vsix:
-    name: Build VS Code Extension (.vsix)
+    name: Build VS Code Extension
     needs: validate-version
     runs-on: ubuntu-latest
     env:
@@ -226,19 +179,19 @@ jobs:
         working-directory: herramientas/vscode-cforgev
         run: |
           npm install
-          npx vsce package --no-git-tag-version --out "c-forge-${VERSION}.vsix"
+          npx vsce package --out "c-forge-${VERSION}.vsix"
       - uses: actions/upload-artifact@v4
         with:
-          name: vsix-${{ env.VERSION }}
+          name: vsix
           path: herramientas/vscode-cforgev/c-forge-${{ env.VERSION }}.vsix
           if-no-files-found: error
 
 # ─────────────────────────────────────────────────────────────────────────────
-# JOB 6 — Publicar GitHub Release con todos los artefactos
+# JOB 5 — Publicar GitHub Release con todos los artefactos
 # ─────────────────────────────────────────────────────────────────────────────
   publish-release:
     name: Publicar Release
-    needs: [build-linux, build-macos, build-windows, build-vsix]
+    needs: [validate-version, build-linux, build-macos, build-windows, build-vsix]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.validate-version.outputs.version }}
@@ -257,7 +210,7 @@ jobs:
       - name: Generar SHA-256
         run: |
           cd release-assets
-          sha256sum * | sort > SHA256SUMS
+          sha256sum * > SHA256SUMS
           cat SHA256SUMS
 
       - name: Generar release-manifest.json
@@ -265,9 +218,7 @@ jobs:
           VERSION="${{ env.VERSION }}"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           BASE="https://github.com/VemorisGroup/C-Forge/releases/download/v${VERSION}"
-
-          # Leer hashes del SHA256SUMS
-          get_sha() { grep "$1" release-assets/SHA256SUMS 2>/dev/null | awk '{print $1}'; }
+          get_sha() { grep "$1" release-assets/SHA256SUMS 2>/dev/null | awk '{print $1}' | head -1; }
 
           LINUX_TGZ="cforge-${VERSION}-linux-x64.tar.gz"
           LINUX_DEB="cforge_${VERSION}_amd64.deb"
@@ -335,10 +286,8 @@ jobs:
             "sha256sums": "${BASE}/SHA256SUMS"
           }
           EOF
-          echo "release-manifest.json generado:"
-          cat release-assets/release-manifest.json
 
-      - name: Generar latest.json (para c-forge.org)
+      - name: Generar latest.json
         run: |
           VERSION="${{ env.VERSION }}"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -350,94 +299,20 @@ jobs:
           }
           EOF
 
-      - name: Generar notas de release
-        run: |
-          VERSION="${{ env.VERSION }}"
-          cat > release-notes.md <<'NOTES'
-          ## C-Forge $VERSION
-
-          C-Forge es un lenguaje de programación con tipado dinámico y biblioteca estándar
-          escrita en el propio lenguaje. Esta versión supera el gate `make release-check`
-          en macOS, Linux y Windows.
-
-          ### Instalación rápida
-
-          **macOS / Linux** (compila desde fuente):
-          ```sh
-          curl -fsSL https://raw.githubusercontent.com/VemorisGroup/C-Forge/main/install.sh | bash
-          ```
-
-          **Desde archivo**:
-          Descarga el `.tar.gz` para tu plataforma, extrae y añade el binario al PATH:
-          ```sh
-          tar xzf cforge-$VERSION-linux-x64.tar.gz
-          sudo cp cforge-$VERSION-linux-x64/cforge /usr/local/bin/
-          export CFORGE_STDLIB=/usr/local/lib/cforge/stdlib
-          ```
-
-          **Windows**: descarga el `.zip`, extrae y añade la carpeta al PATH del sistema.
-
-          **VS Code**: descarga el `.vsix` e instala con *Extensions → Install from VSIX*.
-
-          ### Hello World
-
-          ```text
-          mostrar("Hola C-Forge")
-          ```
-
-          ```sh
-          cforge hola.cfv
-          # → Hola C-Forge
-          ```
-
-          ### Nuevo en 3.3.0
-
-          - CLI completo: `cforge new <nombre>`, `cforge init`, `cforge doctor`
-          - SDL2 estable: simulador de tráfico urbano funcional
-          - Versión centralizada: Makefile como única fuente de verdad
-          - release-manifest.json generado automáticamente en cada release
-          - Extensión VS Code 3.3.0 con snippets reales
-
-          ### Plataformas
-
-          | Plataforma | Artifact | Estado |
-          |-----------|---------|--------|
-          | macOS ARM64 | `.tar.gz` | ✅ Verificado en CI |
-          | Linux x64 | `.tar.gz`, `.deb` | ✅ Verificado en CI |
-          | Windows x64 | `.zip` | ✅ Verificado en CI |
-          | VS Code | `.vsix` | ✅ Incluido |
-
-          ### Características experimentales
-
-          Red (web.cfv), SQLite (db.cfv), criptografía (crypto.cfv), gráficos (gl.cfv)
-          y backends de compilación directa están presentes pero marcados como
-          **experimentales** en `capabilities.json`.
-
-          ### Problemas conocidos
-
-          - La firma de código (notarization macOS, Authenticode Windows) requiere
-            certificados externos — los binarios pueden generar aviso de Gatekeeper.
-          - El `.vsix` no está en el Marketplace todavía — instalar manualmente.
-
-          ### Checksums
-
-          Ver `SHA256SUMS` adjunto en este release.
-          NOTES
-          sed -i "s/\$VERSION/$VERSION/g" release-notes.md
-
       - name: Publicar GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            release-assets/cforge-${{ env.VERSION }}-linux-x64.tar.gz \
-            release-assets/cforge_${{ env.VERSION }}_amd64.deb \
-            release-assets/cforge-${{ env.VERSION }}-macos-arm64.tar.gz \
-            release-assets/cforge-${{ env.VERSION }}-windows-x64.zip \
-            release-assets/c-forge-${{ env.VERSION }}.vsix \
+          VERSION="${{ env.VERSION }}"
+          gh release create "v${VERSION}" \
+            release-assets/cforge-${VERSION}-linux-x64.tar.gz \
+            release-assets/cforge_${VERSION}_amd64.deb \
+            release-assets/cforge-${VERSION}-macos-arm64.tar.gz \
+            release-assets/cforge-${VERSION}-windows-x64.zip \
+            "release-assets/c-forge-${VERSION}.vsix" \
             release-assets/SHA256SUMS \
             release-assets/release-manifest.json \
             release-assets/latest.json \
-            --title "C-Forge v${{ env.VERSION }}" \
-            --notes-file release-notes.md \
+            --title "C-Forge v${VERSION}" \
+            --generate-notes \
             --latest
