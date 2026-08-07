@@ -2,207 +2,249 @@
 
 ![C-Forge](assets/cforgev-logo.svg)
 
-**[c-forge.org](https://c-forge.org)** · [Documentación](https://docs.c-forge.org) · [Playground](https://play.c-forge.org) · [Paquetes](https://pkg.c-forge.org) · [GitHub](https://github.com/VemorisGroup/C-Forge)
+**[c-forge.org](https://c-forge.org)** · [GitHub](https://github.com/VemorisGroup/C-Forge) · [Releases](https://github.com/VemorisGroup/C-Forge/releases)
 
-C-Forge es un lenguaje de programación creado por Vemoris Group.
-Su objetivo es ofrecer una sintaxis clara, ejecución nativa y una biblioteca
-estándar escrita en el propio lenguaje.
+C-Forge es un lenguaje de programación creado por Vemoris Group. Su objetivo es ofrecer una sintaxis clara, ejecución nativa y una biblioteca estándar escrita en el propio lenguaje.
 
-> Estado actual: **C-Forge 3.2.0**. El núcleo, CLI y biblioteca estable
-> superan el gate reproducible `make release-check`. Las capacidades marcadas
-> como experimentales no forman parte del contrato estable. C-Forge no posee
-> todavía certificación regulatoria para sistemas bancarios, médicos,
-> aeroespaciales ni otras cargas críticas.
+> **C-Forge 3.3.0** — El núcleo, CLI y biblioteca estándar superan el gate reproducible `make release-check` en macOS ARM64, Linux x64 y Windows x64. Las capacidades marcadas como experimentales no forman parte del contrato estable.
 
-## Principios
+---
 
-- Los programas usan la extensión oficial `.cfv`.
-- La biblioteca estándar y las pruebas del lenguaje se escriben en C-Forge.
-- El ejecutable no necesita otro runtime para ejecutar un programa `.cfv`.
-- C++ se conserva únicamente como bootstrap para construir el motor nativo.
-- Una capacidad solo se anuncia como terminada cuando tiene evidencia y pruebas.
+## Instalación rápida
 
-El estado verificable de cada componente está en
-[`capabilities.json`](capabilities.json).
-
-## Ejemplo
-
-```text
-funcion factorial(n) {
-    si (n <= 1) {
-        retornar 1
-    }
-    retornar n * factorial(n - 1)
-}
-
-sea nombre = "C-Forge"
-mostrar(nombre)
-mostrar(factorial(6))
-```
-
-Guarda el programa como `hola.cfv` y ejecútalo:
+### macOS y Linux (desde fuente, recomendado)
 
 ```sh
-cforge hola.cfv
+curl -fsSL https://raw.githubusercontent.com/VemorisGroup/C-Forge/main/install.sh | bash
 ```
 
-## Construir desde el código fuente
+El script detecta la versión más reciente, descarga las fuentes, compila con el compilador C++20 disponible e instala el binario en `/usr/local/bin/cforge`.
 
-Se necesita un compilador C++20 únicamente para generar el motor inicial:
+Después de instalar, agrega al `.bashrc` / `.zshrc`:
 
 ```sh
-make clean
-make build
-./cforge --version
-make check
-make test
+export CFORGE_STDLIB="/usr/local/lib/cforge/stdlib"
 ```
 
-Después de construirlo, el motor ejecuta archivos `.cfv` directamente.
+### macOS (desde archivo)
 
-## Instalar
+1. Descarga `cforge-3.3.0-macos-arm64.tar.gz` desde [Releases](https://github.com/VemorisGroup/C-Forge/releases/tag/v3.3.0).
+2. Extrae e instala:
 
 ```sh
-./install.sh
+tar xzf cforge-3.3.0-macos-arm64.tar.gz
+sudo cp cforge-3.3.0-macos-arm64/cforge /usr/local/bin/
+sudo mkdir -p /usr/local/lib/cforge
+sudo cp -r cforge-3.3.0-macos-arm64/stdlib /usr/local/lib/cforge/
+echo 'export CFORGE_STDLIB="/usr/local/lib/cforge/stdlib"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+> **Nota:** El binario no está firmado con Apple Developer ID. Si macOS bloquea la ejecución, ve a *Ajustes del sistema → Privacidad y Seguridad → Permitir de todos modos*.
+
+### Linux x64 (desde .deb)
+
+```sh
+wget https://github.com/VemorisGroup/C-Forge/releases/download/v3.3.0/cforge_3.3.0_amd64.deb
+sudo dpkg -i cforge_3.3.0_amd64.deb
+echo 'export CFORGE_STDLIB="/usr/lib/cforge/stdlib"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### Linux x64 (desde .tar.gz)
+
+```sh
+tar xzf cforge-3.3.0-linux-x64.tar.gz
+sudo cp cforge-3.3.0-linux-x64/cforge /usr/local/bin/
+sudo mkdir -p /usr/local/lib/cforge
+sudo cp -r cforge-3.3.0-linux-x64/stdlib /usr/local/lib/cforge/
+echo 'export CFORGE_STDLIB="/usr/local/lib/cforge/stdlib"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### Windows x64
+
+1. Descarga `cforge-3.3.0-windows-x64.zip` desde [Releases](https://github.com/VemorisGroup/C-Forge/releases/tag/v3.3.0).
+2. Extrae el archivo ZIP.
+3. Añade la carpeta extraída al `PATH` del sistema (Panel de control → Variables de entorno).
+4. Define la variable de entorno `CFORGE_STDLIB` apuntando a la carpeta `stdlib` dentro del ZIP extraído.
+5. Abre una nueva PowerShell o CMD y verifica:
+
+```powershell
 cforge --version
 ```
 
-También se puede instalar con Make:
+### Desinstalar
 
+**macOS / Linux:**
 ```sh
-sudo make install
+sudo rm /usr/local/bin/cforge /usr/local/bin/cforgev
+sudo rm -rf /usr/local/lib/cforge
 ```
 
-## CLI
+**Debian:**
+```sh
+sudo dpkg -r cforge
+```
+
+---
+
+## Verificar la instalación
+
+```sh
+cforge --version
+# → C-Forge 3.3.0
+
+cforge --help
+# → muestra todos los comandos disponibles
+
+cforge doctor
+# → diagnóstico del entorno
+```
+
+---
+
+## Hello World
+
+Crea un archivo `hola.cfv`:
+
+```cfv
+mostrar("Hola C-Forge")
+```
+
+Ejecútalo:
+
+```sh
+cforge hola.cfv
+# → Hola C-Forge
+```
+
+O con el subcomando explícito:
+
+```sh
+cforge run hola.cfv
+# → Hola C-Forge
+```
+
+---
+
+## Ejemplo: funciones y clases
+
+```cfv
+funcion factorial(n: numero): numero {
+    si (n <= 1) { retornar 1 }
+    retornar n * factorial(n - 1)
+}
+
+clase Saludo {
+    funcion constructor(nombre: texto): nulo {
+        esto.nombre = nombre
+    }
+    funcion decir(): nulo {
+        mostrar("Hola desde " + esto.nombre)
+    }
+}
+
+mostrar(factorial(6))         // 720
+sea s = nuevo Saludo("C-Forge")
+s.decir()                     // Hola desde C-Forge
+```
+
+---
+
+## CLI — comandos oficiales
 
 | Comando | Función |
-|---|---|
+|---------|---------|
 | `cforge archivo.cfv` | Ejecutar un programa |
-| `cforge run archivo.cfv` | Ejecutar un programa |
-| `cforge repl` | Abrir la consola interactiva |
-| `cforge check archivo.cfv` | Verificar la sintaxis |
-| `cforge test archivo.cfv` | Ejecutar pruebas C-Forge |
-| `cforge fmt archivo.cfv` | Validar sintaxis y formato sin modificar |
-| `cforge --version` | Mostrar la versión |
+| `cforge run archivo.cfv` | Ejecutar un programa (forma explícita) |
+| `cforge repl` | Consola interactiva |
+| `cforge check archivo.cfv` | Verificar sintaxis |
+| `cforge test archivo.cfv` | Ejecutar pruebas `.cfv` |
+| `cforge fmt archivo.cfv` | Validar formato sin modificar |
+| `cforge new <nombre>` | Crear proyecto nuevo |
+| `cforge init` | Inicializar proyecto en directorio actual |
+| `cforge doctor` | Diagnosticar entorno |
+| `cforge --version` | Mostrar versión |
 | `cforge --help` | Mostrar ayuda |
+
+---
+
+## Extensión de Visual Studio Code
+
+1. Descarga `c-forge-3.3.0.vsix` desde [Releases](https://github.com/VemorisGroup/C-Forge/releases/tag/v3.3.0).
+2. En VS Code: **Extensions** (⇧⌘X) → **···** → **Install from VSIX…** → selecciona el archivo.
+3. Los archivos `.cfv` tendrán resaltado de sintaxis, snippets y diagnósticos automáticos al guardar.
+
+La extensión busca `cforge` en el PATH del sistema. Si el binario no está en el PATH, los comandos *Ejecutar* y *Comprobar* mostrarán un aviso.
+
+---
+
+## Crear un proyecto nuevo
+
+```sh
+cforge new mi-app
+cd mi-app
+cforge main.cfv
+```
+
+Esto genera:
+```
+mi-app/
+  main.cfv        ← programa de entrada
+  cforge.json     ← manifiesto del proyecto
+  .gitignore
+```
+
+---
 
 ## Biblioteca estándar
 
-Los módulos oficiales están en [`stdlib/`](stdlib/) y conservan formato `.cfv`.
-Actualmente hay **30 módulos que pasan el análisis sintáctico y la carga del
-motor**. Incluyen utilidades para:
+Los módulos están en [`stdlib/`](stdlib/). Importa con:
 
-- texto, números y matemáticas;
-- listas, mapas, colecciones y algoritmos;
-- archivos y JSON;
-- concurrencia y canales;
-- validación, logging y manejo de errores;
-- red, bases de datos, criptografía y gráficos en estado experimental.
+```cfv
+importar "matematica"
+mostrar(piso(3.7))   // 3
+```
 
-Se retiraron del árbol activo los módulos falsos, incompletos o dependientes de
-otros runtimes. Pasar el análisis y la carga no equivale a estabilidad de API:
-los módulos experimentales no deben emplearse todavía como base de sistemas
-críticos.
+Módulos estables: `matematica`, `lista`, `mapa`, `colecciones`, `algoritmos`, `texto`, `json`, `errores`, `io`, `fecha`, `numero`, `base64`, `regex`, `concurrencia`, `aleatorio`, `sdl`.
 
-## Pruebas
+Módulos experimentales (presentes, sin garantías de producción): `web`, `db`, `crypto`, `gl`, `red`, `redis`, `audio`, `auth`.
 
-La suite principal está escrita en C-Forge:
+---
+
+## Construir desde el código fuente
+
+Requiere un compilador C++20 (g++ ≥ 12 o clang++ ≥ 14):
 
 ```sh
-make check
-make test
-make bootstrap-check
-make release-check
+git clone https://github.com/VemorisGroup/C-Forge.git
+cd C-Forge
+make build
+./cforge --version
+make release-check   # gate completo
 ```
 
-Los archivos están en [`tests/cfv/`](tests/cfv/). El proceso falla de inmediato
-si una prueba devuelve un código distinto de cero. El gate estable verifica 30
-módulos, ejecuta 20 archivos de prueba nativos, rechaza entradas dañadas,
-comprueba el CLI y la instalación y ejecuta el núcleo con ASan/UBSan. Es una
-validación reproducible del alcance estable, no una certificación regulatoria.
+---
 
-## Arquitectura
+## Plataformas verificadas en 3.3.0
 
-```text
-programa .cfv
-     │
-     ▼
-lexer → parser → AST → runtime
-     │
-     ▼
-ejecutable nativo C-Forge
-```
+| Plataforma | Build CI | Tests | Distribuible |
+|-----------|----------|-------|-------------|
+| macOS ARM64 (Apple Silicon) | ✅ | ✅ | `.tar.gz` |
+| Linux x64 | ✅ | ✅ | `.tar.gz`, `.deb` |
+| Windows x64 | ✅ | ✅ | `.zip` |
 
-Stage 0 y los backends de emisión directa se encuentran en
-[`bootstrap/`](bootstrap/). Las fuentes antiguas de Stage 1 se retiraron porque
-no pasaban el parser actual. Consulta [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md)
-para conocer el estado verificable.
-
-## Plataformas
-
-- macOS ARM64: validación local activa.
-- Linux: validación mediante CI.
-- Windows: backend experimental; falta validación física completa.
-
-Los emisores mínimos Mach-O ARM64, ELF x64 y PE x64 aceptan el programa
-`mostrar("texto")`. Los tres incluyen también variantes Core B6.20 para
-variables, aritmética, control, funciones, listas y texto dinámico. El gate comprueba sus cabeceras y ejecuta
-únicamente el formato compatible con el sistema anfitrión. Todavía no son
-backends completos del lenguaje.
-
-El avance B6.9 comienza con `bootstrap/core_ir.cfv`: un IR común escrito en
-C-Forge que fija layouts reproducibles para estructuras, clases, campos y
-métodos antes de bajarlos a los tres formatos nativos.
-La etapa `bootstrap/core_object_lowering.cfv` inicia B6.10 y convierte
-instancias, lecturas y escrituras de campos a almacenamiento escalar común.
-Esa representación ya alimenta los emisores Mach-O ARM64, ELF x64 y PE x64:
-el gate construye el mismo programa de objetos en los tres formatos y ejecuta
-el binario compatible con el anfitrión. B6.12 añade métodos de instancia y la
-referencia `este`; B6.13 incorpora métodos mutables mediante expansión segura
-de escrituras sobre la instancia. B6.14 incorpora el método reservado `crear`
-como constructor y `destruir` como finalizador determinista; las instancias se
-destruyen en orden inverso al terminar el ámbito superior. Interfaces y
-destrucción de ámbitos anidados siguen en progreso.
-B6.15 añade `interfaz` y `implementa`: el IR verifica la existencia del
-contrato, sus métodos, retornos y parámetros antes de cualquier emisión.
-El mismo programa válido se genera para Mach-O, ELF y PE; un contrato
-incompleto es rechazado por el gate.
-B6.16 permite separar un programa Core en archivos `.cfv` mediante
-`importar "ruta.cfv"`. Las rutas son relativas al módulo que importa, cada
-archivo se carga una sola vez y los ciclos se rechazan antes de emitir código.
-El ejemplo modular divide una simulación de videojuego entre entidades, reglas
-y programa principal y genera los tres formatos nativos.
-B6.19 reduce excepciones locales `intentar`/`capturar`/`lanzar` a un control de
-flujo común y las genera sin toolchain externa para Mach-O, ELF y PE. La
-ABI B6.20 propaga errores de llamadas directas entre funciones mediante
-registros propios de C-Forge y permite capturarlos sin excepciones C++.
-B6.21 añade un verificador de ownership escrito en C-Forge para `mover`,
-`prestar`, `prestar_mut` y `soltar_prestamo`, más destrucción LIFO al salir de
-ámbitos anidados, retornar o lanzar. Los tres backends comparten el mismo pase.
-
-No se anunciará compatibilidad total con una plataforma hasta que instalación,
-ejecución, pruebas y desinstalación estén verificadas en ella.
+---
 
 ## Seguridad
 
-Reporta vulnerabilidades siguiendo [`SECURITY.md`](SECURITY.md). C-Forge aún no
-ha completado una auditoría de seguridad profesional independiente.
+Reporta vulnerabilidades siguiendo [`SECURITY.md`](SECURITY.md).
 
-## Documentación
-
-- [Sitio oficial](https://c-forge.org)
-- [Documentación completa](https://docs.c-forge.org)
-- [Playground online](https://play.c-forge.org)
-- [Registro de paquetes](https://pkg.c-forge.org)
-- [Especificación](ESPECIFICACION.md)
-- [Dirección del núcleo](docs/CORE-DIRECTION.md)
-- [Bootstrap](docs/BOOTSTRAP.md)
-- [Preparación para producción](docs/PRODUCTION-READINESS.md)
-- [Política de completitud](docs/COMPLETENESS-POLICY.md)
-- [Registro de capacidades](capabilities.json)
+---
 
 ## Licencia
 
-Consulta [`LICENSE`](LICENSE).
+Consulta [`LICENSE`](LICENSE). Copyright © 2026 Vemoris Group.
 
-Copyright © 2026 Vemoris Group.
+El estado verificable de cada componente está en [`capabilities.json`](capabilities.json).

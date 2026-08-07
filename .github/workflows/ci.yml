@@ -1,4 +1,4 @@
-name: CI — C-Forge 2.6 native
+name: CI — C-Forge
 
 on:
   push:
@@ -50,10 +50,9 @@ jobs:
         run: |
           make release-check CXX=${{ matrix.cxx }}
 
-      - name: Smoke test básico
+      - name: Smoke test oficial
         run: |
-          echo 'mostrar("C-Forge CI OK")' > /tmp/ci_test.cfv
-          CFORGE_STDLIB=./stdlib ./cforge /tmp/ci_test.cfv
+          CFORGE_STDLIB=./stdlib bash tests/install-smoke/run_smoke.sh ./cforge
 
       - name: Test importar stdlib
         run: |

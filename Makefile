@@ -487,10 +487,15 @@ object-lowering-check:
 	! grep -q 'Estructura' "$$dir/ast.txt"; \
 	echo "  ✓ objetos Core reducidos a almacenamiento común verificable"
 
+## Smoke test de instalación (simula usuario nuevo)
+smoke-test: build
+	@echo "  SMOKE  tests/install-smoke/run_smoke.sh"
+	@CFORGE_STDLIB=$(PWD)/stdlib bash tests/install-smoke/run_smoke.sh $(PWD)/$(TARGET)
+
 ## Gate único exigido antes de publicar una versión estable.
 release-check: clean build check test stdlib-load-check cli-check malformed-check \
 	backend-check install-check bootstrap-check backend-core-check ir-core-check \
-	object-lowering-check sanitize-check
+	object-lowering-check sanitize-check smoke-test
 	@echo ""
 	@echo "  ✓ GATE DE ESTABILIDAD C-FORGE COMPLETO"
 

@@ -1,0 +1,3 @@
+// syntax_error.cfv — debe producir error de sintaxis (exit code != 0)
+si (verdadero {
+    mostrar("esto no debe llegar")

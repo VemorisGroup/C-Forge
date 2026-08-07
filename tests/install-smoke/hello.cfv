@@ -1,0 +1,4 @@
+// hello.cfv — smoke test oficial de C-Forge
+// Este archivo debe ejecutarse correctamente en una instalación limpia.
+// Salida esperada: "Hola C-Forge 3.3.0"
+mostrar("Hola C-Forge 3.3.0")
