@@ -8010,8 +8010,13 @@ static void cfv_compile_file(const std::string& src_path, const std::string& out
     std::string exe_dir = "";
     {
       char buf[4096] = {};
+#ifdef _WIN32
+      DWORD n = GetModuleFileNameA(nullptr, buf, (DWORD)(sizeof(buf)-1));
+      if (n > 0) exe_dir = std::filesystem::path(std::string(buf, (size_t)n)).parent_path().string();
+#elif defined(__linux__)
       ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf)-1);
-      if (n > 0) exe_dir = std::filesystem::path(std::string(buf, n)).parent_path().string();
+      if (n > 0) exe_dir = std::filesystem::path(std::string(buf, (size_t)n)).parent_path().string();
+#endif
     }
     std::string src_dir = std::filesystem::path(src_path).parent_path().string();
     std::vector<std::string> inc_paths = {

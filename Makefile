@@ -385,43 +385,43 @@ backend-core-check: backend-core-bundle
 	cmp "$$dir/uno-macho" "$$dir/dos-macho"; \
 	cmp "$$dir/uno.exe" "$$dir/dos.exe"; \
 	cmp "$$dir/uno-elf" "$$dir/dos-elf"; \
-	file "$$dir/uno-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/uno-macho" | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file "$$dir/uno.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/uno-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
-	file "$$dir/objetos-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/objetos-macho" | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file "$$dir/objetos.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/objetos-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
-	file "$$dir/metodos-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/metodos-macho" | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file "$$dir/metodos.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/metodos-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
-	file "$$dir/mutables-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/mutables-macho" | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file "$$dir/mutables.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/mutables-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
-	file "$$dir/ciclo-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/ciclo-macho" | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file "$$dir/ciclo.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/ciclo-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
-	file "$$dir/interfaz-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/interfaz-macho" | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file "$$dir/interfaz.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/interfaz-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
-	file "$$dir/modulos-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/modulos-macho" | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file "$$dir/modulos.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/modulos-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
-	file "$$dir/mapas-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/mapas-macho" | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file "$$dir/mapas.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/mapas-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
-	file "$$dir/excepciones-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/excepciones-macho" | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file "$$dir/excepciones.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/excepciones-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
-	file "$$dir/excepciones-funcion-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/excepciones-funcion-macho" | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file "$$dir/excepciones-funcion.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/excepciones-funcion-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
-	file "$$dir/ownership-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/ownership-macho" | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file "$$dir/ownership.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/ownership-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
-	file "$$dir/ambitos-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/ambitos-macho" | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file "$$dir/ambitos.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/ambitos-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
-	file "$$dir/limpieza-error-macho" | grep -q "Mach-O 64-bit executable arm64"; \
+	file "$$dir/limpieza-error-macho" | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file "$$dir/limpieza-error.exe" | grep -q "PE32+ executable.*x86-64"; \
 	file "$$dir/limpieza-error-elf" | grep -q "ELF 64-bit LSB executable, x86-64"; \
 	if [ "$(UNAME)" = "Darwin" ] && [ "$(ARCH)" = "arm64" ]; then \
