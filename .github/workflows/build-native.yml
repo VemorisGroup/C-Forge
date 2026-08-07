@@ -28,7 +28,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cl /std:c++20 /EHsc /O2 /Fe:cforge.exe cforgev.cpp ws2_32.lib
+          cl /std:c++20 /EHsc /O2 /I"include" /Fe:cforge.exe cforgev.cpp ws2_32.lib
           $env:CFORGE_STDLIB = "$PWD\stdlib"
           .\cforge.exe --version
           Get-ChildItem stdlib\*.cfv | ForEach-Object { & .\cforge.exe check $_.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }

@@ -229,7 +229,7 @@ backend-check: build
 	./$(TARGET) bootstrap/direct/cforge_macho_arm64.cfv "$$fixture" -o /tmp/cforge-check-macho; \
 	./$(TARGET) bootstrap/direct/cforge_elf_x64.cfv "$$fixture" -o /tmp/cforge-check-elf; \
 	./$(TARGET) bootstrap/direct/cforge_pe_x64.cfv "$$fixture" -o /tmp/cforge-check.exe; \
-	file /tmp/cforge-check-macho | grep -q "Mach-O 64-bit executable arm64"; \
+	file /tmp/cforge-check-macho | grep -qE "Mach-O 64-bit (executable )?arm64( executable)?"; \
 	file /tmp/cforge-check-elf | grep -q "ELF 64-bit LSB executable, x86-64"; \
 	file /tmp/cforge-check.exe | grep -q "PE32+ executable.*x86-64"; \
 	if [ "$(UNAME)" = "Darwin" ] && [ "$(ARCH)" = "arm64" ]; then \
