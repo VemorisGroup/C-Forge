@@ -129,14 +129,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configurar entorno MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
       - name: Compilar con MSVC
         shell: cmd
-        run: cl /std:c++20 /EHsc /O2 /bigobj /I"include" /Fe:cforge.exe cforgev.cpp ws2_32.lib
+        run: |
+          for /f "usebackq tokens=*" %%v in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find "VC\Auxiliary\Build\vcvarsall.bat"`) do set VCVARSALL=%%v
+          if "%VCVARSALL%"=="" (echo ERROR: vcvarsall.bat no encontrado && exit /b 1)
+          call "%VCVARSALL%" x64
+          cl /std:c++20 /EHsc /O2 /bigobj /I"include" /Fe:cforge.exe cforgev.cpp ws2_32.lib
 
       - name: Tests Windows
         shell: pwsh
