@@ -130,12 +130,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Compilar con MSVC
-        shell: cmd
+        shell: pwsh
         run: |
-          for /f "usebackq tokens=*" %%v in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find "VC\Auxiliary\Build\vcvarsall.bat"`) do set VCVARSALL=%%v
-          if "%VCVARSALL%"=="" (echo ERROR: vcvarsall.bat no encontrado && exit /b 1)
-          call "%VCVARSALL%" x64
-          cl /std:c++20 /EHsc /O2 /bigobj /I"include" /Fe:cforge.exe cforgev.cpp ws2_32.lib
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -property installationPath
+          if (-not $vsPath) { Write-Error "Visual Studio no encontrado"; exit 1 }
+          $vcvarsall = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+          Write-Host "vcvarsall: $vcvarsall"
+          cmd /c "`"$vcvarsall`" x64 && cl /std:c++20 /EHsc /O2 /bigobj /I`"include`" /Fe:cforge.exe cforgev.cpp ws2_32.lib"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Tests Windows
         shell: pwsh
