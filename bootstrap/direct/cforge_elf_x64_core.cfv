@@ -3356,6 +3356,12 @@ funcion emitir_texto_core_elf(nodo: cualquiera, contexto: cualquiera) {
         operacion_bytes_elf(contexto, [73, 255, 194, 73, 255, 193, 73, 255, 203])
         operacion_control_elf(contexto, "jmp", copiar_derecha, 0)
         etiqueta_core_elf(contexto, fin_derecha)
+        // Restaurar rax al inicio del buffer: los loops de copia usan mov al,[rcx]
+        // y mov al,[r10] que corrompen el byte bajo de rax (que guardaba la dirección
+        // del buffer). Sin esto, el puntero devuelto apunta a basura y write() emite ceros.
+        sea restaurar_rax: lista = [72, 141, 133]
+        agregar_le_elf(restaurar_rax, entero_32_core_elf(buffer), 4)
+        operacion_bytes_elf(contexto, restaurar_rax)
         retornar 0
     }
     afirmar(falso, "expresión textual ELF no soportada")

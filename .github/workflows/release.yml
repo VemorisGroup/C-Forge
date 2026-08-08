@@ -195,62 +195,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Diagnosticar entorno MSVC
-        shell: pwsh
-        run: |
-          Write-Host "=== Variables de entorno VS ==="
-          Get-ChildItem env: | Where-Object { $_.Name -match '^VS' } | Format-Table Name,Value
-          Write-Host "=== Instalaciones en Program Files ==="
-          Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -EA SilentlyContinue | Select-Object Name
-          Get-ChildItem "C:\Program Files (x86)\Microsoft Visual Studio" -EA SilentlyContinue | Select-Object Name
-          Write-Host "=== vswhere ==="
-          $vswhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
-          if (Test-Path $vswhere) {
-            Write-Host "vswhere existe: $vswhere"
-            & $vswhere -all -legacy -format json
-          } else { Write-Host "vswhere NO encontrado" }
-          Write-Host "=== Buscando vcvarsall.bat ==="
-          Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -Recurse -Filter "vcvarsall.bat" -EA SilentlyContinue | Select-Object FullName
-
       - name: Compilar con MSVC
-        shell: pwsh
+        shell: cmd
         run: |
-          # 1) Intentar via VS env vars (VS170=VS2022, VS180=VS2025+)
-          $vcvarsall = $null
-          foreach ($ver in @('VS170COMNTOOLS','VS180COMNTOOLS','VS160COMNTOOLS')) {
-            $tools = [System.Environment]::GetEnvironmentVariable($ver)
-            if ($tools) {
-              $candidate = Join-Path $tools "..\..\VC\Auxiliary\Build\vcvarsall.bat"
-              $candidate = [System.IO.Path]::GetFullPath($candidate)
-              if (Test-Path $candidate) { $vcvarsall = $candidate; break }
-            }
-          }
-          # 2) Buscar via vswhere
-          if (-not $vcvarsall) {
-            $vswhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
-            if (Test-Path $vswhere) {
-              $vsPath = & $vswhere -latest -property installationPath 2>$null
-              if ($vsPath) {
-                $candidate = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
-                if (Test-Path $candidate) { $vcvarsall = $candidate }
-              }
-            }
-          }
-          # 3) Buscar por glob recursivo
-          if (-not $vcvarsall) {
-            $vcvarsall = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" `
-              -Recurse -Filter "vcvarsall.bat" -EA SilentlyContinue |
-              Where-Object { $_.FullName -match "\\VC\\Auxiliary\\Build\\vcvarsall\.bat$" } |
-              Sort-Object FullName -Descending |
-              Select-Object -First 1 -ExpandProperty FullName
-          }
-          if (-not $vcvarsall) {
-            Write-Error "vcvarsall.bat no encontrado tras tres intentos"
-            exit 1
-          }
-          Write-Host "Usando: $vcvarsall"
-          cmd /c "`"$vcvarsall`" x64 && cl /std:c++20 /EHsc /O2 /bigobj /I`"include`" /Fe:cforge.exe cforgev.cpp ws2_32.lib"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          for /f "usebackq tokens=*" %%v in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find "VC\Auxiliary\Build\vcvarsall.bat"`) do set VCVARSALL=%%v
+          if "%VCVARSALL%"=="" (echo ERROR: vcvarsall.bat no encontrado && exit /b 1)
+          call "%VCVARSALL%" x64
+          if errorlevel 1 (echo ERROR: vcvarsall.bat fallo && exit /b 1)
+          cl /std:c++20 /EHsc /O2 /bigobj /I"include" /Fe:cforge.exe cforgev.cpp ws2_32.lib
 
       - name: Tests Windows
         shell: pwsh
