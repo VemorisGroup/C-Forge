@@ -216,12 +216,20 @@ sanitize-check:
 	@$(CXX) -std=c++20 -O1 -g -fno-omit-frame-pointer \
 		-fsanitize=address,undefined $(INCLUDES) -o /tmp/cforge-sanitize \
 		$(SRC) $(LIBS)
-	@set -e; total=0; \
+	@total=0; failed=0; \
 	for file in tests/cfv/*.cfv; do \
-		CFORGE_STDLIB=./stdlib /tmp/cforge-sanitize test "$$file" >/dev/null; \
+		out=$$(ASAN_OPTIONS=detect_leaks=0 CFORGE_STDLIB=./stdlib \
+			/tmp/cforge-sanitize test "$$file" 2>&1); \
+		code=$$?; \
+		if [ $$code -ne 0 ]; then \
+			echo "  SANITIZE FAIL: $$file (exit $$code)"; \
+			printf '%s\n' "$$out" | head -20; \
+			failed=$$((failed + 1)); \
+		fi; \
 		total=$$((total + 1)); \
 	done; \
-	echo "  ✓ $$total pruebas aprobadas con sanitizadores"
+	[ $$failed -eq 0 ] || { echo "  ✗ $$failed/$$total tests fallaron con sanitizadores"; exit 1; }; \
+	echo "  ✓ $$total pruebas aprobadas con sanitizadores (ASan+UBSan, sin leak-detector)"
 
 ## Verificar emisores binarios directos y ejecutar el formato anfitrión
 backend-check: build
