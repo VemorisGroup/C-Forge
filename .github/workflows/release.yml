@@ -195,26 +195,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Configurar MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Compilar con MSVC
         shell: cmd
         run: |
-          rem Buscar vcvarsall.bat en rutas conocidas de VS 2022 (Enterprise, Professional, Community, BuildTools)
-          set "VCVARSALL="
-          for %%e in (Enterprise Professional Community BuildTools) do (
-            if exist "C:\Program Files\Microsoft Visual Studio\2022\%%e\VC\Auxiliary\Build\vcvarsall.bat" (
-              set "VCVARSALL=C:\Program Files\Microsoft Visual Studio\2022\%%e\VC\Auxiliary\Build\vcvarsall.bat"
-            )
-          )
-          if "%VCVARSALL%"=="" (
-            echo ERROR: vcvarsall.bat no encontrado en ninguna edicion de VS 2022
-            dir "C:\Program Files\Microsoft Visual Studio\" 2>nul
-            exit /b 1
-          )
-          echo Usando: %VCVARSALL%
-          call "%VCVARSALL%" x64
-          if errorlevel 1 (echo ERROR: vcvarsall.bat fallo && exit /b 1)
           where cl
-          echo VSCMD_ARG_TGT_ARCH=%VSCMD_ARG_TGT_ARCH%
           cl /std:c++20 /EHsc /O2 /bigobj /I"include" /Fe:cforge.exe cforgev.cpp ws2_32.lib
 
       - name: Tests Windows
