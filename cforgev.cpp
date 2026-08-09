@@ -3552,6 +3552,14 @@ static Value cfv_hilo_crear_fn(const Value& fn_v, const Value& args_v,
 #ifndef _WIN32
 #include <dlfcn.h>
 #endif
+// Windows.h define CreateWindow/CreateWindowA/CreateWindowExA como macros.
+// Los campos homónimos de CfvSdl2 colisionan con ellos — los limpiamos aquí.
+#ifdef _WIN32
+#undef CreateWindow
+#undef CreateWindowA
+#undef CreateWindowExA
+#undef DestroyWindow
+#endif
 struct CfvSdl2 {
   void* lib=nullptr; void* lib_img=nullptr; void* lib_mix=nullptr; void* lib_ttf=nullptr;
   // SDL core
