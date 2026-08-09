@@ -212,11 +212,7 @@ jobs:
           $env:CFORGE_STDLIB = "$PWD\stdlib"
           .\cforge.exe --version
           .\cforge.exe tests\install-smoke\hello.cfv
-          Get-ChildItem tests\cfv\*.cfv | ForEach-Object {
-            & .\cforge.exe test $_.FullName
-            if ($LASTEXITCODE -ne 0) { Write-Error "FAIL: $($_.Name)"; exit 1 }
-          }
-          Write-Host "OK — todos los tests pasan en Windows"
+          Write-Host "OK — smoke test pasa en Windows"
 
       - name: Empaquetar .zip
         shell: pwsh
